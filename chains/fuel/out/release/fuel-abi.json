@@ -835,12 +835,12 @@
       "concreteTypeId": "ae438802fd396d1a9e35c5d90ac591a3b07fefce2c695bbe8b413c97a45580a0"
     },
     {
-      "logId": "8961848586872524460",
-      "concreteTypeId": "7c5ee1cecf5f8eacd1284feb5f0bf2bdea533a51e2f0c9aabe9236d335989f3b"
-    },
-    {
       "logId": "14832741149864513620",
       "concreteTypeId": "cdd87b7d12fe505416570c294c884bca819364863efe3bf539245fa18515fbbb"
+    },
+    {
+      "logId": "8961848586872524460",
+      "concreteTypeId": "7c5ee1cecf5f8eacd1284feb5f0bf2bdea533a51e2f0c9aabe9236d335989f3b"
     },
     {
       "logId": "8695557382153973144",

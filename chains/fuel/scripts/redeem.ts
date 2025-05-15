@@ -20,7 +20,7 @@ async function redeem() {
 
   const contractAddress = Address.fromB256(contractAddressString);
   const contractInstance = new Contract(contractAddress, contractAbi, wallet);
-  const Id = BigInt(process.env.ID2!);
+  const Id = BigInt(process.env.ID1!);
   const secret = BigInt(process.env.SECRET!);       
 
   try {

@@ -44,7 +44,7 @@ async function commit(): Promise<void> {
     const dstAddress = '0QAS8JNB0G4zVkdxABCLVG-Vy3KXE3W3zz1yxpnfu4J-B40y'.padEnd(64, ' ');
     const srcAsset = 'ETH'.padEnd(64, ' ');
     const srcReceiver = { bits: '0x8d08AAa3252C67dA78f5F4Dd2396aF1a8c231527BFEeB4a96743c646dBE9C9B2' };
-    const currentUnixTime = Math.floor(Date.now() / 1000) + 901;
+    const currentUnixTime = Math.floor(Date.now() / 1000) + 1000;
     const timelock = DateTime.fromUnixSeconds(currentUnixTime).toTai64();
     const id = process.env.ID1;
 

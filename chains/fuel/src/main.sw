@@ -22,6 +22,7 @@ use std::{
         u64::*,
     },
     call_frames::*,
+    codec::encode,
     context::*,
     contract_id::*,
     crypto::message::*,
@@ -146,13 +147,11 @@ storage {
     contracts: StorageMap<u256, HTLC> = StorageMap::<u256, HTLC> {},
     rewards: StorageMap<u256, Reward> = StorageMap::<u256, Reward> {},
 }
-// message prefix '\x19Fuel Signed Message:\n'
-const MESSAGE_PREFIX: [u8; 22] = [
+// message prefix '\x19Fuel Signed Message:\n32'
+const MESSAGE_PREFIX: [u8; 24] = [
     25, 70, 117, 101, 108, 32, 83, 105, 103, 110, 101, 100, 32, 77, 101, 115, 115,
-    97, 103, 101, 58, 10,
+    97, 103, 101, 58, 10, 51, 50,
 ];
-// fixed message length
-const MESSAGE_LENGTH: [u8; 2] = [54, 54];
 // Check if an HTLC exists
 #[storage(read)]
 fn has_htlc(Id: u256) -> bool {
@@ -280,38 +279,36 @@ impl Train for Contract {
         require(has_htlc(Id), "Contract Does Not Exist");
         require(timelock > timestamp() + 900, "Not Future Timelock");
         let mut htlc: HTLC = storage.contracts.get(Id).try_read().unwrap();
-        let message: [b256; 3] = [Id.into(), hashlock, timelock.as_u256().into()];
         let message_hash: b256 = sha256(
             {
                 let mut bytes = Bytes::new();
                 bytes
-                    .append(Bytes::from(message[0]));
+                    .append(Bytes::from(encode(Id)));
                 bytes
-                    .append(Bytes::from(message[1]));
+                    .append(Bytes::from(encode(hashlock)));
                 bytes
-                    .append(Bytes::from(message[2]));
+                    .append(Bytes::from(encode(timelock)));
                 bytes
             },
         );
-        log(message_hash);
-        let signed_messsage_hash = sha256(
+        let signed_messsage_hash: b256 = sha256(
             {
                 let mut bytes = Bytes::new();
                 let mut vec = Vec::new();
                 let mut i: u64 = 0;
-                while i < 22 {
+                while i < 24 {
                     vec.push(MESSAGE_PREFIX[i]);
                     i = i + 1;
                 }
-                let mut j: u64 = 0;
-                while j < 2 {
-                    vec.push(MESSAGE_LENGTH[j]);
-                    j = j + 1;
-                }
+                //                 bytes
+                //                     .append(Bytes::from(encode("Fuel Signed Message:
+                // 32")));
                 bytes
                     .append(Bytes::from(vec));
+                log(bytes);
                 bytes
-                    .append(Bytes::from((message_hash)));
+                    .append(Bytes::from(encode(message_hash)));
+                log(bytes);
                 bytes
             },
         );
@@ -323,7 +320,7 @@ impl Train for Contract {
         let addr = Address::from(htlc.sender);
         require(sig.verify_address(addr, msg).is_ok(), "Invalid Signature");
         require(htlc.claimed == 1, "Already Claimed");
-        require(htlc.hashlock == b256::zero(), "Hashlock Already Set");
+        require(htlc.hashlock == b256::from(1), "Hashlock Already Set");
         htlc.hashlock = hashlock;
         htlc.timelock = timelock;
         storage.contracts.insert(Id, htlc);
