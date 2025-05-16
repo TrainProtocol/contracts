@@ -8,15 +8,12 @@ import {
   concat,
   BigNumberCoder,
   B256Coder,
-  StringCoder,
   bn,
   arrayify,
   hashMessage,
   Signer,
   toUtf8Bytes,
   hexlify,
-  BytesLike,
-  HashableMessage,
 } from 'fuels';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -56,31 +53,27 @@ async function addLockSig() {
   const hashlockBytes = new B256Coder().encode(hashlock);
   const timelockBytes = new BigNumberCoder('u64').encode(bn(timelock));
 
-  // ─── 3) First SHA256: sha256(encode(Id)||encode(hashlock)||encode(timelock)) ─
+  // First SHA256: sha256(encode(Id)||encode(hashlock)||encode(timelock)) ─
   const rawData = concat([idBytes, hashlockBytes, timelockBytes]);
   const message = arrayify(sha256(rawData));
 
-  // // ─── 4) Build the ABI-encoded prefix + message, then sign with signMessage ──
-  const signature: string = await signer.signMessage({personalSign: message});
+  // Build the ABI-encoded prefix + message, then sign with signMessage ──
+  const signature: string = await signer.signMessage({ personalSign: message });
 
   const MESSAGE_PREFIX = '\x19Fuel Signed Message:\n';
   const payloadPrefixed = concat([toUtf8Bytes(MESSAGE_PREFIX), toUtf8Bytes(String(message.length)), message]);
-  console.log(
-    'toUtf8Bytes(MESSAGE_PREFIX), toUtf8Bytes(String(message.length)): ',
-    concat([toUtf8Bytes(MESSAGE_PREFIX), toUtf8Bytes(String(message.length))])
-  );
-  console.log(
-    'concat([toUtf8Bytes(MESSAGE_PREFIX), toUtf8Bytes(String(message.length)), message]): ',
-    concat([toUtf8Bytes(MESSAGE_PREFIX), toUtf8Bytes(String(message.length)), message])
-  );
+  // signedPrefixedHashedMimic what is done under the hood of hashMessage
   const signedPrefixedHashedMimic = hexlify(sha256(payloadPrefixed));
-  const signedPrefixedHashed = hashMessage({personalSign: message});
-  // console.log('signedPrefixedHashedMimic: ', signedPrefixedHashedMimic);
-  console.log('signedPrefixedHashed: ', signedPrefixedHashed);
+  const signedPrefixedHashed = hashMessage({ personalSign: message });
+  console.log(
+    'signedPrefixedHashedMimic and signedPrefixedHashed equal ?: ',
+    signedPrefixedHashedMimic === signedPrefixedHashed
+  );
+
   const recoveredAddress: Address = Signer.recoverAddress(signedPrefixedHashed, signature);
   console.log('off chain signature is valid ? : ', recoveredAddress.toString() === signer.address.toString());
 
-  // ─── 5) Call your contract function ────────────────────────────────────────
+  // Call contract function ────────────────────────────────────────
   try {
     const { transactionId, waitForResult } = await contract.functions
       .add_lock_sig(signature, Id, hashlock, bn(timelock))

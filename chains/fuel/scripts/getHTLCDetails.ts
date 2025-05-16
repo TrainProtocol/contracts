@@ -20,7 +20,7 @@ async function getHTLCDetials() {
 
   const contractAddress = Address.fromB256(contractAddressString);
   const contractInstance = new Contract(contractAddress, contractAbi, wallet);
-  const id = process.env.ID2!;
+  const id = process.env.ID1!;
 
   console.log((await contractInstance.functions.get_htlc_details(id).get()).value);
 }

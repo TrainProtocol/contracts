@@ -300,23 +300,16 @@ impl Train for Contract {
                     vec.push(MESSAGE_PREFIX[i]);
                     i = i + 1;
                 }
-                //                 bytes
-                //                     .append(Bytes::from(encode("Fuel Signed Message:
-                // 32")));
                 bytes
                     .append(Bytes::from(vec));
-                log(bytes);
                 bytes
                     .append(Bytes::from(encode(message_hash)));
-                log(bytes);
                 bytes
             },
         );
-        log(signed_messsage_hash);
         let (r, s): (b256, b256) = <(b256, b256) as From<B512>>::from(signature);
         let sig = Signature::Secp256k1(Secp256k1::from((r, s)));
         let msg = Message::from(Bytes::from(signed_messsage_hash));
-        log(msg.bytes());
         let addr = Address::from(htlc.sender);
         require(sig.verify_address(addr, msg).is_ok(), "Invalid Signature");
         require(htlc.claimed == 1, "Already Claimed");
