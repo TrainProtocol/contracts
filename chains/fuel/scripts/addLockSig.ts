@@ -53,24 +53,13 @@ async function addLockSig() {
   const hashlockBytes = new B256Coder().encode(hashlock);
   const timelockBytes = new BigNumberCoder('u64').encode(bn(timelock));
 
-  // First SHA256: sha256(encode(Id)||encode(hashlock)||encode(timelock)) ─
   const rawData = concat([idBytes, hashlockBytes, timelockBytes]);
-  const message = arrayify(sha256(rawData));
+  const message = sha256(rawData);
 
-  // Build the ABI-encoded prefix + message, then sign with signMessage ──
-  const signature: string = await signer.signMessage({ personalSign: message });
+  const signature: string = await signer.signMessage(message);
+  const messageHash = hashMessage(message);
 
-  const MESSAGE_PREFIX = '\x19Fuel Signed Message:\n';
-  const payloadPrefixed = concat([toUtf8Bytes(MESSAGE_PREFIX), toUtf8Bytes(String(message.length)), message]);
-  // signedPrefixedHashedMimic what is done under the hood of hashMessage
-  const signedPrefixedHashedMimic = hexlify(sha256(payloadPrefixed));
-  const signedPrefixedHashed = hashMessage({ personalSign: message });
-  console.log(
-    'signedPrefixedHashedMimic and signedPrefixedHashed equal ?: ',
-    signedPrefixedHashedMimic === signedPrefixedHashed
-  );
-
-  const recoveredAddress: Address = Signer.recoverAddress(signedPrefixedHashed, signature);
+  const recoveredAddress: Address = Signer.recoverAddress(messageHash, signature);
   console.log('off chain signature is valid ? : ', recoveredAddress.toString() === signer.address.toString());
 
   // Call contract function ────────────────────────────────────────

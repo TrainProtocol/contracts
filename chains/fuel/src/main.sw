@@ -147,11 +147,6 @@ storage {
     contracts: StorageMap<u256, HTLC> = StorageMap::<u256, HTLC> {},
     rewards: StorageMap<u256, Reward> = StorageMap::<u256, Reward> {},
 }
-// message prefix '\x19Fuel Signed Message:\n32'
-const MESSAGE_PREFIX: [u8; 24] = [
-    25, 70, 117, 101, 108, 32, 83, 105, 103, 110, 101, 100, 32, 77, 101, 115, 115,
-    97, 103, 101, 58, 10, 51, 50,
-];
 // Check if an HTLC exists
 #[storage(read)]
 fn has_htlc(Id: u256) -> bool {
@@ -279,33 +274,48 @@ impl Train for Contract {
         require(has_htlc(Id), "Contract Does Not Exist");
         require(timelock > timestamp() + 900, "Not Future Timelock");
         let mut htlc: HTLC = storage.contracts.get(Id).try_read().unwrap();
-        let message_hash: b256 = sha256(
-            {
-                let mut bytes = Bytes::new();
-                bytes
-                    .append(Bytes::from(encode(Id)));
-                bytes
-                    .append(Bytes::from(encode(hashlock)));
-                bytes
-                    .append(Bytes::from(encode(timelock)));
-                bytes
-            },
-        );
+        let message_hash: b256 = sha256({
+            let mut bytes = Bytes::new();
+            bytes.append(Bytes::from(encode(Id)));
+            bytes.append(Bytes::from(encode(hashlock)));
+            bytes.append(Bytes::from(encode(timelock)));
+            bytes
+        });
+
+        let mut result = Vec::<u8>::new();
+        result.push(48u8);  // '0'
+        result.push(120u8); // 'x'
+
+        let bytes: Bytes = Bytes::from(message_hash);
+
+        let mut i: u64 = 0;
+        while i < bytes.len() {
+            let byte: u8 = bytes.get(i).unwrap();
+
+            let high_nibble = (byte >> 4) & 0x0F;
+            let low_nibble  = byte & 0x0F;
+
+            // map 0–15 → '0'–'9','a'–'f' by adding constants
+            let high_ascii: u8 = if high_nibble < 10u8 {
+                high_nibble + 48u8   // ASCII '0' is 48
+            } else {
+                high_nibble + 87u8   // ASCII 'a' is 97, so 97−10 == 87
+            };
+
+            let low_ascii: u8 = if low_nibble < 10u8 {
+                low_nibble + 48u8
+            } else {
+                low_nibble + 87u8
+            };
+
+            result.push(high_ascii);
+            result.push(low_ascii);
+
+            i += 1;
+        }
+
         let signed_messsage_hash: b256 = sha256(
-            {
-                let mut bytes = Bytes::new();
-                let mut vec = Vec::new();
-                let mut i: u64 = 0;
-                while i < 24 {
-                    vec.push(MESSAGE_PREFIX[i]);
-                    i = i + 1;
-                }
-                bytes
-                    .append(Bytes::from(vec));
-                bytes
-                    .append(Bytes::from(encode(message_hash)));
-                bytes
-            },
+            Bytes::from(result)
         );
         let (r, s): (b256, b256) = <(b256, b256) as From<B512>>::from(signature);
         let sig = Signature::Secp256k1(Secp256k1::from((r, s)));
