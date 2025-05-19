@@ -4,15 +4,12 @@
 resolution = true
 skip-lint = false
 
-[programs.devnet]
-anchor_htlc = "AN8Y7CGKNQcBCLxeNmnob786v8EkWhrGBBriPD2JzjK8"
-
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "devnet"
+cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/anchor_htlc.ts"
