@@ -17,7 +17,7 @@ Train is a revolutionary bridging protocol designed to address the challenges of
 
 - **Trustless**: No reliance on oracle-based systems or 3rd parties
 - **Permissionless**: Open for any participant to join without compromising security
-- **Multi-hop Transactions**: Enables bridging between chains without direct LP connections
+- **Multi-hop Transactions**: Enables bridging between chains without direct Solver connections
 - **Censorship Resistant**: Decentralized design resistant to censorship attempts
 
 ## Architecture
@@ -29,10 +29,10 @@ Train is a revolutionary bridging protocol designed to address the challenges of
 
 Train introduces, an improved version of HTLC that addresses key limitations:
 
-1. User creates a PreHTLC, committing funds for the selected LP
-2. LP detects the transaction, generates a Secret, and creates an HTLC on the destination chain
+1. User creates a PreHTLC, committing funds for the selected Solver
+2. Solver detects the transaction, generates a Secret, and creates an HTLC on the destination chain
 3. User observes the destination transaction and converts their PreHTLC to an HTLC on the source chain
-4. LP reveals the Secret on both chains to complete the transfer
+4. Solver reveals the Secret on both chains to complete the transfer
 
 This approach resolves issues with secret management, claim transactions on the destination chain, and liveness requirements.
 
