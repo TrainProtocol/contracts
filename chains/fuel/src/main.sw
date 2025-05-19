@@ -266,8 +266,13 @@ impl Train for Contract {
         });
         Id
     }
-    ///  Adds a hashlock and updates the timelock for an existing HTLC using a signed message.
-    ///  Verifies the provided signature and updates the HTLC if valid. Emits a `TokenLockAdded` event.
+    /// Note: Wallets don’t support `personalSign`, so we emulate it by
+    /// hashing the UTF-8 message via `sha256(toUtf8Bytes(message))`. In Sway,
+    /// we mimic `toUtf8Bytes` by hex-encoding each byte into its ASCII form.
+    ///
+    /// This function adds a hashlock and updates the timelock for an existing
+    /// HTLC using the signed message, verifies the signature, and, if valid,
+    /// stores the updated contract and emits a `TokenLockAdded` event.
     #[storage(read, write)]
     fn add_lock_sig(signature: B512, Id: u256, hashlock: b256, timelock: u64) -> u256 {
         reentrancy_guard();
