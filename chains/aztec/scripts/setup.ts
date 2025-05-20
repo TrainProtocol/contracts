@@ -147,13 +147,13 @@ async function main(): Promise<void> {
   );
 
   updateData({
-    userSecertKey: secretKey,
+    userSecretKey: secretKey,
     userSalt: salt,
     userAddress: userAddress,
-    solverSecertKey: secretKey2,
+    solverSecretKey: secretKey2,
     solverSalt: salt2,
     solverAddress: solverAddress,
-    deployerSecertKey: secretKey3,
+    deployerSecretKey: secretKey3,
     deployerSalt: salt3,
     deployerAddress: deployerAddress,
     tokenAddress: token.address.toString(),

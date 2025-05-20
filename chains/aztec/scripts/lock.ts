@@ -2,8 +2,8 @@ import { getInitialTestAccountsWallets } from '@aztec/accounts/testing';
 import {
   AztecAddress,
   Contract,
-  createPXEClient,
-  waitForPXE,
+  Fr,
+  SponsoredFeePaymentMethod,
 } from '@aztec/aztec.js';
 import { TrainContract } from './Train.ts';
 import { TokenContract } from '@aztec/noir-contracts.js/Token';
@@ -15,32 +15,55 @@ import {
   publicLogs,
   getHTLCDetails,
   simulateBlockPassing,
-  connectPXE,
+  getPXEs,
 } from './utils.ts';
 import { CheatCodes } from '@aztec/aztec.js/testing';
+import { getSchnorrAccount } from '@aztec/accounts/schnorr';
+import { deriveSigningKey } from '@aztec/stdlib/keys';
+import { getSponsoredFPCInstance } from './fpc.ts';
 
 const TrainContractArtifact = TrainContract.artifact;
 const ethRpcUrl = 'http://localhost:8545';
 
 async function main(): Promise<void> {
-  const pxe = await connectPXE(8080);
-  const cc = await CheatCodes.create([ethRpcUrl], pxe);
-
-  const [solverWallet, recipientWallet]: any[] =
-    await getInitialTestAccountsWallets(pxe);
-  const solver: string = solverWallet.getAddress();
-  console.log(`Using wallet: ${solver}`);
+  const [pxe1, pxe2, pxe3] = await getPXEs(['pxe1', 'pxe2', 'pxe3']);
+  const sponseredFPC = await getSponsoredFPCInstance();
+  const paymentMethod = new SponsoredFeePaymentMethod(sponseredFPC.address);
+  const cc = await CheatCodes.create([ethRpcUrl], pxe2);
 
   const data = readData();
+  let solverSecretKey = Fr.fromString(data.solverSecretKey);
+  let solverSalt = Fr.fromString(data.solverSalt);
+  const schnorWallet = await getSchnorrAccount(
+    pxe2,
+    solverSecretKey,
+    deriveSigningKey(solverSecretKey),
+    solverSalt,
+  );
+  const solverWallet = await schnorWallet.getWallet();
+
+  const deployerSecretKey = Fr.fromString(data.deployerSecretKey);
+  const deployerSalt = Fr.fromString(data.deployerSalt);
+  const schnorWallet1 = await getSchnorrAccount(
+    pxe3,
+    deployerSecretKey,
+    deriveSigningKey(deployerSecretKey),
+    deployerSalt,
+  );
+  const deployerWallet = await schnorWallet1.getWallet();
+
+  const solver: AztecAddress = solverWallet.getAddress();
+  console.log(`Using wallet: ${solver.toString()}`);
+
   const Id = generateId();
   const pair = generateSecretAndHashlock();
   const hashlock = pair[1];
   const amount = 7n;
-  // const now = BigInt(Math.floor(Date.now() / 1000));
+  const pair2 = generateSecretAndHashlock();
+  const ownership_hash = pair2[1];
   const now = await cc.eth.timestamp();
-  // await cc.eth.warp(now);
-  const timelock = now + 2701;
-  const token: string = data.token;
+  const timelock = now + 1850;
+  const token: string = data.tokenAddress;
   const randomness = generateId();
   const dst_chain = 'TON'.padEnd(8, ' ');
   const dst_asset = 'Toncoin'.padEnd(8, ' ');
@@ -55,16 +78,16 @@ async function main(): Promise<void> {
   );
 
   const transfer = asset
-    .withWallet(solverWallet.getAddress())
+    .withWallet(solverWallet)
     .methods.transfer_to_public(
       solverWallet.getAddress(),
-      AztecAddress.fromString(data.train),
+      AztecAddress.fromString(data.trainContractAddress),
       amount,
       randomness,
     );
 
   const witness = await solverWallet.createAuthWit({
-    caller: AztecAddress.fromString(data.train),
+    caller: AztecAddress.fromString(data.trainContractAddress),
     action: transfer,
   });
 
@@ -74,11 +97,13 @@ async function main(): Promise<void> {
   console.log('private balance of solver: ', privateBalanceBefore);
   console.log(
     'public balance of Train: ',
-    await asset.methods.balance_of_public(data.train).simulate(),
+    await asset.methods
+      .balance_of_public(AztecAddress.fromString(data.trainContractAddress))
+      .simulate(),
   );
 
   const contract = await Contract.at(
-    data.train,
+    AztecAddress.fromString(data.trainContractAddress),
     TrainContractArtifact,
     solverWallet,
   );
@@ -91,6 +116,7 @@ async function main(): Promise<void> {
       Id,
       hashlock,
       amount,
+      ownership_hash,
       timelock,
       token,
       randomness,
@@ -98,7 +124,7 @@ async function main(): Promise<void> {
       dst_asset,
       dst_address,
     )
-    .send({ authWitnesses: [witness] })
+    .send({ authWitnesses: [witness], fee: { paymentMethod } })
     .wait();
   console.log('tx : ', lockTx);
 
@@ -108,17 +134,22 @@ async function main(): Promise<void> {
   console.log('private balance of solver: ', privateBalanceAfter);
   console.log(
     'public balance of Train: ',
-    await asset.methods.balance_of_public(data.train).simulate(),
+    await asset.methods.balance_of_public(data.trainContractAddress).simulate(),
   );
-  publicLogs(pxe);
+  publicLogs(pxe2);
 
   updateData({
     lockId: Id.toString(),
-    hashlock: pair[1].toString(),
-    secret: pair[0].toString(),
+    hashlock2: pair[1].toString(),
+    secret2: pair[0].toString(),
+    ownership_hash: pair2[1].toString(),
+    ownership_key: pair2[0].toString(),
   });
-  const assetMinter = await TokenContract.at(data.token, recipientWallet);
-  await simulateBlockPassing(pxe, assetMinter, recipientWallet, 3);
+  const assetMinter = await TokenContract.at(
+    AztecAddress.fromString(data.tokenAddress),
+    deployerWallet,
+  );
+  await simulateBlockPassing(pxe3, assetMinter, deployerWallet, 3);
   await getHTLCDetails(contract, Id);
 }
 

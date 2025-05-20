@@ -30,16 +30,16 @@ async function main(): Promise<void> {
   const sponseredFPC = await getSponsoredFPCInstance();
   const paymentMethod = new SponsoredFeePaymentMethod(sponseredFPC.address);
   const data = readData();
-  let userSecertKey = Fr.fromString(data.userSecertKey);
+  let userSecretKey = Fr.fromString(data.userSecretKey);
   let userSalt = Fr.fromString(data.userSalt);
   const schnorWallet = await getSchnorrAccount(
     pxe1,
-    userSecertKey,
-    deriveSigningKey(userSecertKey),
+    userSecretKey,
+    deriveSigningKey(userSecretKey),
     userSalt,
   );
   const senderWallet = await schnorWallet.getWallet();
-  const deployerSecretKey = Fr.fromString(data.deployerSecertKey);
+  const deployerSecretKey = Fr.fromString(data.deployerSecretKey);
   const deployerSalt = Fr.fromString(data.deployerSalt);
   const schnorWallet1 = await getSchnorrAccount(
     pxe3,

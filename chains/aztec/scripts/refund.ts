@@ -1,5 +1,9 @@
-import { getInitialTestAccountsWallets } from '@aztec/accounts/testing';
-import { AztecAddress, Contract } from '@aztec/aztec.js';
+import {
+  AztecAddress,
+  Contract,
+  Fr,
+  SponsoredFeePaymentMethod,
+} from '@aztec/aztec.js';
 import { TrainContract } from './Train.ts';
 import { TokenContract } from '@aztec/noir-contracts.js/Token';
 import {
@@ -7,71 +11,100 @@ import {
   publicLogs,
   simulateBlockPassing,
   getHTLCDetails,
-  connectPXE,
-  generateId,
+  getPXEs,
 } from './utils.ts';
+import { getSponsoredFPCInstance } from './fpc.ts';
+import { getSchnorrAccount } from '@aztec/accounts/schnorr';
+import { deriveSigningKey } from '@aztec/stdlib/keys';
 
-const TrainContractArtifact = TrainContract.artifact;
 const TokenContractArtifact = TokenContract.artifact;
 
 async function main(): Promise<void> {
-  const pxe = await connectPXE(8080);
-
-  const [wallet1, wallet2, wallet3]: any[] =
-    await getInitialTestAccountsWallets(pxe);
-  const sender: string = wallet1.getAddress();
-  console.log(`Using wallet: ${sender}`);
+  const [pxe1, pxe2, pxe3] = await getPXEs(['pxe1', 'pxe2', 'pxe3']);
+  const sponseredFPC = await getSponsoredFPCInstance();
+  const paymentMethod = new SponsoredFeePaymentMethod(sponseredFPC.address);
 
   const data = readData();
-  const Id = BigInt(data.commitId);
+  let userSecretKey = Fr.fromString(data.userSecretKey);
+  let userSalt = Fr.fromString(data.userSalt);
+  const schnorWallet = await getSchnorrAccount(
+    pxe1,
+    userSecretKey,
+    deriveSigningKey(userSecretKey),
+    userSalt,
+  );
+  const senderWallet = await schnorWallet.getWallet();
+
+  const deployerSecretKey = Fr.fromString(data.deployerSecretKey);
+  const deployerSalt = Fr.fromString(data.deployerSalt);
+  const schnorWallet1 = await getSchnorrAccount(
+    pxe3,
+    deployerSecretKey,
+    deriveSigningKey(deployerSecretKey),
+    deployerSalt,
+  );
+  const deployerWallet = await schnorWallet1.getWallet();
+
+  const sender: string = senderWallet.getAddress().toString();
+  console.log(`Using wallet: ${sender}`);
+  await pxe1.registerSender(AztecAddress.fromString(data.trainContractAddress));
+  const Id = Fr.fromString(data.commitId);
 
   const asset = await Contract.at(
-    AztecAddress.fromString(data.token),
+    AztecAddress.fromString(data.tokenAddress),
     TokenContractArtifact,
-    wallet1,
+    senderWallet,
   );
-
-  const contract = await Contract.at(
-    AztecAddress.fromString(data.train),
-    TrainContractArtifact,
-    wallet3,
+  const contract = await TrainContract.at(
+    AztecAddress.fromString(data.trainContractAddress),
+    senderWallet,
   );
 
   console.log(
     'private balance of sender: ',
-    await asset.methods.balance_of_private(wallet1.getAddress()).simulate(),
+    await asset.methods
+      .balance_of_private(senderWallet.getAddress())
+      .simulate(),
   );
+
   console.log(
     'contract public: ',
     await asset.methods
-      .balance_of_public(AztecAddress.fromString(data.train))
+      .balance_of_public(AztecAddress.fromString(data.trainContractAddress))
       .simulate(),
   );
+
   const is_contract_initialized = await contract.methods
     .is_contract_initialized(Id)
     .simulate();
-  if (!is_contract_initialized) throw new Error('HTLC Does Not Exsist');
+
+  if (!is_contract_initialized) {
+    throw new Error('HTLC Does Not Exist');
+  }
   const refundTx = await contract.methods
-    .refund_private(Id, generateId())
-    .send()
+    .refund_private(Id)
+    .send({ fee: { paymentMethod } })
     .wait();
 
   console.log('tx : ', refundTx);
-  await publicLogs(pxe);
 
   console.log(
     'private balance of sender: ',
-    await asset.methods.balance_of_private(wallet1.getAddress()).simulate(),
+    await asset.methods
+      .balance_of_private(senderWallet.getAddress())
+      .simulate(),
   );
   console.log(
     'contract public: ',
     await asset.methods
-      .balance_of_public(AztecAddress.fromString(data.train))
+      .balance_of_public(AztecAddress.fromString(data.trainContractAddress))
       .simulate(),
   );
-  const assetMinter = await TokenContract.at(data.token, wallet2);
-  await simulateBlockPassing(pxe, assetMinter, wallet3, 3);
-  getHTLCDetails(contract, Id);
+
+  const assetMinter = await TokenContract.at(AztecAddress.fromString(data.tokenAddress), deployerWallet);
+  await publicLogs(pxe1);
+  await simulateBlockPassing(pxe3, assetMinter, deployerWallet, 3);
+  await getHTLCDetails(contract, Id);
 }
 
 main().catch((err: any) => {

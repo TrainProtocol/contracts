@@ -59,7 +59,7 @@ pub contract Train {
     #[storage]
     struct Storage<Context> {
         contracts_private: Map<Field, PrivateImmutable<HTLC_Private, Context>, Context>,
-        contracts_public: Map<Field, SharedMutable<HTLC_Public, 3, Context>, Context>,
+        contracts_public: Map<Field, SharedMutable<HTLC_Public, 2, Context>, Context>,
     }
 
     #[private]
@@ -182,16 +182,19 @@ pub contract Train {
     }
 
     #[private]
-    fn refund_private(Id: Field, randomness: Field) {
+    fn refund_private(Id: Field) {
         // Safety: The contract intentionally exposes these parameters as public.
         Train::at(context.this_address()).refund_public(Id).enqueue(&mut context);
 
         let htlc_private = storage.contracts_private.at(Id).get_note();
         let htlc_public = storage.contracts_public.at(Id).get_current_value();
 
-        Token::at(htlc_public.token)
-            .transfer_to_private(htlc_private.owner, htlc_public.amount)
+        let partial_note = Token::at(htlc_public.token)
+            .prepare_private_balance_increase(htlc_private.owner, htlc_private.owner)
             .call(&mut context);
+        Token::at(htlc_public.token)
+            .finalize_transfer_to_private(htlc_public.amount, partial_note)
+            .enqueue(&mut context);
     }
 
     #[public]
@@ -273,7 +276,7 @@ pub contract Train {
         dst_asset: str<8>,
         dst_address: str<48>,
     ) {
-        assert(context.timestamp() + 2700 < timelock, "InvalidTimelock");
+        assert(context.timestamp() + 1800 < timelock, "InvalidTimelock");
         let hashlock_tuple = bytes_to_u128_limbs(hashlock);
         let ownership_hash_tuple = bytes_to_u128_limbs(ownership_hash);
         let htlc_public = HTLC_Public {
@@ -308,23 +311,31 @@ pub contract Train {
     }
 
     #[private]
-    fn redeem_private(Id: Field, secret: [u8; 32], ownership_key: [u8; 32], randomness: Field) {
+    fn redeem_private(Id: Field, secret: [u8; 32], ownership_key: [u8; 32]) {
         // Safety: The contract intentionally exposes these parameters as public.
         Train::at(context.this_address()).redeem_public(Id, secret, ownership_key).enqueue(
             &mut context,
         );
-
         let htlc_public = storage.contracts_public.at(Id).get_current_value();
         if (htlc_public.ownership_hash_high == 0 as u128) {
             if htlc_public.ownership_hash_low == 0 as u128 {
-                Token::at(htlc_public.token)
-                    .transfer_to_private(htlc_public.src_receiver, htlc_public.amount)
+                let partial_note = Token::at(htlc_public.token)
+                    .prepare_private_balance_increase(
+                        htlc_public.src_receiver,
+                        htlc_public.src_receiver,
+                    )
                     .call(&mut context);
+                Token::at(htlc_public.token)
+                    .finalize_transfer_to_private(htlc_public.amount, partial_note)
+                    .enqueue(&mut context);
             }
         } else {
-            Token::at(htlc_public.token)
-                .transfer_to_private(context.msg_sender(), htlc_public.amount)
+            let partial_note = Token::at(htlc_public.token)
+                .prepare_private_balance_increase(context.msg_sender(), context.msg_sender())
                 .call(&mut context);
+            Token::at(htlc_public.token)
+                .finalize_transfer_to_private(htlc_public.amount, partial_note)
+                .enqueue(&mut context);
         }
     }
 
