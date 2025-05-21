@@ -74,7 +74,7 @@ pub contract Train {
         dst_address: str<48>,
         randomness: Field,
     ) {
-        assert(amount > 0, "Funds Not Sent");
+        assert(amount > 0, "FundsNotSent");
 
         // Safety: The contract intentionally exposes these parameters as public.
         Train::at(context.this_address())
@@ -114,6 +114,8 @@ pub contract Train {
         token: AztecAddress,
         amount: u128,
     ) {
+        let htlc_public_current = storage.contracts_public.at(Id).get_current_value();
+        assert(htlc_public_current.amount == 0, "HTLCAlreadyExists");
         assert(context.timestamp() + 900 < timelock, "InvalidTimelock");
         let htlc_public = HTLC_Public {
             src_receiver: src_receiver,
@@ -276,6 +278,8 @@ pub contract Train {
         dst_asset: str<8>,
         dst_address: str<48>,
     ) {
+        let htlc_public_current = storage.contracts_public.at(Id).get_current_value();
+        assert(htlc_public_current.amount == 0, "HTLCAlreadyExists");
         assert(context.timestamp() + 1800 < timelock, "InvalidTimelock");
         let hashlock_tuple = bytes_to_u128_limbs(hashlock);
         let ownership_hash_tuple = bytes_to_u128_limbs(ownership_hash);

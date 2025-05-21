@@ -66,6 +66,11 @@ async function main(): Promise<void> {
     await asset.methods.balance_of_public(train.address).simulate(),
   );
 
+  const is_contract_initialized = await train.methods
+    .is_contract_initialized(Id)
+    .simulate();
+
+  if (!is_contract_initialized) throw new Error('HTLC Does Not Exsist');
   const redeemTx = await train.methods
     .redeem_private(Id, secret, ownershipKey)
     .send({ fee: { paymentMethod } })
