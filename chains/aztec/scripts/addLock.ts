@@ -52,8 +52,9 @@ async function main(): Promise<void> {
 
   const pair = generateSecretAndHashlock();
   const Id = BigInt(data.commitId);
-  const now = await cc.eth.timestamp();
-  const timelock = now + 901;
+  // const now = await cc.eth.timestamp();
+  const now = Math.floor(new Date().getTime() / 1000);
+  const timelock = now + 1100;
 
   const contract = await Contract.at(
     AztecAddress.fromString(data.trainContractAddress),
@@ -86,7 +87,7 @@ async function main(): Promise<void> {
     AztecAddress.fromString(data.tokenAddress),
     deployer,
   );
-  await simulateBlockPassing(pxe3, assetMinter, deployer, 3);
+  await simulateBlockPassing(pxe3, assetMinter, deployer, 2);
   getHTLCDetails(contract, Id);
   updateData({
     hashlock: pair[1].toString(),

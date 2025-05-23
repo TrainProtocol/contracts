@@ -91,7 +91,7 @@ async function main(): Promise<void> {
   );
 
   await publicLogs(pxe2);
-  await simulateBlockPassing(pxe3, asset, deployerWallet, 3);
+  await simulateBlockPassing(pxe3, asset, deployerWallet, 2);
   await getHTLCDetails(train, Id);
 }
 

@@ -9,3 +9,4 @@ scripts/data.json
 scripts/package-lock.json
 contracts/train/codegenCache.json
 scripts/store/
+scripts/.env

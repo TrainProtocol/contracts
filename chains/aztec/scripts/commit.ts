@@ -54,8 +54,9 @@ async function main(): Promise<void> {
   console.log(`Using wallet: ${sender}`);
 
   const Id = generateId();
-  const now = await cc.eth.timestamp();
-  const timelock = now + 910;
+  // const now = await cc.eth.timestamp();
+  const now = Math.floor(new Date().getTime() / 1000);
+  const timelock = now + 1100;
   const token = data.tokenAddress;
   const amount = 23n;
   let solverAddress = AztecAddress.fromString(data.solverAddress);
@@ -128,7 +129,7 @@ async function main(): Promise<void> {
 
   await publicLogs(pxe1);
   updateData({ commitId: Id.toString() });
-  await simulateBlockPassing(pxe3, assetMinter, deployerWallet, 3);
+  await simulateBlockPassing(pxe3, assetMinter, deployerWallet, 2);
   await getHTLCDetails(contract, Id);
 }
 

@@ -14,7 +14,8 @@
     "@aztec/accounts": "^0.87.2",
     "@aztec/aztec.js": "^0.87.2",
     "@aztec/noir-contracts.js": "^0.87.2",
-    "@aztec/pxe": "^0.87.2"
+    "@aztec/pxe": "^0.87.2",
+    "dotenv": "^16.5.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.1",

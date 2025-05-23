@@ -1,4 +1,3 @@
-import { getInitialTestAccountsWallets } from '@aztec/accounts/testing';
 import {
   AztecAddress,
   Contract,
@@ -61,8 +60,9 @@ async function main(): Promise<void> {
   const amount = 7n;
   const pair2 = generateSecretAndHashlock();
   const ownership_hash = pair2[1];
-  const now = await cc.eth.timestamp();
-  const timelock = now + 1850;
+  // const now = await cc.eth.timestamp();
+  const now = Math.floor(new Date().getTime() / 1000);
+  const timelock = now + 2000;
   const token: string = data.tokenAddress;
   const randomness = generateId();
   const dst_chain = 'TON'.padEnd(8, ' ');
@@ -149,7 +149,7 @@ async function main(): Promise<void> {
     AztecAddress.fromString(data.tokenAddress),
     deployerWallet,
   );
-  await simulateBlockPassing(pxe3, assetMinter, deployerWallet, 3);
+  await simulateBlockPassing(pxe3, assetMinter, deployerWallet, 2);
   await getHTLCDetails(contract, Id);
 }
 
