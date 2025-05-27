@@ -360,6 +360,7 @@ pub mod anchor_htlc {
                 && reward_timelock > clock.unix_timestamp.try_into().unwrap(),
             HTLCError::InvalidRewardTimeLock
         );
+        require!(htlc.reward == 0, HTLCError::RewardAlreadyExists);
 
         htlc.reward_timelock = reward_timelock;
         htlc.reward = reward;
@@ -830,7 +831,7 @@ pub struct Refund<'info> {
     has_one = sender @HTLCError::NotSender,
     has_one = token_contract @HTLCError::NoToken,
     constraint = htlc.claimed == 1 @ HTLCError::AlreadyClaimed,
-    constraint = Clock::get().unwrap().unix_timestamp >= htlc.timelock.try_into().unwrap() @ HTLCError::NotPastTimeLock,
+    constraint = Clock::get().unwrap().unix_timestamp > htlc.timelock.try_into().unwrap() @ HTLCError::NotPastTimeLock,
     )]
     pub htlc: Box<Account<'info, HTLC>>,
     #[account(
@@ -945,4 +946,6 @@ pub enum HTLCError {
     NoToken,
     #[msg("Signature verification failed.")]
     SigVerificationFailed,
+    #[msg("Reward Already Exists.")]
+    RewardAlreadyExists,
 }
