@@ -1,15 +1,23 @@
-//   _____ ____      _    ___ _   _      ____  ____   ___ _____ ___   ____ ___  _
-//  |_   _|  _ \    / \  |_ _| \ | |    |  _ \|  _ \ / _ \_   _/ _ \ / ___/ _ \| |
-//    | | | |_) |  / _ \  | ||  \| |    | |_) | |_) | | | || || | | | |  | | | | |
-//    | | |  _ <  / ___ \ | || |\  |    |  __/|  _ <| |_| || || |_| | |__| |_| | |___
-//    |_| |_| \_\/_/   \_\___|_| \_|    |_|   |_| \_\\___/ |_| \___/ \____\___/|_____|
+//     @@                                    @@@
+//    @@@
+//    @@@        @@   @@@@      @@@@@         @     @    @@@@@
+//  @@@@@@@@@   @@@@@@      @@@@    @@@@@    @@@   @@@@@@    @@@@
+//    @@@       @@@       @@@           @@@  @@@   @@@          @@@
+//    @@@       @@@       @@@           @@@  @@@   @@@          @@@
+//    @@@       @@@       @@@           @@@  @@@   @@@          @@@
+//     @@@      @@@        @@@@       @@@@@  @@@   @@@          @@@
+//       @@@@@  @@@           @@@@@@@@@ @@@  @@@   @@@          @@@
 
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::ed25519_program::ID as ED25519_ID;
+use anchor_lang::solana_program::instruction::Instruction;
+use anchor_lang::solana_program::sysvar::instructions::{load_instruction_at_checked, ID as IX_ID};
 use anchor_lang::system_program;
 use sha2::{Digest, Sha256};
+use std::convert::TryInto;
 use std::mem::size_of;
 
-declare_id!("Erxy5jJoEbqrWVVyynH47pwzcthv4mpN2qELBofx9gcz");
+declare_id!("M4q843mQwjoTn52Ks5HsmZV8bq8ZtA2XgAWW5pHhwdM");
 /// @title Pre Hashed Timelock Contracts (PHTLCs) on Solana.
 ///
 /// This contract provides a way to create and keep PHTLCs for Solana.
@@ -29,8 +37,62 @@ declare_id!("Erxy5jJoEbqrWVVyynH47pwzcthv4mpN2qELBofx9gcz");
 ///  5) refund(Id) - after timelock has expired and if the src_receiver did not
 ///      redeem the sol the sender / creator of the HTLC can get their sol
 ///      back with this function.
+
+pub fn check_ed25519_data(data: &[u8], pubkey: &[u8], msg: &[u8], sig: &[u8]) -> Result<()> {
+    // According to this layout used by the Ed25519Program
+    // https://github.com/solana-labs/solana-web3.js/blob/master/src/ed25519-program.ts#L33
+
+    // "Deserializing" byte slices
+
+    let num_signatures = &[data[0]]; // Byte  0
+    let padding = &[data[1]]; // Byte  1
+    let signature_offset = &data[2..=3]; // Bytes 2,3
+    let signature_instruction_index = &data[4..=5]; // Bytes 4,5
+    let public_key_offset = &data[6..=7]; // Bytes 6,7
+    let public_key_instruction_index = &data[8..=9]; // Bytes 8,9
+    let message_data_offset = &data[10..=11]; // Bytes 10,11
+    let message_data_size = &data[12..=13]; // Bytes 12,13
+    let message_instruction_index = &data[14..=15]; // Bytes 14,15
+
+    let data_pubkey = &data[16..16 + 32]; // Bytes 16..16+32
+    let data_sig = &data[48..48 + 64]; // Bytes 48..48+64
+    let data_msg = &data[112..]; // Bytes 112..end
+
+    // Expected values
+
+    let exp_public_key_offset: u16 = 16; // 2*u8 + 7*u16
+    let exp_signature_offset: u16 = exp_public_key_offset + pubkey.len() as u16;
+    let exp_message_data_offset: u16 = exp_signature_offset + sig.len() as u16;
+    let exp_num_signatures: u8 = 1;
+    let exp_message_data_size: u16 = msg.len().try_into().unwrap();
+
+    // Header and Arg Checks
+
+    // Header
+    if num_signatures != &exp_num_signatures.to_le_bytes()
+        || padding != &[0]
+        || signature_offset != &exp_signature_offset.to_le_bytes()
+        || signature_instruction_index != &u16::MAX.to_le_bytes()
+        || public_key_offset != &exp_public_key_offset.to_le_bytes()
+        || public_key_instruction_index != &u16::MAX.to_le_bytes()
+        || message_data_offset != &exp_message_data_offset.to_le_bytes()
+        || message_data_size != &exp_message_data_size.to_le_bytes()
+        || message_instruction_index != &u16::MAX.to_le_bytes()
+    {
+        return Err(HTLCError::SigVerificationFailed.into());
+    }
+
+    // Arguments
+    if data_pubkey != pubkey || data_msg != msg || data_sig != sig {
+        return Err(HTLCError::SigVerificationFailed.into());
+    }
+
+    Ok(())
+}
+
 #[program]
 pub mod native_htlc {
+
     use super::*;
 
     /// @dev Sender / Payer sets up a new pre-hash time lock contract depositing the
@@ -55,11 +117,10 @@ pub mod native_htlc {
         commit_bump: u8,
     ) -> Result<[u8; 32]> {
         let clock = Clock::get().unwrap();
-        require!(
-            timelock > clock.unix_timestamp.try_into().unwrap(),
-            HTLCError::NotFutureTimeLock
-        );
+        let time: u64 = clock.unix_timestamp.try_into().unwrap();
+        require!(timelock >= time + 900, HTLCError::InvalidTimeLock);
         require!(amount != 0, HTLCError::FundsNotSent);
+
         let htlc = &mut ctx.accounts.htlc;
 
         htlc.dst_address = dst_address;
@@ -117,10 +178,8 @@ pub mod native_htlc {
         lock_bump: u8,
     ) -> Result<[u8; 32]> {
         let clock = Clock::get().unwrap();
-        require!(
-            timelock > clock.unix_timestamp.try_into().unwrap(),
-            HTLCError::NotFutureTimeLock
-        );
+        let time: u64 = clock.unix_timestamp.try_into().unwrap();
+        require!(timelock >= time + 900, HTLCError::InvalidTimeLock);
         require!(amount != 0, HTLCError::FundsNotSent);
 
         let htlc = &mut ctx.accounts.htlc;
@@ -154,6 +213,10 @@ pub mod native_htlc {
 
         Ok(Id)
     }
+
+    /// @dev Solver / Payer sets the reward for claiming the funds.
+    /// @param reward the amount of the reward token.
+    /// @param reward_timelock After this time the rewards can be claimed.
     pub fn lock_reward(
         ctx: Context<LockReward>,
         Id: [u8; 32],
@@ -169,6 +232,7 @@ pub mod native_htlc {
                 && reward_timelock > clock.unix_timestamp.try_into().unwrap(),
             HTLCError::InvalidRewardTimeLock
         );
+        require!(htlc.reward == 0, HTLCError::RewardAlreadyExists);
 
         htlc.reward_timelock = reward_timelock;
         htlc.reward = reward;
@@ -200,12 +264,74 @@ pub mod native_htlc {
         timelock: u64,
     ) -> Result<[u8; 32]> {
         let clock = Clock::get().unwrap();
-        require!(
-            timelock > clock.unix_timestamp.try_into().unwrap(),
-            HTLCError::NotFutureTimeLock
-        );
+        let time: u64 = clock.unix_timestamp.try_into().unwrap();
+        require!(timelock >= time + 900, HTLCError::InvalidTimeLock);
 
         let htlc = &mut ctx.accounts.htlc;
+        htlc.hashlock = hashlock;
+        htlc.timelock = timelock;
+
+        Ok(Id)
+    }
+
+    /// @dev Called by the solver to add hashlock to the HTLC
+    ///
+    /// @param Id of the HTLC.
+    /// @param hashlock to be added.
+    pub fn add_lock_sig(
+        ctx: Context<AddLockSig>,
+        Id: [u8; 32],
+        hashlock: [u8; 32],
+        timelock: u64,
+        signature: [u8; 64],
+    ) -> Result<[u8; 32]> {
+        let clock = Clock::get().unwrap();
+        let time: u64 = clock.unix_timestamp.try_into().unwrap();
+        require!(timelock >= time + 900, HTLCError::InvalidTimeLock);
+        let htlc = &mut ctx.accounts.htlc;
+        let signer = htlc.sender.to_bytes();
+
+        let ix: Instruction = load_instruction_at_checked(0, &ctx.accounts.ix_sysvar)?;
+
+        let mut hasher = Sha256::new();
+        hasher.update(Id.clone());
+        hasher.update(hashlock.clone());
+        hasher.update(timelock.to_le_bytes());
+        let hash = hasher.finalize();
+
+        let signing_domain: &[u8; 16] = b"\xffsolana offchain";
+        let header_version: [u8; 1] = [0u8]; // Version 0
+        let mut application_domain = [0u8; 32];
+        application_domain[..5].copy_from_slice(b"Train");
+        let message_format = [0u8]; // Assuming Restricted ASCII
+        let signer_count = [1u8]; // One signer
+        let message_length = (hash.len() as u16).to_le_bytes();
+
+        let mut raw_message = Vec::new();
+        raw_message.extend_from_slice(signing_domain);
+        raw_message.extend_from_slice(&header_version);
+        raw_message.extend_from_slice(&application_domain);
+        raw_message.extend_from_slice(&message_format);
+        raw_message.extend_from_slice(&signer_count);
+        raw_message.extend_from_slice(&signer);
+        raw_message.extend_from_slice(&message_length);
+        raw_message.extend_from_slice(&hash);
+
+        let hex_message = hex::encode(raw_message);
+        let full_message = hex_message.into_bytes();
+
+        // Check that ix is what we expect to have been sent
+        if ix.program_id!= ED25519_ID ||  // The program id we expect
+        ix.accounts.len()!= 0
+        // With no context accounts
+        || ix.data.len()!= (16 + 64 + 32 + full_message.len())
+        // And data of this size
+        {
+            return Err(HTLCError::SigVerificationFailed.into());
+        }
+
+        check_ed25519_data(&ix.data, &signer, &full_message, &signature)?;
+
         htlc.hashlock = hashlock;
         htlc.timelock = timelock;
 
@@ -418,7 +544,7 @@ pub struct Refund<'info> {
     bump,
     has_one = sender @HTLCError::NotSender,
     constraint = htlc.claimed == 1 @ HTLCError::AlreadyClaimed,
-    constraint = Clock::get().unwrap().unix_timestamp >= htlc.timelock.try_into().unwrap() @ HTLCError::NotPastTimeLock,
+    constraint = Clock::get().unwrap().unix_timestamp > htlc.timelock.try_into().unwrap() @ HTLCError::NotPastTimeLock,
     )]
     pub htlc: Box<Account<'info, HTLC>>,
 
@@ -433,9 +559,8 @@ pub struct Refund<'info> {
 #[derive(Accounts)]
 #[instruction(Id: [u8; 32])]
 pub struct AddLock<'info> {
-    sender: Signer<'info>,
     #[account(mut)]
-    payer: Signer<'info>,
+    sender: Signer<'info>,
     #[account(mut,
     seeds = [
         Id.as_ref()
@@ -447,6 +572,31 @@ pub struct AddLock<'info> {
     )]
     pub htlc: Box<Account<'info, HTLC>>,
 
+    system_program: Program<'info, System>,
+    rent: Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+#[instruction(Id: [u8;32])]
+pub struct AddLockSig<'info> {
+    #[account(mut)]
+    payer: Signer<'info>,
+    #[account(mut,
+    seeds = [
+        Id.as_ref()
+    ],
+    bump,
+    constraint = htlc.claimed == 1 @ HTLCError::AlreadyClaimed,
+    constraint = htlc.hashlock == [0u8;32] @ HTLCError::HashlockAlreadySet,
+    )]
+    pub htlc: Box<Account<'info, HTLC>>,
+
+    /// CHECK: The address check is needed because otherwise
+    /// the supplied Sysvar could be anything else.
+    /// The Instruction Sysvar has not been implemented
+    /// in the Anchor framework yet, so this is the safe approach.
+    #[account(address = IX_ID)]
+    pub ix_sysvar: AccountInfo<'info>,
     system_program: Program<'info, System>,
     rent: Sysvar<'info, Rent>,
 }
@@ -465,8 +615,8 @@ pub struct GetDetails<'info> {
 
 #[error_code]
 pub enum HTLCError {
-    #[msg("Not Future TimeLock.")]
-    NotFutureTimeLock,
+    #[msg("Invalid TimeLock.")]
+    InvalidTimeLock,
     #[msg("Not Past TimeLock.")]
     NotPastTimeLock,
     #[msg("Invalid Reward TimeLock.")]
@@ -489,4 +639,8 @@ pub enum HTLCError {
     NotSender,
     #[msg("Not The Reciever.")]
     NotReciever,
+    #[msg("Signature verification failed.")]
+    SigVerificationFailed,
+    #[msg("Reward Already Exists.")]
+    RewardAlreadyExists,
 }
