@@ -415,7 +415,7 @@ impl Train for Contract {
         if has_reward(Id) {
             let reward: Reward = storage.rewards.get(Id).try_read().unwrap();
             // Check if reward timelock has passed and distribute funds accordingly
-            if reward.timelock < timestamp() {
+            if reward.timelock > timestamp() {
                 transfer(
                     Identity::Address(htlc.srcReceiver),
                     htlc.assetId,
