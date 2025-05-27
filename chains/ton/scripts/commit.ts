@@ -51,7 +51,7 @@ async function run() {
         timelock: timelock,
         senderPubKey: senderPubKey,
         amount: amount,
-        Id: 13n,
+        Id: 133n,
     };
 
     console.log('Sending Commit message...');

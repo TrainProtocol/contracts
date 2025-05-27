@@ -1,4 +1,4 @@
-# HashedTimeLockTON
+# TRAIN Protocol TON
 
 ## Project structure
 
