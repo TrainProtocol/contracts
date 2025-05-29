@@ -189,7 +189,7 @@ describe("HTLC", () => {
     console.log(`[${TIMELOCK * 1000}] the Timelock`);
 
     const commitTx = await program.methods
-      .commit(IDArray, HOPCHAINS, HOPASSETS, HOPADDRESSES, DSTCHAIN, DSTASSET, DSTADDRESS, SRCASSET, bob.publicKey, TIMELOCK, new anchor.BN(AMOUNT), pda.htlcBump)
+      .commit(IDArray, HOPCHAINS, HOPASSETS, HOPADDRESSES, DSTCHAIN, DSTASSET, DSTADDRESS, SRCASSET, bob.publicKey, TIMELOCK, new anchor.BN(AMOUNT))
       .accountsPartial({
         sender: wallet.publicKey,
         htlc: pda.htlc,
@@ -376,7 +376,7 @@ describe("HTLC", () => {
 
 
   //   const lockTx = await program.methods
-  //     .lock(IDArray, HASHLOCKArray, TIMELOCK, DSTCHAIN, DSTADDRESS, DSTASSET, SRCASSET, bob.publicKey, new anchor.BN(AMOUNT), pda.htlcBump)
+  //     .lock(IDArray, HASHLOCKArray, TIMELOCK, DSTCHAIN, DSTADDRESS, DSTASSET, SRCASSET, bob.publicKey, new anchor.BN(AMOUNT))
   //     .accountsPartial({
   //       sender: wallet.publicKey,
   //       htlc: pda.htlc,
@@ -388,7 +388,7 @@ describe("HTLC", () => {
   //   // .rpc().catch(e => console.error(e));
 
   //   const rewardTx = await program.methods
-  //     .lockReward(IDArray, RTIMELOCK, new anchor.BN(REWARD), pda.htlcBump)
+  //     .lockReward(IDArray, RTIMELOCK, new anchor.BN(REWARD))
   //     .accountsPartial({
   //       sender: wallet.publicKey,
   //       htlc: pda.htlc,
@@ -458,7 +458,7 @@ describe("HTLC", () => {
   //   const RTIMELOCK = new anchor.BN(RTIME);
 
   //   const lockTx = await program.methods
-  //     .lock(IDArray, HASHLOCKArray, TIMELOCK, DSTCHAIN, DSTADDRESS, DSTASSET, SRCASSET, bob.publicKey, new anchor.BN(AMOUNT), pda.htlcBump)
+  //     .lock(IDArray, HASHLOCKArray, TIMELOCK, DSTCHAIN, DSTADDRESS, DSTASSET, SRCASSET, bob.publicKey, new anchor.BN(AMOUNT))
   //     .accountsPartial({
   //       sender: wallet.publicKey,
   //       htlc: pda.htlc,
@@ -470,7 +470,7 @@ describe("HTLC", () => {
   //   // .rpc().catch(e => console.error(e));
 
   //   const rewardTx = await program.methods
-  //     .lockReward(IDArray, RTIMELOCK, new anchor.BN(REWARD), pda.htlcBump)
+  //     .lockReward(IDArray, RTIMELOCK, new anchor.BN(REWARD))
   //     .accountsPartial({
   //       sender: wallet.publicKey,
   //       htlc: pda.htlc,

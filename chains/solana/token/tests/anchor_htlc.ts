@@ -180,7 +180,7 @@ describe("HTLC", () => {
             }).transaction();
 
         const rewardTx = await program.methods
-            .lockReward(Array.from(Id), rewardTimelock, new anchor.BN(REWARD), htlc_pda.htlcBump)
+            .lockReward(Array.from(Id), rewardTimelock, new anchor.BN(REWARD))
             .accountsPartial({
                 sender: wallet.publicKey,
                 htlc: htlc_pda.htlc,
@@ -662,7 +662,7 @@ describe("HTLC", () => {
                 senderTokenAccount: bobTokenAccount
             }).transaction();
         const rewardTx = await program.methods
-            .lockReward(Array.from(Id), new anchor.BN(rtime), new anchor.BN(REWARD), htlc_pda.htlcBump)
+            .lockReward(Array.from(Id), new anchor.BN(rtime), new anchor.BN(REWARD))
             .accountsPartial({
                 sender: bob.publicKey,
                 htlc: htlc_pda.htlc,

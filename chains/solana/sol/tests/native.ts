@@ -187,7 +187,7 @@ describe("HTLC", () => {
 
 
     const rewardTx = await program.methods
-      .lockReward(IDArray, RTIMELOCK, new anchor.BN(REWARD), pda.htlcBump)
+      .lockReward(IDArray, RTIMELOCK, new anchor.BN(REWARD))
       .accountsPartial({
         sender: wallet.publicKey,
         htlc: pda.htlc,
@@ -254,7 +254,7 @@ describe("HTLC", () => {
 
 
   //   const rewardTx = await program.methods
-  //     .lockReward(IDArray, RTIMELOCK, new anchor.BN(REWARD), pda.htlcBump)
+  //     .lockReward(IDArray, RTIMELOCK, new anchor.BN(REWARD))
   //     .accountsPartial({
   //       sender: wallet.publicKey,
   //       htlc: pda.htlc,

@@ -350,7 +350,6 @@ pub mod anchor_htlc {
         Id: [u8; 32],
         reward_timelock: u64,
         reward: u64,
-        lock_bump: u8,
     ) -> Result<bool> {
         let clock = Clock::get().unwrap();
         let htlc = &mut ctx.accounts.htlc;
@@ -365,7 +364,8 @@ pub mod anchor_htlc {
         htlc.reward_timelock = reward_timelock;
         htlc.reward = reward;
 
-        let bump_vector = lock_bump.to_le_bytes();
+        let htlc_bump = ctx.bumps.htlc;
+        let bump_vector = htlc_bump.to_le_bytes();
         let inner = vec![Id.as_ref(), bump_vector.as_ref()];
         let outer = vec![inner.as_slice()];
         let transfer_context = CpiContext::new_with_signer(
