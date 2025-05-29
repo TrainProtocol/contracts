@@ -93,7 +93,7 @@ describe("HTLC", () => {
   //   console.log("lamport balance of wallet before commit",
   //     await anchor.getProvider().connection.getBalance(wallet.publicKey));
   //   const commitTx = await program.methods
-  //     .commit(IDArray, HOPCHAINS, HOPASSETS, HOPADDRESSES, DSTCHAIN, DSTASSET, DSTADDRESS, SRCASSET, wallet.publicKey, TIMELOCK, new anchor.BN(AMOUNT), pda.htlcBump)
+  //     .commit(IDArray, HOPCHAINS, HOPASSETS, HOPADDRESSES, DSTCHAIN, DSTASSET, DSTADDRESS, SRCASSET, wallet.publicKey, TIMELOCK, new anchor.BN(AMOUNT))
   //     .accountsPartial({
   //       sender: user.publicKey,
   //       htlc: pda.htlc,
@@ -177,7 +177,7 @@ describe("HTLC", () => {
     console.log("lamport balance of wallet at the beginning",
       await anchor.getProvider().connection.getBalance(wallet.publicKey));
     const lockTx = await program.methods
-      .lock(IDArray, HASHLOCKArray, TIMELOCK, new anchor.BN(AMOUNT), DSTCHAIN, DSTADDRESS, DSTASSET, SRCASSET, bob.publicKey, pda.htlcBump)
+      .lock(IDArray, HASHLOCKArray, TIMELOCK, new anchor.BN(AMOUNT), DSTCHAIN, DSTADDRESS, DSTASSET, SRCASSET, bob.publicKey)
       .accountsPartial({
         sender: wallet.publicKey,
         htlc: pda.htlc,
@@ -244,7 +244,7 @@ describe("HTLC", () => {
   //     await anchor.getProvider().connection.getBalance(wallet.publicKey));
 
   //   const lockTx = await program.methods
-  //     .lock(IDArray, HASHLOCKArray, TIMELOCK, new anchor.BN(AMOUNT), DSTCHAIN, DSTADDRESS, DSTASSET, SRCASSET, bob.publicKey, pda.htlcBump)
+  //     .lock(IDArray, HASHLOCKArray, TIMELOCK, new anchor.BN(AMOUNT), DSTCHAIN, DSTADDRESS, DSTASSET, SRCASSET, bob.publicKey)
   //     .accountsPartial({
   //       sender: wallet.publicKey,
   //       htlc: pda.htlc,

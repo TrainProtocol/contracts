@@ -114,7 +114,6 @@ pub mod native_htlc {
         src_receiver: Pubkey,
         timelock: u64,
         amount: u64,
-        commit_bump: u8,
     ) -> Result<[u8; 32]> {
         let clock = Clock::get().unwrap();
         let time: u64 = clock.unix_timestamp.try_into().unwrap();
@@ -137,7 +136,8 @@ pub mod native_htlc {
         htlc.claimed = 1;
         htlc.secret = [0u8; 32];
 
-        let bump_vector = commit_bump.to_le_bytes();
+        let htlc_bump = ctx.bumps.htlc;
+        let bump_vector = htlc_bump.to_le_bytes();
         let inner = vec![Id.as_ref(), bump_vector.as_ref()];
         let outer = vec![inner.as_slice()];
 
@@ -175,11 +175,10 @@ pub mod native_htlc {
         dst_asset: String,
         src_asset: String,
         src_receiver: Pubkey,
-        lock_bump: u8,
     ) -> Result<[u8; 32]> {
         let clock = Clock::get().unwrap();
         let time: u64 = clock.unix_timestamp.try_into().unwrap();
-        require!(timelock >= time + 900, HTLCError::InvalidTimeLock);
+        require!(timelock >= time + 1800, HTLCError::InvalidTimeLock);
         require!(amount != 0, HTLCError::FundsNotSent);
 
         let htlc = &mut ctx.accounts.htlc;
@@ -198,7 +197,8 @@ pub mod native_htlc {
         htlc.reward_timelock = 0;
         htlc.claimed = 1;
 
-        let bump_vector = lock_bump.to_le_bytes();
+        let htlc_bump = ctx.bumps.htlc;
+        let bump_vector = htlc_bump.to_le_bytes();
         let inner = vec![Id.as_ref(), bump_vector.as_ref()];
         let outer = vec![inner.as_slice()];
         let transfer_context = CpiContext::new_with_signer(
@@ -442,7 +442,7 @@ pub struct HTLC {
     pub claimed: u8,
 }
 #[derive(Accounts)]
-#[instruction(Id: [u8; 32], commit_bump: u8)]
+#[instruction(Id: [u8; 32])]
 pub struct Commit<'info> {
     #[account(mut)]
     pub sender: Signer<'info>,
@@ -463,7 +463,7 @@ pub struct Commit<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(Id: [u8; 32], lock_bump: u8)]
+#[instruction(Id: [u8; 32])]
 pub struct Lock<'info> {
     #[account(mut)]
     pub sender: Signer<'info>,

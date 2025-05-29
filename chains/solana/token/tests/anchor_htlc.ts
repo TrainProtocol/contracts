@@ -154,7 +154,7 @@ describe("HTLC", () => {
     const createPHTLC = async (Id: Buffer, amount: anchor.BN, timelock: anchor.BN) => {
         const pda = await getPdaParams(Id);
         const commitTx = await program.methods
-            .commit(Array.from(Id), HOPCHAINS, HOPASSETS, HOPADDRESSES, DSTCHAIN, DSTASSET, DSTADDRESS, SRCASSET, bob.publicKey, timelock, amount, pda.htlcBump)
+            .commit(Array.from(Id), HOPCHAINS, HOPASSETS, HOPADDRESSES, DSTCHAIN, DSTASSET, DSTADDRESS, SRCASSET, bob.publicKey, timelock, amount)
             .accountsPartial({
                 sender: wallet.publicKey,
                 htlc: pda.htlc,
@@ -170,7 +170,7 @@ describe("HTLC", () => {
         const htlc_pda = await getPdaParams(Id);
 
         const lockTx = await program.methods
-            .lock(Array.from(Id), hashlock, timelock, DSTCHAIN, DSTADDRESS, DSTASSET, SRCASSET, bob.publicKey, amount, htlc_pda.htlcBump)
+            .lock(Array.from(Id), hashlock, timelock, DSTCHAIN, DSTADDRESS, DSTASSET, SRCASSET, bob.publicKey, amount)
             .accountsPartial({
                 sender: wallet.publicKey,
                 htlc: htlc_pda.htlc,
@@ -360,7 +360,7 @@ describe("HTLC", () => {
         const Id = randomBytes(32);
         const secret = randomBytes(32);
         const hashlock = createHash("sha256").update(secret).digest();
-        const time = (new Date().getTime() + 1000000) / 1000;
+        const time = (new Date().getTime() + 10000000) / 1000;
         const rtime = (new Date().getTime() + 900000) / 1000;
 
         const pda = await getPdaParams(Id);
@@ -389,7 +389,7 @@ describe("HTLC", () => {
         const secret = randomBytes(32);
         const wrong_secret = randomBytes(32);
         const hashlock = createHash("sha256").update(secret).digest();
-        const time = (new Date().getTime() + 1000000) / 1000;
+        const time = (new Date().getTime() + 10000000) / 1000;
         const rtime = (new Date().getTime() + 900000) / 1000;
 
         const pda = await getPdaParams(Id);
@@ -431,7 +431,7 @@ describe("HTLC", () => {
         const Id = randomBytes(32);
         const secret = randomBytes(32);
         const hashlock = createHash("sha256").update(secret).digest();
-        const time = (new Date().getTime() + 1000000) / 1000;
+        const time = (new Date().getTime() + 10000000) / 1000;
         const rtime = (new Date().getTime() + 900000) / 1000;
 
         const pda = await getPdaParams(Id);
@@ -572,7 +572,7 @@ describe("HTLC", () => {
         const Id = randomBytes(32);
         const secret = randomBytes(32);
         const hashlock = createHash("sha256").update(secret).digest();
-        const time = (new Date().getTime() + 1000000) / 1000;
+        const time = (new Date().getTime() + 10000000) / 1000;
         const rtime = (new Date().getTime() + 900000) / 1000;
 
         await createHTLC(Id, new anchor.BN(rtime), new anchor.BN(time), new anchor.BN(AMOUNT), Array.from(hashlock));
@@ -626,7 +626,7 @@ describe("HTLC", () => {
 
         const pda = await getPdaParams(Id);
         const commitTx = await program.methods
-            .commit(Array.from(Id), HOPCHAINS, HOPASSETS, HOPADDRESSES, DSTCHAIN, DSTASSET, DSTADDRESS, SRCASSET, bob.publicKey, new anchor.BN(time), new anchor.BN(AMOUNT), pda.htlcBump)
+            .commit(Array.from(Id), HOPCHAINS, HOPASSETS, HOPADDRESSES, DSTCHAIN, DSTASSET, DSTADDRESS, SRCASSET, bob.publicKey, new anchor.BN(time), new anchor.BN(AMOUNT))
             .accountsPartial({
                 sender: bob.publicKey,
                 htlc: pda.htlc,
@@ -653,7 +653,7 @@ describe("HTLC", () => {
         const htlc_pda = await getPdaParams(Id);
 
         const lockTx = await program.methods
-            .lock(Array.from(Id), Array.from(hashlock), new anchor.BN(time), DSTCHAIN, DSTADDRESS, DSTASSET, SRCASSET, bob.publicKey, new anchor.BN(AMOUNT), htlc_pda.htlcBump)
+            .lock(Array.from(Id), Array.from(hashlock), new anchor.BN(time), DSTCHAIN, DSTADDRESS, DSTASSET, SRCASSET, bob.publicKey, new anchor.BN(AMOUNT))
             .accountsPartial({
                 sender: bob.publicKey,
                 htlc: htlc_pda.htlc,
@@ -1131,7 +1131,7 @@ describe("HTLC", () => {
         const pda = await getPdaParams(Id);
 
         const commitTx = await program.methods
-            .commit(Array.from(Id), HOPCHAINS, HOPASSETS, HOPADDRESSES, DSTCHAIN, DSTASSET, DSTADDRESS, SRCASSET, bob.publicKey, timelock, new anchor.BN(AMOUNT), pda.htlcBump)
+            .commit(Array.from(Id), HOPCHAINS, HOPASSETS, HOPADDRESSES, DSTCHAIN, DSTASSET, DSTADDRESS, SRCASSET, bob.publicKey, timelock, new anchor.BN(AMOUNT))
             .accountsPartial({
                 sender: bob.publicKey,
                 htlc: pda.htlc,

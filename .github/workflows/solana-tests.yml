@@ -3,8 +3,12 @@ name: Solana Localnet Tests
 on:
   push:
     branches: [ dev ]
+    paths:
+      - 'chains/solana/**'
   pull_request:
     branches: [ dev ]
+    paths:
+      - 'chains/solana/**'
 
 jobs:
   anchor-test:

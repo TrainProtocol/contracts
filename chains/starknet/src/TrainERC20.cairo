@@ -30,7 +30,6 @@ struct AddLockMsg {
     /// @dev The new timelock to be set for the HTLC.
     timelock: u256,
 }
-
 #[derive(Drop, Copy, Hash)]
 pub struct StarknetDomain {
     name: felt252,
@@ -146,14 +145,14 @@ pub trait ITrainERC20<TContractState> {
 ///      back with this function.
 #[starknet::contract]
 mod TrainERC20 {
-    use super::{SNIP12MetadataImpl, StructHashImpl, AddLockMsg, OffchainMessageHash};
-    use openzeppelin_account::interface::{ISRC6Dispatcher, ISRC6DispatcherTrait};
-    use openzeppelin::token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
-    use core::traits::Into;
-    use core::num::traits::Zero;
-    use starknet::storage::{Map, StoragePathEntry};
-    use starknet::{ContractAddress, get_caller_address, get_contract_address, get_block_timestamp};
     use alexandria_bytes::{Bytes, BytesTrait};
+    use core::num::traits::Zero;
+    use core::traits::Into;
+    use openzeppelin::token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
+    use openzeppelin::account::interface::{ISRC6Dispatcher, ISRC6DispatcherTrait};
+    use starknet::storage::{Map, StoragePathEntry};
+    use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_contract_address};
+    use super::{AddLockMsg, OffchainMessageHash, SNIP12MetadataImpl, StructHashImpl};
 
     #[storage]
     struct Storage {
@@ -431,7 +430,7 @@ mod TrainERC20 {
             amount: u256,
             tokenContract: ContractAddress,
         ) -> u256 {
-            assert!(self.validTimelock(timelock), "Invalid TimeLock");
+            assert!(timelock > get_block_timestamp().into() + 1800, "Invalid TimeLock");
             assert!(amount != 0, "Funds Can Not Be Zero");
             assert!(!self.hasHTLC(Id), "HTLC Already Exists");
             assert!(
@@ -442,7 +441,9 @@ mod TrainERC20 {
             // transfer the token from the user into the contract
             let token: IERC20Dispatcher = IERC20Dispatcher { contract_address: tokenContract };
             assert!(
-                token.balance_of(get_caller_address()) >= amount + reward, "Insufficient Balance",
+                token.balance_of(get_caller_address()) >= amount + reward,
+                "Insufficient
+                Balance",
             );
             assert!(
                 token.allowance(get_caller_address(), get_contract_address()) >= amount + reward,
