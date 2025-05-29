@@ -13,7 +13,8 @@ import {
 import { createStore } from '@aztec/kv-store/lmdb';
 import { createPXEService, getPXEServiceConfig } from '@aztec/pxe/server';
 import { getSponsoredFPCInstance } from './fpc.ts';
-import 'dotenv/config';  
+import { PXECreationOptions } from './node_modules/@aztec/pxe/src/entrypoints/pxe_creation_options.ts';
+import 'dotenv/config';
 
 export async function getPXEs(names: string[]): Promise<PXE[]> {
   const url = process.env.PXE_URL ?? 'http://localhost:8080';
@@ -31,7 +32,11 @@ export async function getPXEs(names: string[]): Promise<PXE[]> {
       dataDirectory: 'store',
       dataStoreMapSizeKB: 1e6,
     });
-    const pxe = await createPXEService(node, fullConfig, true, store);
+    const options: PXECreationOptions = {
+      loggers: {},
+      store,
+    };
+    const pxe = await createPXEService(node, fullConfig, options);
     await waitForPXE(pxe);
     svcs.push(pxe);
   }
