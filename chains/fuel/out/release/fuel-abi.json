@@ -497,13 +497,43 @@
         {
           "name": "doc-comment",
           "arguments": [
-            "  Adds a hashlock and updates the timelock for an existing HTLC using a signed message.\r"
+            " Note: Wallets don’t support `personalSign`, so we emulate it by\r"
           ]
         },
         {
           "name": "doc-comment",
           "arguments": [
-            "  Verifies the provided signature and updates the HTLC if valid. Emits a `TokenLockAdded` event.\r"
+            " hashing the UTF-8 message via `sha256(toUtf8Bytes(message))`. In Sway,\r"
+          ]
+        },
+        {
+          "name": "doc-comment",
+          "arguments": [
+            " we mimic `toUtf8Bytes` by hex-encoding each byte into its ASCII form.\r"
+          ]
+        },
+        {
+          "name": "doc-comment",
+          "arguments": [
+            "\r"
+          ]
+        },
+        {
+          "name": "doc-comment",
+          "arguments": [
+            " This function adds a hashlock and updates the timelock for an existing\r"
+          ]
+        },
+        {
+          "name": "doc-comment",
+          "arguments": [
+            " HTLC using the signed message, verifies the signature, and, if valid,\r"
+          ]
+        },
+        {
+          "name": "doc-comment",
+          "arguments": [
+            " stores the updated contract and emits a `TokenLockAdded` event.\r"
           ]
         },
         {

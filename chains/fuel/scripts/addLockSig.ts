@@ -9,11 +9,8 @@ import {
   BigNumberCoder,
   B256Coder,
   bn,
-  arrayify,
   hashMessage,
   Signer,
-  toUtf8Bytes,
-  hexlify,
 } from 'fuels';
 import * as fs from 'fs';
 import * as path from 'path';
