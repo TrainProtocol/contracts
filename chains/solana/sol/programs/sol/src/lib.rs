@@ -508,7 +508,7 @@ pub struct LockReward<'info> {
 pub struct Redeem<'info> {
     #[account(mut)]
     user_signing: Signer<'info>,
-    ///CHECK: The reciever
+    ///CHECK: The sender
     #[account(mut)]
     sender: UncheckedAccount<'info>,
     ///CHECK: The reciever

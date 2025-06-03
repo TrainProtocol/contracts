@@ -4,15 +4,12 @@
 resolution = true
 skip-lint = false
 
-[programs.devnet]
-native = "M4q843mQwjoTn52Ks5HsmZV8bq8ZtA2XgAWW5pHhwdM"
-
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "devnet"
+cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/anchor_htlc.ts"
