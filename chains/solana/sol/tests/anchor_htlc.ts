@@ -1,20 +1,17 @@
 // import assert from "assert";
 import * as anchor from "@coral-xyz/anchor";
 import { randomBytes, createHash } from "crypto";
-import * as spl from '@solana/spl-token';
 import * as ed from '@noble/ed25519';
-import { AnchorHtlc } from '../target/types/anchor_htlc';
+import { NativeHtlc } from '../target/types/native_htlc';
 
 interface PDAParameters {
-    htlcTokenAccount: anchor.web3.PublicKey;
     htlc: anchor.web3.PublicKey;
-    htlcBump: number;
 }
 
 describe("HTLC", () => {
     const provider = anchor.AnchorProvider.env();
     anchor.setProvider(provider);
-    const program = anchor.workspace.AnchorHtlc as anchor.Program<AnchorHtlc>;
+    const program = anchor.workspace.NativeHtlc as anchor.Program<NativeHtlc>;
     const wallet = provider.wallet as anchor.Wallet;
 
     const SECRET = randomBytes(32);
@@ -23,133 +20,43 @@ describe("HTLC", () => {
     const REWARD = 0.001 * anchor.web3.LAMPORTS_PER_SOL;
     const DSTCHAIN = "STARKNET_SEPOLIA";
     const DSTADDRESS = "0x021b6a2ff227f1c71cc6536e7b9e8ecd0d5599b3a934279011e2f2b923d3a782";
-    const SRCASSET = "ETH";
+    const SRCASSET = "SOL";
     const DSTASSET = "ETH";
     const HOPCHAINS = [DSTCHAIN];
     const HOPASSETS = [DSTASSET];
     const HOPADDRESSES = [DSTADDRESS];
 
-
     let signature: Uint8Array;
-    let tokenMint: anchor.web3.PublicKey;
-    let walletTokenAccount: anchor.web3.PublicKey;
     let bob: anchor.web3.Keypair;
 
     const getPdaParams = async (
         Id: Buffer,
     ): Promise<PDAParameters> => {
-        let [htlc, htlcBump] = await anchor.web3.PublicKey.findProgramAddressSync(
+        let [htlc, _] = await anchor.web3.PublicKey.findProgramAddressSync(
             [Id],
-            program.programId
-        );
-        let [htlcTokenAccount, htlcTokenbump] = await anchor.web3.PublicKey.findProgramAddressSync(
-            [Buffer.from("htlc_token_account"), Id],
             program.programId
         );
 
         return {
-            htlcTokenAccount,
-            htlc,
-            htlcBump,
+            htlc
         };
     };
 
-    const createMint = async (): Promise<anchor.web3.PublicKey> => {
-        const tokenMint = new anchor.web3.Keypair();
-        const lamportsForMint = await provider.connection.getMinimumBalanceForRentExemption(spl.MintLayout.span);
-        let tx = new anchor.web3.Transaction();
 
-        // Allocate mint
-        tx.add(
-            anchor.web3.SystemProgram.createAccount({
-                programId: spl.TOKEN_PROGRAM_ID,
-                space: spl.MintLayout.span,
-                fromPubkey: provider.wallet.publicKey,
-                newAccountPubkey: tokenMint.publicKey,
-                lamports: lamportsForMint,
-            })
-        );
-        // Allocate wallet account
-        tx.add(
-            spl.createInitializeMintInstruction(tokenMint.publicKey, 6, provider.wallet.publicKey, provider.wallet.publicKey)
-        );
-        const signature = await provider.sendAndConfirm(tx, [tokenMint]);
-
-        // console.log(`[${tokenMint.publicKey}] Created new token mint at ${signature}`);
-        return tokenMint.publicKey;
-    };
-
-    const createUserAndAssociatedWallet = async (
-        mint?: anchor.web3.PublicKey
-    ): Promise<[anchor.web3.Keypair, anchor.web3.PublicKey | undefined]> => {
+    const createUser = async (): Promise<anchor.web3.Keypair> => {
         const user = new anchor.web3.Keypair();
-        let userAssociatedTokenAccount: anchor.web3.PublicKey | undefined = undefined;
-
-        // Fund user with SOL
+        // Fund user with some SOL
         let txFund = new anchor.web3.Transaction();
         txFund.add(
             anchor.web3.SystemProgram.transfer({
                 fromPubkey: provider.wallet.publicKey,
                 toPubkey: user.publicKey,
-                lamports: 0.1 * anchor.web3.LAMPORTS_PER_SOL,
+                lamports: 0.05 * anchor.web3.LAMPORTS_PER_SOL,
             })
         );
         const sigTxFund = await provider.sendAndConfirm(txFund);
-        // console.log(`[${user.publicKey.toBase58()}] Funded new account with 0.005 SOL: ${sigTxFund}`);
-
-        if (mint) {
-            // Create a token account for the user and mint some tokens
-            userAssociatedTokenAccount = await spl.getAssociatedTokenAddress(mint, user.publicKey);
-            const txFundTokenAccount = new anchor.web3.Transaction();
-            txFundTokenAccount.add(
-                spl.createAssociatedTokenAccountInstruction(
-                    provider.wallet.publicKey,
-                    userAssociatedTokenAccount,
-                    user.publicKey,
-                    mint
-                )
-            );
-            txFundTokenAccount.add(spl.createMintToInstruction(mint, userAssociatedTokenAccount, provider.wallet.publicKey, 13370000000));
-            const txFundTokenSig = await provider.sendAndConfirm(txFundTokenAccount);
-            // console.log(`[${userAssociatedTokenAccount.toBase58()}] New associated account for mint ${mint.toBase58()}: ${txFundTokenSig}`);
-        }
-        return [user, userAssociatedTokenAccount];
-    };
-
-    const mintTokensForUser = async (
-        user: anchor.web3.PublicKey,
-        mint: anchor.web3.PublicKey
-    ): Promise<anchor.web3.PublicKey> => {
-        let userAssociatedTokenAccount: anchor.web3.PublicKey | undefined = undefined;
-
-        // Create a token account for the wallet and mint some tokens
-        userAssociatedTokenAccount = await spl.getAssociatedTokenAddress(mint, user);
-        const txFundTokenAccount = new anchor.web3.Transaction();
-        txFundTokenAccount.add(
-            spl.createAssociatedTokenAccountInstruction(
-                provider.wallet.publicKey,
-                userAssociatedTokenAccount,
-                user,
-                mint
-            )
-        );
-        txFundTokenAccount.add(spl.createMintToInstruction(mint, userAssociatedTokenAccount, provider.wallet.publicKey, 1337000000));
-        const txFundTokenSig = await provider.sendAndConfirm(txFundTokenAccount);
-        // console.log(`[${userAssociatedTokenAccount.toBase58()}] New associated account for mint ${mint.toBase58()}: ${txFundTokenSig}`);
-
-        return userAssociatedTokenAccount;
-    };
-
-    const readAccount = async (
-        accountPublicKey: anchor.web3.PublicKey,
-        provider: anchor.AnchorProvider
-    ): Promise<[spl.RawAccount, string]> => {
-        const tokenInfo = await provider.connection.getAccountInfo(accountPublicKey);
-        const data = Buffer.from(tokenInfo.data);
-        const accountInfo = spl.AccountLayout.decode(data);
-        // Convert amount from buffer to bigint, then to anchor.BN
-        const amount = accountInfo.amount;
-        return [accountInfo, amount.toString()];
+        console.log(`[${user.publicKey.toBase58()}] Funded new account with 0.05 SOL: ${sigTxFund}`);
+        return user;
     };
 
     const createPHTLC = async (Id: Buffer, amount: anchor.BN, timelock: anchor.BN) => {
@@ -159,9 +66,6 @@ describe("HTLC", () => {
             .accountsPartial({
                 sender: wallet.publicKey,
                 htlc: pda.htlc,
-                htlcTokenAccount: pda.htlcTokenAccount,
-                tokenContract: tokenMint,
-                senderTokenAccount: walletTokenAccount
             })
             .signers([wallet.payer])
             .rpc();
@@ -171,23 +75,17 @@ describe("HTLC", () => {
         const htlc_pda = await getPdaParams(Id);
 
         const lockTx = await program.methods
-            .lock(Array.from(Id), hashlock, timelock, DSTCHAIN, DSTADDRESS, DSTASSET, SRCASSET, bob.publicKey, amount)
+            .lock(Array.from(Id), hashlock, timelock, amount, DSTCHAIN, DSTADDRESS, DSTASSET, SRCASSET, bob.publicKey)
             .accountsPartial({
                 sender: wallet.publicKey,
                 htlc: htlc_pda.htlc,
-                htlcTokenAccount: htlc_pda.htlcTokenAccount,
-                tokenContract: tokenMint,
-                senderTokenAccount: walletTokenAccount
             }).transaction();
 
         const rewardTx = await program.methods
-            .lockReward(Array.from(Id), rewardTimelock, new anchor.BN(REWARD), htlc_pda.htlcBump)
+            .lockReward(Array.from(Id), rewardTimelock, new anchor.BN(REWARD))
             .accountsPartial({
                 sender: wallet.publicKey,
                 htlc: htlc_pda.htlc,
-                htlcTokenAccount: htlc_pda.htlcTokenAccount,
-                tokenContract: tokenMint,
-                senderTokenAccount: walletTokenAccount
             }).transaction();
 
         let lock_with_rewardtx = new anchor.web3.Transaction();
@@ -238,30 +136,21 @@ describe("HTLC", () => {
         return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
-    beforeEach(async () => {
-        tokenMint = await createMint();
-        walletTokenAccount = await mintTokensForUser(wallet.publicKey, tokenMint);
-        let bobTokenAccount;
-        [bob, bobTokenAccount] = await createUserAndAssociatedWallet();
-        bobTokenAccount = await mintTokensForUser(bob.publicKey, tokenMint);
+    before(async () => {
+        bob = await createUser();
     });
 
     /// Can't redeem if the (Pre)HTLC with the given Id does not exist.
-    const T0_1 = async (Id: Buffer, bobTokenAccount) => {
+    const T0_1 = async (Id: Buffer) => {
         const secret = randomBytes(32);
         const pda = await getPdaParams(Id);
 
-        const redeemTx = await program.methods.redeem(Array.from(Id), Array.from(secret), pda.htlcBump).
+        const redeemTx = await program.methods.redeem(Array.from(Id), Array.from(secret)).
             accountsPartial({
                 userSigning: wallet.publicKey,
                 sender: wallet.publicKey,
                 srcReceiver: bob.publicKey,
-                tokenContract: tokenMint,
                 htlc: pda.htlc,
-                htlcTokenAccount: pda.htlcTokenAccount,
-                senderTokenAccount: walletTokenAccount,
-                srcReceiverTokenAccount: bobTokenAccount,
-                rewardTokenAccount: walletTokenAccount,
             })
             .signers([wallet.payer])
             .rpc().catch(e => console.error(e));
@@ -272,14 +161,11 @@ describe("HTLC", () => {
     const T0_2 = async (Id: Buffer) => {
         const pda = await getPdaParams(Id);
 
-        const refundTx = await program.methods.refund(Array.from(Id), pda.htlcBump).
+        const refundTx = await program.methods.refund(Array.from(Id)).
             accountsPartial({
                 userSigning: wallet.publicKey,
                 htlc: pda.htlc,
-                htlcTokenAccount: pda.htlcTokenAccount,
                 sender: wallet.publicKey,
-                tokenContract: tokenMint,
-                senderTokenAccount: walletTokenAccount,
             })
             .signers([wallet.payer])
             .rpc().catch(e => console.error(e));
@@ -343,21 +229,17 @@ describe("HTLC", () => {
     /// Tests with not existing HTLCs.
     /// There is no (Pre)HTLC with that IDs.
     it("T0", async () => {
-        const bobTokenAccount = await spl.getAssociatedTokenAddress(
-            tokenMint,
-            bob.publicKey
-        )
         const Id = randomBytes(32);
         const TIME = (new Date().getTime() + 970000) / 1000;
 
-        await T0_1(Id, bobTokenAccount)
+        await T0_1(Id)
         await T0_2(Id)
         await T0_3(Id, new anchor.BN(TIME))
         await T0_4(Id, new anchor.BN(TIME))
     });
 
     /// Can redeem with the correct secret.
-    const T1_1 = async (bobTokenAccount) => {
+    const T1_1 = async () => {
         const Id = randomBytes(32);
         const secret = randomBytes(32);
         const hashlock = createHash("sha256").update(secret).digest();
@@ -367,17 +249,12 @@ describe("HTLC", () => {
         const pda = await getPdaParams(Id);
         await createHTLC(Id, new anchor.BN(rtime), new anchor.BN(time), new anchor.BN(AMOUNT), Array.from(hashlock));
 
-        const redeemTx = await program.methods.redeem(Array.from(Id), Array.from(secret), pda.htlcBump).
+        const redeemTx = await program.methods.redeem(Array.from(Id), Array.from(secret)).
             accountsPartial({
                 userSigning: wallet.publicKey,
                 sender: wallet.publicKey,
                 srcReceiver: bob.publicKey,
-                tokenContract: tokenMint,
                 htlc: pda.htlc,
-                htlcTokenAccount: pda.htlcTokenAccount,
-                senderTokenAccount: walletTokenAccount,
-                srcReceiverTokenAccount: bobTokenAccount,
-                rewardTokenAccount: walletTokenAccount,
             })
             .signers([wallet.payer])
             .rpc();
@@ -385,7 +262,7 @@ describe("HTLC", () => {
     }
 
     /// Can't redeem with wrong secret.
-    const T1_2 = async (bobTokenAccount) => {
+    const T1_2 = async () => {
         const Id = randomBytes(32);
         const secret = randomBytes(32);
         const wrong_secret = randomBytes(32);
@@ -395,17 +272,12 @@ describe("HTLC", () => {
 
         const pda = await getPdaParams(Id);
         await createHTLC(Id, new anchor.BN(rtime), new anchor.BN(time), new anchor.BN(AMOUNT), Array.from(hashlock));
-        const redeemTx = await program.methods.redeem(Array.from(Id), Array.from(wrong_secret), pda.htlcBump).
+        const redeemTx = await program.methods.redeem(Array.from(Id), Array.from(wrong_secret)).
             accountsPartial({
                 userSigning: wallet.publicKey,
                 sender: wallet.publicKey,
                 srcReceiver: bob.publicKey,
-                tokenContract: tokenMint,
                 htlc: pda.htlc,
-                htlcTokenAccount: pda.htlcTokenAccount,
-                senderTokenAccount: walletTokenAccount,
-                srcReceiverTokenAccount: bobTokenAccount,
-                rewardTokenAccount: walletTokenAccount,
             })
             .signers([wallet.payer])
             .rpc().catch(e => console.error(e));
@@ -413,21 +285,13 @@ describe("HTLC", () => {
     }
     /// Tests for redeeming HTLC.
     it("T1", async () => {
-        let bobTokenAccount
-        [bob, bobTokenAccount] = await createUserAndAssociatedWallet();
-        bobTokenAccount = await mintTokensForUser(bob.publicKey, tokenMint);
 
-        await T1_1(bobTokenAccount)
-        await T1_2(bobTokenAccount)
+        await T1_1()
+        await T1_2()
     });
 
     /// Tests for already redeemed HTLCs.
     it("T2", async () => {
-
-        const bobTokenAccount = await spl.getAssociatedTokenAddress(
-            tokenMint,
-            bob.publicKey
-        )
 
         const Id = randomBytes(32);
         const secret = randomBytes(32);
@@ -438,22 +302,17 @@ describe("HTLC", () => {
         const pda = await getPdaParams(Id);
         await createHTLC(Id, new anchor.BN(rtime), new anchor.BN(time), new anchor.BN(AMOUNT), Array.from(hashlock));
 
-        const redeemTx = await program.methods.redeem(Array.from(Id), Array.from(secret), pda.htlcBump).
+        const redeemTx = await program.methods.redeem(Array.from(Id), Array.from(secret)).
             accountsPartial({
                 userSigning: wallet.publicKey,
                 sender: wallet.publicKey,
                 srcReceiver: bob.publicKey,
-                tokenContract: tokenMint,
                 htlc: pda.htlc,
-                htlcTokenAccount: pda.htlcTokenAccount,
-                senderTokenAccount: walletTokenAccount,
-                srcReceiverTokenAccount: bobTokenAccount,
-                rewardTokenAccount: walletTokenAccount,
             })
             .signers([wallet.payer])
             .rpc();
 
-        await T0_1(Id, bobTokenAccount)
+        await T0_1(Id)
         await T0_2(Id)
         await T0_3(Id, new anchor.BN(time))
         await T0_4(Id, new anchor.BN(time))
@@ -473,14 +332,11 @@ describe("HTLC", () => {
         const pda = await getPdaParams(Id);
         await createHTLC(Id, new anchor.BN(rtime), new anchor.BN(time), new anchor.BN(AMOUNT), Array.from(hashlock));
 
-        const refundTx = await program.methods.refund(Array.from(Id), pda.htlcBump).
+        const refundTx = await program.methods.refund(Array.from(Id)).
             accountsPartial({
                 userSigning: wallet.publicKey,
                 htlc: pda.htlc,
-                htlcTokenAccount: pda.htlcTokenAccount,
                 sender: wallet.publicKey,
-                tokenContract: tokenMint,
-                senderTokenAccount: walletTokenAccount,
             })
             .signers([wallet.payer])
             .rpc();
@@ -491,7 +347,6 @@ describe("HTLC", () => {
     const T3_2 = async () => {
         const Id = randomBytes(32);
         const secret = randomBytes(32);
-        const wrong_secret = randomBytes(32);
         const hashlock = createHash("sha256").update(secret).digest();
         const time = (new Date().getTime() + 1000000) / 1000;
         const rtime = (new Date().getTime() + 900000) / 1000;
@@ -499,14 +354,11 @@ describe("HTLC", () => {
         const pda = await getPdaParams(Id);
         await createHTLC(Id, new anchor.BN(rtime), new anchor.BN(time), new anchor.BN(AMOUNT), Array.from(hashlock));
         await wait(20000);
-        const refundTx = await program.methods.refund(Array.from(Id), pda.htlcBump).
+        const refundTx = await program.methods.refund(Array.from(Id)).
             accountsPartial({
                 userSigning: wallet.publicKey,
                 htlc: pda.htlc,
-                htlcTokenAccount: pda.htlcTokenAccount,
                 sender: wallet.publicKey,
-                tokenContract: tokenMint,
-                senderTokenAccount: walletTokenAccount,
             })
             .signers([wallet.payer])
             .rpc();
@@ -523,11 +375,6 @@ describe("HTLC", () => {
     /// Tests for already refunded HTLCs.
     // it("T4", async () => {
 
-    //   const bobTokenAccount = await spl.getAssociatedTokenAddress(
-    //     tokenMint,
-    //     bob.publicKey
-    //   )
-
     //   const Id = randomBytes(32);
     //   const secret = randomBytes(32);
     //   const hashlock = createHash("sha256").update(secret).digest();
@@ -538,20 +385,17 @@ describe("HTLC", () => {
     //   await createHTLC(Id, new anchor.BN(rtime), new anchor.BN(time), new anchor.BN(AMOUNT), Array.from(hashlock));
 
     //   await wait(1200000);
-    //   const refundTx = await program.methods.refund(Array.from(Id), pda.htlcBump).
+    //   const refundTx = await program.methods.refund(Array.from(Id)).
     //     accountsPartial({
     //       userSigning: wallet.publicKey,
     //       htlc: pda.htlc,
-    //       htlcTokenAccount: pda.htlcTokenAccount,
     //       sender: wallet.publicKey,
-    //       tokenContract: tokenMint,
-    //       senderTokenAccount: walletTokenAccount,
     //     })
     //     .signers([wallet.payer])
     //     .rpc();
 
 
-    //   await T0_1(Id, bobTokenAccount)
+    //   await T0_1(Id)
     //   await T0_2(Id)
     //   await T0_3(Id, new anchor.BN(time))
     //   await T0_4(Id, new anchor.BN(time))
@@ -620,20 +464,13 @@ describe("HTLC", () => {
     const T7_1 = async () => {
         const Id = randomBytes(32);
         const time = (new Date().getTime() + 1000000) / 1000;
-        const bobTokenAccount = await spl.getAssociatedTokenAddress(
-            tokenMint,
-            bob.publicKey
-        )
 
         const pda = await getPdaParams(Id);
         const commitTx = await program.methods
             .commit(Array.from(Id), HOPCHAINS, HOPASSETS, HOPADDRESSES, DSTCHAIN, DSTASSET, DSTADDRESS, SRCASSET, bob.publicKey, new anchor.BN(time), new anchor.BN(AMOUNT))
             .accountsPartial({
                 sender: bob.publicKey,
-                htlc: pda.htlc,
-                htlcTokenAccount: pda.htlcTokenAccount,
-                tokenContract: tokenMint,
-                senderTokenAccount: bobTokenAccount
+                htlc: pda.htlc
             })
             .signers([bob])
             .rpc().catch(e => console.error(e));
@@ -646,30 +483,20 @@ describe("HTLC", () => {
         const hashlock = createHash("sha256").update(secret).digest();
         const time = (new Date().getTime() + 1000000) / 1000;
         const rtime = (new Date().getTime() + 900000) / 1000;
-        const bobTokenAccount = await spl.getAssociatedTokenAddress(
-            tokenMint,
-            bob.publicKey
-        )
 
         const htlc_pda = await getPdaParams(Id);
 
         const lockTx = await program.methods
-            .lock(Array.from(Id), Array.from(hashlock), new anchor.BN(time), DSTCHAIN, DSTADDRESS, DSTASSET, SRCASSET, bob.publicKey, new anchor.BN(AMOUNT))
+            .lock(Array.from(Id), Array.from(hashlock), new anchor.BN(time), new anchor.BN(AMOUNT), DSTCHAIN, DSTADDRESS, DSTASSET, SRCASSET, bob.publicKey)
             .accountsPartial({
                 sender: bob.publicKey,
                 htlc: htlc_pda.htlc,
-                htlcTokenAccount: htlc_pda.htlcTokenAccount,
-                tokenContract: tokenMint,
-                senderTokenAccount: bobTokenAccount
             }).transaction();
         const rewardTx = await program.methods
-            .lockReward(Array.from(Id), new anchor.BN(rtime), new anchor.BN(REWARD), htlc_pda.htlcBump)
+            .lockReward(Array.from(Id), new anchor.BN(rtime), new anchor.BN(REWARD))
             .accountsPartial({
                 sender: bob.publicKey,
                 htlc: htlc_pda.htlc,
-                htlcTokenAccount: htlc_pda.htlcTokenAccount,
-                tokenContract: tokenMint,
-                senderTokenAccount: bobTokenAccount
             }).transaction();
 
         let lock_with_rewardtx = new anchor.web3.Transaction();
@@ -818,7 +645,7 @@ describe("HTLC", () => {
         await createPHTLC(Id, new anchor.BN(AMOUNT), new anchor.BN(time)).catch(e => console.error(e));
         // not future timelock
         const wrong_time = (new Date().getTime() - 1000000) / 1000;
-        const AddLockTx1 = await program.methods.addLock(Array.from(Id), Array.from(HASHLOCK), new anchor.BN(wrong_time)).
+        const AddLockTx = await program.methods.addLock(Array.from(Id), Array.from(HASHLOCK), new anchor.BN(wrong_time)).
             accountsPartial({
                 sender: wallet.publicKey,
                 htlc: pda.htlc,
@@ -1124,21 +951,15 @@ describe("HTLC", () => {
         const timelock = new anchor.BN(time);
         const secret = randomBytes(32);
         const hashlock = createHash("sha256").update(secret).digest();
+        const amount = 0.01 * anchor.web3.LAMPORTS_PER_SOL;
 
-        let bobTokenAccount
-        [bob, bobTokenAccount] = await createUserAndAssociatedWallet();
-        bobTokenAccount = await mintTokensForUser(bob.publicKey, tokenMint);
-        // Create a token account for Bob.
         const pda = await getPdaParams(Id);
 
         const commitTx = await program.methods
-            .commit(Array.from(Id), HOPCHAINS, HOPASSETS, HOPADDRESSES, DSTCHAIN, DSTASSET, DSTADDRESS, SRCASSET, bob.publicKey, timelock, new anchor.BN(AMOUNT))
+            .commit(Array.from(Id), HOPCHAINS, HOPASSETS, HOPADDRESSES, DSTCHAIN, DSTASSET, DSTADDRESS, SRCASSET, bob.publicKey, timelock, new anchor.BN(amount))
             .accountsPartial({
                 sender: bob.publicKey,
                 htlc: pda.htlc,
-                htlcTokenAccount: pda.htlcTokenAccount,
-                tokenContract: tokenMint,
-                senderTokenAccount: bobTokenAccount
             })
             .signers([bob])
             .rpc();
@@ -1176,7 +997,6 @@ describe("HTLC", () => {
         tx.sign(wallet.payer);
 
         await provider.connection.sendRawTransaction(tx.serialize()).catch(e => console.error(e));
-
     }
 
     /// Tests for add Lock Signature function.
