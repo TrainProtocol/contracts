@@ -78,32 +78,43 @@ This part of the repository contains a cairo1.0 smart contract for implementing 
 
 ## Tests
 
-There are 12 test types for the HTLC contract which are written in the tests folder.
-The 12 tests types are 
-    1. **Non-existent HTLCs**  
-    Can’t call any function if the HTLC ID doesn’t exist.
-    2. **Redeeming HTLC**  
-    Can redeem with correct secret; fails with a bad secret.
-    3. **Already redeemed**  
-    Can’t interact with an HTLC once it’s been redeemed.
-    4. **Refunding**  
-    Can refund after timelock expiry; fails before.
-    5. **Already refunded**  
-    No calls allowed once refunded.
-    6. **Duplicate creation**  
-    Can’t create an HTLC with an ID that’s already used.
-    7. **Non-positive amount**  
-    Amount must be > 0.
-    8. **Insufficient balance**  
-    Sender needs enough tokens in their account.
-    9. **Insufficient allowance**  
-    Contract needs allowance for the token amount.
-    10. **Invalid timelock**  
-        Timelock must be in the future.
-    11. **addLock**  
-        Only the messenger can set the hashlock; must be new and within time.
-    12. **addLock with signature**  
-        Validates off-chain signature; rejects bad data or wrong signer.
+There are 12 test types for the HTLC contract, written in the **tests** folder. The 12 test types are:
+
+1. **Non-existent HTLCs**  
+   Can’t call any function if the HTLC ID doesn’t exist.
+
+2. **Redeeming HTLC**  
+   Can redeem with a correct secret; fails with an incorrect secret.
+
+3. **Already Redeemed**  
+   Can’t interact with an HTLC once it’s been redeemed.
+
+4. **Refunding**  
+   Can refund after timelock expiry; fails before expiry.
+
+5. **Already Refunded**  
+   No calls allowed once refunded.
+
+6. **Duplicate Creation**  
+   Can’t create an HTLC with an ID that’s already used.
+
+7. **Non-positive Amount**  
+   Amount must be > 0.
+
+8. **Insufficient Balance**  
+   Sender needs enough tokens in their account.
+
+9. **Insufficient Allowance**  
+   Contract needs allowance for the token amount.
+
+10. **Invalid Timelock**  
+    Timelock must be set to a future timestamp.
+
+11. **addLock**  
+    Only the messenger can set the hashlock; must be new and within time.
+
+12. **addLock with Signature**  
+    Validates off-chain signature; rejects bad data or wrong signer.
 
 Usage
 Once deployed, users can interact with the contracts using Starknet wallets or through contract function calls programmatically.
