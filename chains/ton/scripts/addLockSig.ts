@@ -1,5 +1,5 @@
 require('dotenv').config();
-import { beginCell, Cell } from '@ton/ton';
+import { beginCell, Cell, Slice } from '@ton/ton';
 import { TonClient4, WalletContractV4, Address } from '@ton/ton';
 import { AddLockSig, Train } from '../build/train/tact_Train';
 import { getHttpV4Endpoint } from '@orbs-network/ton-access';
@@ -21,16 +21,23 @@ async function run() {
     const walletSender = walletContract.sender(key2.secretKey);
     const seqno = await walletContract.getSeqno();
 
-    const contractAddress = Address.parse(process.env.JETTONCONTRACT!);
+    const contractAddress = Address.parse(process.env.CONTRACT!);
     const newContract = Train.fromAddress(contractAddress);
     const contractProvider = client.open(newContract);
     const amount = toNano('0.1');
 
     const Id = BigInt(process.env.id!);
     const hashlock = BigInt(process.env.hashlock!);
-    const timelock = BigInt(Math.floor(Date.now() / 1000) + 1000);
+    const timelock = BigInt(Math.floor(Date.now() / 1000) + 930);
 
     const dataCell: Cell = beginCell().storeInt(Id, 257).storeInt(hashlock, 257).storeInt(timelock, 257).endCell();
+
+    const dataSliceChanged: Cell = beginCell()
+        .storeInt(Id, 257)
+        .storeInt(hashlock, 257)
+        .storeInt(timelock + BigInt(6789), 257)
+        .endCell();
+    const wrongData = dataSliceChanged.beginParse();
 
     const dataSlice = dataCell.beginParse();
 
@@ -47,7 +54,7 @@ async function run() {
     };
 
     console.log('Sending AddLockSig message...');
-    await contractProvider.send(walletSender, { value: amount, bounce: false }, lockCommitmentSigMessage);
+    await contractProvider.send(walletSender, { value: amount, bounce: true }, lockCommitmentSigMessage);
 
     let currentSeqno = seqno;
     while (currentSeqno == seqno) {

@@ -22,20 +22,20 @@ export async function run() {
     const contractProvider = client.open(newContract);
 
     const hashlock = BigInt(process.env.hashlock!);
-    const timelock = BigInt(Math.floor(Date.now() / 1000) + 920);
-    const srcReceiver = Address.parse('0QCfCUwHtdIzOvupHmIQO-z40lrb2sUsYWRrPgPhCiiw64m1');
+    const timelock = BigInt(Math.floor(Date.now() / 1000) + 1830);
+    const srcReceiver = Address.parse('0QD_T3AacDxDFLLPZ9TmOvq9wHKh7dvm8MHoEh8GfHIWkgKJ');
     const srcAsset = 'TON';
     const dstChain = 'STARKNET_SEPOLIA';
     const dstAddress = '0x0430a74277723D1EBba7119339F0F8276ca946c1B2c73DE7636Fd9EBA31e1c1f';
     const dstAsset = 'ETH';
-    const Id = BigInt(process.env.id2!);
-    const amount = toNano('0.5');
+    const Id = BigInt(process.env.id!);
+    const amount = toNano('0.15');
     const rewardAmount = toNano('0.1');
-    const rewardTimelock = BigInt(Math.floor(Date.now() / 1000) + 901);
+    const rewardTimelock = BigInt(Math.floor(Date.now() / 1000) + 30);
 
     const lockMessage: Lock = {
         $$type: 'Lock',
-        Id: Id,
+        id: Id,
         hashlock: hashlock,
         timelock: timelock,
         srcReceiver: srcReceiver,
@@ -49,7 +49,7 @@ export async function run() {
     };
 
     console.log('Sending Lock message...');
-    await contractProvider.send(walletSender, { value: toNano('1'), bounce: true }, lockMessage);
+    await contractProvider.send(walletSender, { value: toNano('0.5'), bounce: true }, lockMessage);
 
     let currentSeqno = seqno;
     while (currentSeqno == seqno) {
