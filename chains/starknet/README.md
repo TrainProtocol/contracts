@@ -80,20 +80,30 @@ This part of the repository contains a cairo1.0 smart contract for implementing 
 
 There are 12 test types for the HTLC contract which are written in the tests folder.
 The 12 tests types are 
-    ```bash
-    0. Tests with not existing HTLCs (Can't call any of the functions if the HTLC with that Id does not exist).
-    1. Tests for redeeming HTLC (Can redeem with correct secret, and can't redeem with wrong secret).
-    2. Tests for already redeemed HTLCs (Can't call any of the functions if the HTLC with that Id is already redeemed).
-    3. Tests for refunding HTLC (Can refund if the timelock passed, and can't refund if timelock did not pass yet).
-    4. Tests for already refunded HTLCs (Can't call any of the functions if the HTLC with that Id is already refunded).
-    5. Tests for already created (Pre)HTLCs (Can't create Pre(HTLC)s with already existing Id).
-    6. Tests for not positive amount (Pre)HTLCs (Can't create Pre(HTLC) with not positive amount).
-    7. Tests for (Pre)HTLCs without enough balance (Can't create Pre(HTLC) without enough balance).
-    8. Tests for (Pre)HTLCs without enough allowance (Can't create Pre(HTLC) without enough allowance).
-    9. Tests for (Pre)HTLCs with wrong timelocks (Can't create Pre(HTLC) with wrong timelock).
-    10. Tests for HTLCs with wrong reward timelocks (Can't create HTLC with not future reward timelock, or with bigger reward timelock).
-    11. Tests for add Lock function (Sender can add lock to PreHTLC, other users can't add lock to PreHTLC, can't add lock if hashlock is already set, and can't add lock with wrong timelock).
-    12. Tests for add Lock signature function (Can add lock with correct signature, can't add lock signature if hashlock is already set, can't add lock with wrong data, and can't add lock signed by other user).
+    1. **Non-existent HTLCs**  
+    Can’t call any function if the HTLC ID doesn’t exist.
+    2. **Redeeming HTLC**  
+    Can redeem with correct secret; fails with a bad secret.
+    3. **Already redeemed**  
+    Can’t interact with an HTLC once it’s been redeemed.
+    4. **Refunding**  
+    Can refund after timelock expiry; fails before.
+    5. **Already refunded**  
+    No calls allowed once refunded.
+    6. **Duplicate creation**  
+    Can’t create an HTLC with an ID that’s already used.
+    7. **Non-positive amount**  
+    Amount must be > 0.
+    8. **Insufficient balance**  
+    Sender needs enough tokens in their account.
+    9. **Insufficient allowance**  
+    Contract needs allowance for the token amount.
+    10. **Invalid timelock**  
+        Timelock must be in the future.
+    11. **addLock**  
+        Only the messenger can set the hashlock; must be new and within time.
+    12. **addLock with signature**  
+        Validates off-chain signature; rejects bad data or wrong signer.
 
 Usage
 Once deployed, users can interact with the contracts using Starknet wallets or through contract function calls programmatically.
