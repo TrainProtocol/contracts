@@ -13,11 +13,9 @@ struct HTLC {
     sender: Address;
     senderPubKey: Int;
     srcReceiver: Address;
-    secret: Int;
     hashlock: Int;
     amount: Int as coins;
     timelock: Int;
-    claimed: Int;
 }
 // Reward object
 struct Reward {
@@ -126,11 +124,9 @@ contract Train {
                 sender: ctx.sender,
                 senderPubKey: msg.senderPubKey,
                 srcReceiver: msg.srcReceiver,
-                secret: 1,
                 hashlock: 1,
                 amount: msg.amount,
                 timelock: msg.timelock,
-                claimed: 1,
             },
         );
         emit(TokenCommitted {
@@ -172,11 +168,9 @@ contract Train {
                 sender: htlc.sender,
                 senderPubKey: htlc.senderPubKey,
                 srcReceiver: htlc.srcReceiver,
-                secret: 1,
                 hashlock: msg.hashlock,
                 amount: htlc.amount,
                 timelock: msg.timelock,
-                claimed: 1,
             },
         );
         message(MessageParameters {
@@ -205,11 +199,9 @@ contract Train {
                 sender: htlc.sender,
                 senderPubKey: htlc.senderPubKey,
                 srcReceiver: htlc.srcReceiver,
-                secret: 1,
                 hashlock,
                 amount: htlc.amount,
                 timelock,
-                claimed: 1,
             },
         );
         message(MessageParameters {
@@ -234,11 +226,9 @@ contract Train {
                 sender: ctx.sender,
                 senderPubKey: 1, // as after locking it cant be used for AddLockSig
                 srcReceiver: msg.srcReceiver,
-                secret: 1,
                 hashlock: msg.hashlock,
                 amount: msg.amount,
                 timelock: msg.timelock,
-                claimed: 1,
             },
         );
         if (msg.reward != 0) {
