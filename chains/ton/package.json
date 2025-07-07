@@ -28,6 +28,7 @@
     },
     "dependencies": {
         "@orbs-network/ton-access": "^2.3.3",
+        "@ton-community/assets-sdk": "^0.0.5",
         "base64url": "^3.0.1",
         "bip32": "^4.0.0",
         "bip39": "^3.1.0",

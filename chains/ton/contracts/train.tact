@@ -149,7 +149,7 @@ contract Train {
             to: ctx.sender,
             value: 0,
             bounce: false,
-            mode: SendRemainingBalance | SendIgnoreErrors,
+            mode: SendRemainingBalance,
             body: "TRAINCommitExcess".asComment(),
         });
     }
@@ -177,7 +177,7 @@ contract Train {
             to: sender(),
             value: 0,
             bounce: false,
-            mode: SendRemainingBalance | SendIgnoreErrors,
+            mode: SendRemainingBalance,
             body: "TRAINAddLockExcess".asComment(),
         });
     }
@@ -208,7 +208,7 @@ contract Train {
             to: sender(),
             value: 0,
             bounce: false,
-            mode: SendRemainingBalance | SendIgnoreErrors,
+            mode: SendRemainingBalance,
             body: "TRAINAddLockSigExcess".asComment(),
         });
     }
@@ -253,7 +253,7 @@ contract Train {
             to: ctx.sender,
             value: 0,
             bounce: false,
-            mode: SendRemainingBalance | SendIgnoreErrors,
+            mode: SendRemainingBalance,
             body: "TRAINLockExcess".asComment(),
         });
     }
@@ -267,12 +267,12 @@ contract Train {
         emit(TokenRedeemed { id: msg.id, redeemAddress: sender(), secret: msg.secret, hashlock: htlc.hashlock }.toCell());
         if (!self.rewards.exists(msg.id)) {
             nativeReserve(myBalance() + self.storageReserve - context().value - htlc.amount, ReserveExact | ReserveBounceIfActionFail);
-            message(MessageParameters { to: htlc.srcReceiver, bounce: false, value: htlc.amount, mode: SendPayFwdFeesSeparately | SendIgnoreErrors, body: "TRAINRedeem".asComment() });
+            message(MessageParameters { to: htlc.srcReceiver, bounce: false, value: htlc.amount, mode: SendPayFwdFeesSeparately, body: "TRAINRedeem".asComment() });
             message(MessageParameters {
                 to: sender(),
                 value: 0,
                 bounce: false,
-                mode: SendRemainingBalance | SendIgnoreErrors,
+                mode: SendRemainingBalance,
                 body: "TRAINRedeemExcess".asComment(),
             });
         } else {
@@ -280,19 +280,19 @@ contract Train {
             reward = self.rewards.get(msg.id)!!;
             nativeReserve(myBalance() + self.storageReserve - context().value - htlc.amount - reward.amount, ReserveExact | ReserveBounceIfActionFail);
             if (reward.timelock > now()) {
-                message(MessageParameters { to: htlc.srcReceiver, bounce: false, value: htlc.amount, mode: SendPayFwdFeesSeparately | SendIgnoreErrors, body: "TRAINRedeem".asComment() });
+                message(MessageParameters { to: htlc.srcReceiver, bounce: false, value: htlc.amount, mode: SendPayFwdFeesSeparately, body: "TRAINRedeem".asComment() });
                 message(MessageParameters {
                     to: htlc.sender,
                     value: reward.amount,
                     bounce: false,
-                    mode: SendIgnoreErrors | SendPayFwdFeesSeparately,
+                    mode: SendPayFwdFeesSeparately,
                     body: "TRAINRewardReturn".asComment(),
                 });
                 message(MessageParameters {
                     to: sender(),
                     value: 0,
                     bounce: false,
-                    mode: SendRemainingBalance | SendIgnoreErrors,
+                    mode: SendRemainingBalance,
                     body: "TRAINRedeemExcess".asComment(),
                 });
             } else {
@@ -301,16 +301,16 @@ contract Train {
                         to: htlc.srcReceiver,
                         bounce: false,
                         value: htlc.amount + reward.amount,
-                        mode: SendRemainingBalance | SendIgnoreErrors,
+                        mode: SendRemainingBalance,
                         body: "TRAINRedeemAndReward".asComment(),
                     });
                 } else {
-                    message(MessageParameters { to: htlc.srcReceiver, bounce: false, value: htlc.amount, mode: SendPayFwdFeesSeparately | SendIgnoreErrors, body: "TRAINRedeem".asComment() });
+                    message(MessageParameters { to: htlc.srcReceiver, bounce: false, value: htlc.amount, mode: SendPayFwdFeesSeparately, body: "TRAINRedeem".asComment() });
                     message(MessageParameters {
                         to: sender(),
                         value: reward.amount,
                         bounce: false,
-                        mode: SendRemainingBalance | SendIgnoreErrors,
+                        mode: SendRemainingBalance,
                         body: "TRAINRedeemReward".asComment(),
                     });
                 }
@@ -330,17 +330,17 @@ contract Train {
             let reward: Reward = Reward { amount: 0, timelock: 0 };
             reward = self.rewards.get(msg.id)!!;
             nativeReserve(myBalance() + self.storageReserve - ctx.value - htlc.amount - reward.amount, ReserveExact | ReserveBounceIfActionFail);
-            message(MessageParameters { to: htlc.sender, bounce: false, value: htlc.amount + reward.amount, mode: SendPayFwdFeesSeparately | SendIgnoreErrors, body: "TRAINRefund".asComment() });
+            message(MessageParameters { to: htlc.sender, bounce: false, value: htlc.amount + reward.amount, mode: SendPayFwdFeesSeparately, body: "TRAINRefund".asComment() });
             let _ = self.rewards.del(msg.id);
         } else {
             nativeReserve(myBalance() + self.storageReserve - ctx.value - htlc.amount, ReserveExact | ReserveBounceIfActionFail);
-            message(MessageParameters { to: htlc.sender, bounce: false, value: htlc.amount, mode: SendPayFwdFeesSeparately | SendIgnoreErrors, body: "TRAINRefund".asComment() });
+            message(MessageParameters { to: htlc.sender, bounce: false, value: htlc.amount, mode: SendPayFwdFeesSeparately, body: "TRAINRefund".asComment() });
         }
         message(MessageParameters {
             to: ctx.sender,
             value: 0,
             bounce: false,
-            mode: SendRemainingBalance | SendIgnoreErrors,
+            mode: SendRemainingBalance,
             body: "TRAINRefundExcess".asComment(),
         });
         let _ = self.contracts.del(msg.id);
@@ -352,7 +352,7 @@ contract Train {
             to: sender(),
             value: 0,
             bounce: false,
-            mode: SendRemainingBalance | SendIgnoreErrors,
+            mode: SendRemainingBalance,
             body: "TRAINEmptyMessageNotAllowed".asComment(),
         });
     }
@@ -363,7 +363,7 @@ contract Train {
             to: sender(),
             value: 0,
             bounce: false,
-            mode: SendRemainingBalance | SendIgnoreErrors,
+            mode: SendRemainingBalance,
             body: "TRAINTextMessageNotAllowed".asComment(),
         });
     }
@@ -374,7 +374,7 @@ contract Train {
             to: sender(),
             value: 0,
             bounce: false,
-            mode: SendRemainingBalance | SendIgnoreErrors,
+            mode: SendRemainingBalance,
             body: "TRAINSliceMessageNotAllowed".asComment(),
         });
     }
