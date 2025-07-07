@@ -1,18 +1,11 @@
-import {
-    Blockchain,
-    prettyLogTransaction,
-    prettyLogTransactions,
-    printTransactionFees,
-    SandboxContract,
-    TreasuryContract,
-} from '@ton/sandbox';
-import { Dictionary, toNano } from '@ton/core';
+import { Blockchain, SandboxContract, toSandboxContract, TreasuryContract } from '@ton/sandbox';
+import { Address, Dictionary, toNano } from '@ton/core';
 import { Train } from '../build/train/tact_Train';
 import '@ton/test-utils';
 import { commit, createHashlockSecretPair, getTotalFees, lock } from '../utils/utils';
 import { randomInt } from 'crypto';
-import { time } from 'console';
-import { BALANCE } from '@tact-lang/compiler';
+import { keyPairFromSeed, getSecureRandomBytes } from '@ton/crypto';
+import { WalletContractV4 } from '@ton/ton';
 
 describe('TRAIN Protocol Native Asset Tests', () => {
     let blockchain: Blockchain;
@@ -21,6 +14,7 @@ describe('TRAIN Protocol Native Asset Tests', () => {
     let userWallet: SandboxContract<TreasuryContract>;
     let solverWallet: SandboxContract<TreasuryContract>;
     let trainContract: SandboxContract<Train>;
+    let userWithPubKey: WalletContractV4;
 
     const dstChain = 'ETH';
     const dstAsset = 'ETH';
@@ -34,6 +28,13 @@ describe('TRAIN Protocol Native Asset Tests', () => {
         userWallet = await blockchain.treasury('user');
         solverWallet = await blockchain.treasury('solver');
         trainContract = blockchain.openContract(await Train.fromInit());
+
+        const seed = await getSecureRandomBytes(32);
+        const kp = keyPairFromSeed(seed);
+        userWithPubKey = WalletContractV4.create({
+            workchain: 0,
+            publicKey: kp.publicKey,
+        });
 
         const trainDeployResult = await trainContract.send(deployerWallet.getSender(), { value: toNano('1') }, null);
         expect(trainDeployResult.transactions).toHaveTransaction({
@@ -1096,14 +1097,14 @@ describe('TRAIN Protocol Native Asset Tests', () => {
         });
     });
 
-    it('Redeem successful reward.timelock < now()', async () => {
+    it('Redeem successful reward.timelock < now(), sender()=srcReceiver', async () => {
         const contractId = BigInt(Date.now());
         const amount = toNano('0.15');
         const rewardAmount = toNano('0.1');
         const { secret, hashlock }: { secret: bigint; hashlock: bigint } = createHashlockSecretPair();
         const timelock = BigInt(blockchain.now!! + 3600);
         const rewardTimelock = BigInt(blockchain.now!! + 1200);
-       await lock({
+        await lock({
             trainContract,
             senderWallet: solverWallet,
             amount,
@@ -1116,7 +1117,6 @@ describe('TRAIN Protocol Native Asset Tests', () => {
         });
         expect(await trainContract.getGetHtlcDetails(contractId)).toBeTruthy();
         blockchain.now = Number(rewardTimelock + 100n);
-        const userBalanceBefore = await userWallet.getBalance();
         const redeemTx = await trainContract.send(
             userWallet.getSender(),
             { value: toNano('1'), bounce: true },
@@ -1126,7 +1126,6 @@ describe('TRAIN Protocol Native Asset Tests', () => {
                 secret: secret,
             },
         );
-        printTransactionFees(redeemTx.transactions);
         expect(redeemTx.externals.some((x) => x.body.beginParse().loadUint(32) === Train.opcodes.TokenRedeemed)).toBe(
             true,
         );
@@ -1143,7 +1142,73 @@ describe('TRAIN Protocol Native Asset Tests', () => {
             success: true,
             op: 0x0,
         });
-        expect((await userWallet.getBalance()) - userBalanceBefore).toBeGreaterThan(amount + rewardAmount);
+
+        const msg = redeemTx.transactions[1].outMessages.get(2);
+        if (msg?.info.type === 'internal') {
+            expect(msg.info.src.toString()).toBe(trainContract.address.toString());
+            expect(msg.info.dest.toString()).toBe(userWallet.address.toString());
+            expect(msg.info.value.coins).toBeGreaterThan(rewardAmount + amount);
+        }
+    });
+
+    it('Redeem successful reward.timelock < now()', async () => {
+        const contractId = BigInt(Date.now());
+        const amount = toNano('0.15');
+        const rewardAmount = toNano('0.1');
+        const { secret, hashlock }: { secret: bigint; hashlock: bigint } = createHashlockSecretPair();
+        const timelock = BigInt(blockchain.now!! + 3600);
+        const rewardTimelock = BigInt(blockchain.now!! + 1200);
+        await lock({
+            trainContract,
+            senderWallet: solverWallet,
+            amount,
+            rewardAmount,
+            contractId,
+            hashlock,
+            timelock,
+            rewardTimelock,
+            srcReceiver: userWallet,
+        });
+        expect(await trainContract.getGetHtlcDetails(contractId)).toBeTruthy();
+        blockchain.now = Number(rewardTimelock + 100n);
+        const redeemTx = await trainContract.send(
+            solverWallet.getSender(),
+            { value: toNano('1'), bounce: true },
+            {
+                $$type: 'Redeem',
+                id: contractId,
+                secret: secret,
+            },
+        );
+        expect(redeemTx.externals.some((x) => x.body.beginParse().loadUint(32) === Train.opcodes.TokenRedeemed)).toBe(
+            true,
+        );
+        expect(redeemTx.transactions).toHaveTransaction({
+            from: solverWallet.address,
+            to: trainContract.address,
+            success: true,
+            op: Train.opcodes.Redeem,
+            value: toNano('1'),
+        });
+        expect(redeemTx.transactions).toHaveTransaction({
+            from: trainContract.address,
+            to: userWallet.address,
+            success: true,
+            op: 0x0,
+            value: amount,
+        });
+        expect(redeemTx.transactions).toHaveTransaction({
+            from: trainContract.address,
+            to: solverWallet.address,
+            success: true,
+            op: 0x0,
+        });
+        const msg = redeemTx.transactions[1].outMessages.get(2);
+        if (msg?.info.type === 'internal') {
+            expect(msg.info.src.toString()).toBe(trainContract.address.toString());
+            expect(msg.info.dest.toString()).toBe(solverWallet.address.toString());
+            expect(msg.info.value.coins).toBeGreaterThan(rewardAmount);
+        }
     });
 
     it('Redeem Contract Does Not Exist', async () => {
