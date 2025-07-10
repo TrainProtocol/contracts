@@ -1,11 +1,10 @@
-import { Blockchain, SandboxContract, toSandboxContract, TreasuryContract } from '@ton/sandbox';
-import { Address, Dictionary, toNano } from '@ton/core';
+import { Blockchain, printTransactionFees, SandboxContract, TreasuryContract } from '@ton/sandbox';
+import { beginCell, Cell, Dictionary, toNano } from '@ton/core';
 import { Train } from '../build/train/tact_Train';
 import '@ton/test-utils';
 import { commit, createHashlockSecretPair, getTotalFees, lock } from '../utils/utils';
 import { randomInt } from 'crypto';
-import { keyPairFromSeed, getSecureRandomBytes } from '@ton/crypto';
-import { WalletContractV4 } from '@ton/ton';
+import { keyPairFromSeed, getSecureRandomBytes, sign } from '@ton/crypto';
 
 describe('TRAIN Protocol Native Asset Tests', () => {
     let blockchain: Blockchain;
@@ -14,12 +13,14 @@ describe('TRAIN Protocol Native Asset Tests', () => {
     let userWallet: SandboxContract<TreasuryContract>;
     let solverWallet: SandboxContract<TreasuryContract>;
     let trainContract: SandboxContract<Train>;
-    let userWithPubKey: WalletContractV4;
 
     const dstChain = 'ETH';
     const dstAsset = 'ETH';
     const dstAddress = '0xabc';
     const srcAsset = 'TON';
+    let userSeed;
+    let kp: { publicKey: any; secretKey: any };
+    let senderPubKey: bigint;
 
     beforeAll(async () => {
         blockchain = await Blockchain.create();
@@ -28,13 +29,9 @@ describe('TRAIN Protocol Native Asset Tests', () => {
         userWallet = await blockchain.treasury('user');
         solverWallet = await blockchain.treasury('solver');
         trainContract = blockchain.openContract(await Train.fromInit());
-
-        const seed = await getSecureRandomBytes(32);
-        const kp = keyPairFromSeed(seed);
-        userWithPubKey = WalletContractV4.create({
-            workchain: 0,
-            publicKey: kp.publicKey,
-        });
+        userSeed = await getSecureRandomBytes(32);
+        kp = keyPairFromSeed(userSeed);
+        senderPubKey = BigInt('0x' + kp.publicKey.toString('hex'));
 
         const trainDeployResult = await trainContract.send(deployerWallet.getSender(), { value: toNano('1') }, null);
         expect(trainDeployResult.transactions).toHaveTransaction({
@@ -52,9 +49,8 @@ describe('TRAIN Protocol Native Asset Tests', () => {
 
     it('commits and stores contract', async () => {
         const contractId = BigInt(Date.now());
-        const senderPubKey = 12345n;
         const amount = toNano('0.15');
-        const timelock = BigInt(blockchain.now!! + 3600);
+        const timelock = BigInt(blockchain.now! + 3600);
         const contractsBefore = await trainContract.getGetContractsLength();
 
         const commitTx = await trainContract.send(
@@ -106,9 +102,8 @@ describe('TRAIN Protocol Native Asset Tests', () => {
 
     it('fails to commit with 0 amount', async () => {
         const contractId = BigInt(Date.now());
-        const senderPubKey = 12345678n;
         const amount = toNano('0');
-        const timelock = BigInt(blockchain.now!! + 3600);
+        const timelock = BigInt(blockchain.now! + 3600);
         const contractsBefore = await trainContract.getGetContractsLength();
 
         const commitTx = await trainContract.send(
@@ -143,7 +138,6 @@ describe('TRAIN Protocol Native Asset Tests', () => {
 
     it('fails to commit with invalid timelock', async () => {
         const contractId = BigInt(Date.now());
-        const senderPubKey = 12345678n;
         const amount = toNano('1');
         const timelock = BigInt(Math.floor(Date.now() / 1000) + 800);
 
@@ -180,9 +174,8 @@ describe('TRAIN Protocol Native Asset Tests', () => {
 
     it('fails to commit with existing id', async () => {
         const contractId = BigInt(Date.now());
-        const senderPubKey = 12345n;
         const amount = toNano('1');
-        const timelock = BigInt(blockchain.now!! + 3600);
+        const timelock = BigInt(blockchain.now! + 3600);
 
         await trainContract.send(
             userWallet.getSender(),
@@ -235,9 +228,8 @@ describe('TRAIN Protocol Native Asset Tests', () => {
 
     it('successfully adds lock', async () => {
         const contractId = BigInt(Date.now());
-        const senderPubKey = 12345678n;
         const amount = toNano('1');
-        const timelock = BigInt(blockchain.now!! + 3600);
+        const timelock = BigInt(blockchain.now! + 3600);
         const hashlock = BigInt(randomInt(256));
 
         await trainContract.send(
@@ -297,9 +289,8 @@ describe('TRAIN Protocol Native Asset Tests', () => {
 
     it('AddLock fails Contract Does Not Exist', async () => {
         const contractId = BigInt(Date.now());
-        const senderPubKey = 12345n;
         const amount = toNano('1');
-        const timelock = BigInt(blockchain.now!! + 3600);
+        const timelock = BigInt(blockchain.now! + 3600);
         const hashlock = BigInt(randomInt(256));
         const carlo = await commit({
             trainContract,
@@ -334,9 +325,8 @@ describe('TRAIN Protocol Native Asset Tests', () => {
 
     it('AddLock fails No Allowance', async () => {
         const contractId = BigInt(Date.now());
-        const senderPubKey = 12345n;
         const amount = toNano('1');
-        const timelock = BigInt(blockchain.now!! + 3600);
+        const timelock = BigInt(blockchain.now! + 3600);
         const hashlock = BigInt(randomInt(256));
         await commit({
             trainContract,
@@ -374,9 +364,8 @@ describe('TRAIN Protocol Native Asset Tests', () => {
 
     it('AddLock fails Hashlock Already Set', async () => {
         const contractId = BigInt(Date.now());
-        const senderPubKey = 12345n;
         const amount = toNano('1');
-        const timelock = BigInt(blockchain.now!! + 3600);
+        const timelock = BigInt(blockchain.now! + 3600);
         const hashlock = BigInt(randomInt(256));
         await commit({
             trainContract,
@@ -409,7 +398,6 @@ describe('TRAIN Protocol Native Asset Tests', () => {
                 timelock: timelock + 10n,
             },
         );
-
         expect(addLockTx.transactions).toHaveTransaction({
             from: userWallet.address,
             to: trainContract.address,
@@ -425,7 +413,6 @@ describe('TRAIN Protocol Native Asset Tests', () => {
 
     it('AddLock fails Not Future Timelock', async () => {
         const contractId = BigInt(Date.now());
-        const senderPubKey = 12345n;
         const amount = toNano('1');
         const timelock = BigInt(Math.floor(Date.now() / 1000) + 901);
         const hashlock = BigInt(randomInt(256));
@@ -464,7 +451,7 @@ describe('TRAIN Protocol Native Asset Tests', () => {
     it('Lock successful', async () => {
         const contractId = BigInt(Date.now());
         const hashlock = BigInt(randomInt(257));
-        const timelock = BigInt(blockchain.now!! + 3600);
+        const timelock = BigInt(blockchain.now! + 3600);
         const amount = toNano('0.15');
         const reward = toNano('0.05');
         const rewardTimelock = BigInt(Math.floor(Date.now() / 1000) + 2000);
@@ -523,7 +510,7 @@ describe('TRAIN Protocol Native Asset Tests', () => {
     it("Lock successful with 0 reward isn't fixed in rewards mapping", async () => {
         const contractId = BigInt(Date.now());
         const hashlock = BigInt(randomInt(257));
-        const timelock = BigInt(blockchain.now!! + 3600);
+        const timelock = BigInt(blockchain.now! + 3600);
         const amount = toNano('0.15');
         const reward = toNano('0');
         const rewardTimelock = BigInt(Math.floor(Date.now() / 1000) + 2000);
@@ -580,7 +567,7 @@ describe('TRAIN Protocol Native Asset Tests', () => {
     it('Lock fail Funds Not Sent', async () => {
         const contractId = BigInt(Date.now());
         const hashlock = BigInt(randomInt(257));
-        const timelock = BigInt(blockchain.now!! + 3600);
+        const timelock = BigInt(blockchain.now! + 3600);
         const amount = toNano('0');
         const reward = toNano('0.05');
         const rewardTimelock = BigInt(Math.floor(Date.now() / 1000) + 2000);
@@ -625,7 +612,7 @@ describe('TRAIN Protocol Native Asset Tests', () => {
     it('Lock fail Funds Not Sent (not enough value)', async () => {
         const contractId = BigInt(Date.now());
         const hashlock = BigInt(randomInt(257));
-        const timelock = BigInt(blockchain.now!! + 3600);
+        const timelock = BigInt(blockchain.now! + 3600);
         const amount = toNano('1');
         const reward = toNano('0.05');
         const rewardTimelock = BigInt(Math.floor(Date.now() / 1000) + 2000);
@@ -670,7 +657,7 @@ describe('TRAIN Protocol Native Asset Tests', () => {
     it('Lock fail Contract Already Exists', async () => {
         const contractId = BigInt(Date.now());
         const hashlock = BigInt(randomInt(257));
-        const timelock = BigInt(blockchain.now!! + 3600);
+        const timelock = BigInt(blockchain.now! + 3600);
         const amount = toNano('1');
         const reward = toNano('0.05');
         const rewardTimelock = BigInt(Math.floor(Date.now() / 1000) + 2000);
@@ -842,9 +829,8 @@ describe('TRAIN Protocol Native Asset Tests', () => {
 
     it('Refund successful', async () => {
         const contractId = BigInt(Date.now());
-        const senderPubKey = 12345n;
         const amount = toNano('0.15');
-        const timelock = BigInt(blockchain.now!! + 3600);
+        const timelock = BigInt(blockchain.now! + 3600);
 
         await trainContract.send(
             userWallet.getSender(),
@@ -901,8 +887,8 @@ describe('TRAIN Protocol Native Asset Tests', () => {
         const amount = toNano('0.15');
         const rewardAmount = toNano('0.1');
         const hashlock = BigInt(randomInt(256));
-        const timelock = BigInt(blockchain.now!! + 3600);
-        const rewardTimelock = BigInt(blockchain.now!! + 1200);
+        const timelock = BigInt(blockchain.now! + 3600);
+        const rewardTimelock = BigInt(blockchain.now! + 1200);
         await lock({
             trainContract,
             senderWallet: solverWallet,
@@ -967,9 +953,8 @@ describe('TRAIN Protocol Native Asset Tests', () => {
 
     it('Refund Not Passed Timelock', async () => {
         const contractId = BigInt(Date.now());
-        const senderPubKey = 12345n;
         const amount = toNano('0.15');
-        const timelock = BigInt(blockchain.now!! + 3600);
+        const timelock = BigInt(blockchain.now! + 3600);
         await commit({ trainContract, userWallet, amount, contractId, solverWallet, timelock, senderPubKey });
         expect(await trainContract.getGetHtlcDetails(contractId)).toBeTruthy();
         const refundTx = await trainContract.send(
@@ -994,8 +979,8 @@ describe('TRAIN Protocol Native Asset Tests', () => {
         const amount = toNano('0.15');
         const rewardAmount = toNano('0.1');
         const { secret, hashlock }: { secret: bigint; hashlock: bigint } = createHashlockSecretPair();
-        const timelock = BigInt(blockchain.now!! + 3600);
-        const rewardTimelock = BigInt(blockchain.now!! + 1200);
+        const timelock = BigInt(blockchain.now! + 3600);
+        const rewardTimelock = BigInt(blockchain.now! + 1200);
         await lock({
             trainContract,
             senderWallet: solverWallet,
@@ -1049,8 +1034,8 @@ describe('TRAIN Protocol Native Asset Tests', () => {
         const amount = toNano('0.15');
         const rewardAmount = toNano('0');
         const { secret, hashlock }: { secret: bigint; hashlock: bigint } = createHashlockSecretPair();
-        const timelock = BigInt(blockchain.now!! + 3600);
-        const rewardTimelock = BigInt(blockchain.now!! + 1200);
+        const timelock = BigInt(blockchain.now! + 3600);
+        const rewardTimelock = BigInt(blockchain.now! + 1200);
         await lock({
             trainContract,
             senderWallet: solverWallet,
@@ -1102,8 +1087,8 @@ describe('TRAIN Protocol Native Asset Tests', () => {
         const amount = toNano('0.15');
         const rewardAmount = toNano('0.1');
         const { secret, hashlock }: { secret: bigint; hashlock: bigint } = createHashlockSecretPair();
-        const timelock = BigInt(blockchain.now!! + 3600);
-        const rewardTimelock = BigInt(blockchain.now!! + 1200);
+        const timelock = BigInt(blockchain.now! + 3600);
+        const rewardTimelock = BigInt(blockchain.now! + 1200);
         await lock({
             trainContract,
             senderWallet: solverWallet,
@@ -1156,8 +1141,8 @@ describe('TRAIN Protocol Native Asset Tests', () => {
         const amount = toNano('0.15');
         const rewardAmount = toNano('0.1');
         const { secret, hashlock }: { secret: bigint; hashlock: bigint } = createHashlockSecretPair();
-        const timelock = BigInt(blockchain.now!! + 3600);
-        const rewardTimelock = BigInt(blockchain.now!! + 1200);
+        const timelock = BigInt(blockchain.now! + 3600);
+        const rewardTimelock = BigInt(blockchain.now! + 1200);
         await lock({
             trainContract,
             senderWallet: solverWallet,
@@ -1241,8 +1226,8 @@ describe('TRAIN Protocol Native Asset Tests', () => {
         const { hashlock } = createHashlockSecretPair();
         const { secret } = createHashlockSecretPair();
 
-        const timelock = BigInt(blockchain.now!! + 3600);
-        const rewardTimelock = BigInt(blockchain.now!! + 1200);
+        const timelock = BigInt(blockchain.now! + 3600);
+        const rewardTimelock = BigInt(blockchain.now! + 1200);
         await lock({
             trainContract,
             senderWallet: solverWallet,
@@ -1271,6 +1256,242 @@ describe('TRAIN Protocol Native Asset Tests', () => {
             success: false,
             op: Train.opcodes.Redeem,
             exitCode: Train.errors['Hashlock Not Match'],
+        });
+    });
+
+    it('AddLockSig successful', async () => {
+        const contractId = BigInt(Date.now());
+        const amount = toNano('1');
+        const timelock = BigInt(blockchain.now! + 1800);
+        const timelock2 = BigInt(blockchain.now! + 2100);
+        const hashlock = BigInt(randomInt(256));
+        await commit({
+            trainContract,
+            userWallet,
+            amount,
+            contractId,
+            solverWallet,
+            timelock,
+            senderPubKey,
+        });
+        const dataCell: Cell = beginCell()
+            .storeInt(contractId, 257)
+            .storeInt(hashlock, 257)
+            .storeInt(timelock2, 257)
+            .endCell();
+
+        const signatureBuffer = sign(dataCell.hash(), kp.secretKey);
+        const signatureCell = beginCell().storeBuffer(signatureBuffer).endCell();
+
+        const addLocSigTx = await trainContract.send(
+            solverWallet.getSender(),
+            { value: amount, bounce: true },
+            {
+                $$type: 'AddLockSig',
+                data: dataCell.beginParse(),
+                signature: signatureCell.beginParse(),
+            },
+        );
+
+        expect(addLocSigTx.transactions).toHaveTransaction({
+            from: solverWallet.address,
+            to: trainContract.address,
+            success: true,
+            op: Train.opcodes.AddLockSig,
+        });
+
+        expect(addLocSigTx.transactions).toHaveTransaction({
+            from: trainContract.address,
+            to: solverWallet.address,
+            success: true,
+            op: 0x0,
+        });
+
+        const htlcDetails = await trainContract.getGetHtlcDetails(contractId);
+        expect(htlcDetails?.hashlock).toBe(hashlock);
+        expect(htlcDetails?.timelock).toBe(timelock2);
+        console.log('Total Fees for AddLockSig Msg: ', getTotalFees(addLocSigTx.transactions) / 10 ** 9, ' TON');
+    });
+
+    it('AddLockSig fails Contract Does Not Exist', async () => {
+        const contractId = BigInt(Date.now());
+        const amount = toNano('1');
+        const timelock = BigInt(blockchain.now! + 1800);
+        const timelock2 = BigInt(blockchain.now! + 2100);
+        const hashlock = BigInt(randomInt(256));
+        await commit({
+            trainContract,
+            userWallet,
+            amount,
+            contractId,
+            solverWallet,
+            timelock,
+            senderPubKey,
+        });
+        const dataCell: Cell = beginCell()
+            .storeInt(contractId + 1n, 257)
+            .storeInt(hashlock, 257)
+            .storeInt(timelock2, 257)
+            .endCell();
+
+        const signatureBuffer = sign(dataCell.hash(), kp.secretKey);
+        const signatureCell = beginCell().storeBuffer(signatureBuffer).endCell();
+
+        const addLocSigTx = await trainContract.send(
+            solverWallet.getSender(),
+            { value: amount, bounce: true },
+            {
+                $$type: 'AddLockSig',
+                data: dataCell.beginParse(),
+                signature: signatureCell.beginParse(),
+            },
+        );
+        expect(addLocSigTx.transactions).toHaveTransaction({
+            from: solverWallet.address,
+            to: trainContract.address,
+            success: false,
+            op: Train.opcodes.AddLockSig,
+            exitCode: Train.errors['Contract Does Not Exist'],
+        });
+    });
+
+    it('AddLockSig fails Invalid Signature', async () => {
+        const contractId = BigInt(Date.now());
+        const amount = toNano('1');
+        const timelock = BigInt(blockchain.now! + 1800);
+        const timelock2 = BigInt(blockchain.now! + 2100);
+        const hashlock = BigInt(randomInt(256));
+        const wrongPubKey = BigInt('0x' + (await getSecureRandomBytes(32)).toString('hex'));
+
+        await commit({
+            trainContract,
+            userWallet,
+            amount,
+            contractId,
+            solverWallet,
+            timelock,
+            senderPubKey: wrongPubKey,
+        });
+        const dataCell: Cell = beginCell()
+            .storeInt(contractId, 257)
+            .storeInt(hashlock, 257)
+            .storeInt(timelock2, 257)
+            .endCell();
+
+        const signatureBuffer = sign(dataCell.hash(), kp.secretKey);
+        const signatureCell = beginCell().storeBuffer(signatureBuffer).endCell();
+
+        const addLocSigTx = await trainContract.send(
+            solverWallet.getSender(),
+            { value: amount, bounce: true },
+            {
+                $$type: 'AddLockSig',
+                data: dataCell.beginParse(),
+                signature: signatureCell.beginParse(),
+            },
+        );
+        expect(addLocSigTx.transactions).toHaveTransaction({
+            from: solverWallet.address,
+            to: trainContract.address,
+            success: false,
+            op: Train.opcodes.AddLockSig,
+            exitCode: Train.errors['Invalid Signature'],
+        });
+    });
+
+    it('AddLockSig fails Hashlock Already Set', async () => {
+        const contractId = BigInt(Date.now());
+        const amount = toNano('1');
+        const timelock = BigInt(blockchain.now! + 1800);
+        const timelock2 = BigInt(blockchain.now! + 2100);
+        const hashlock = BigInt(randomInt(256));
+        await commit({
+            trainContract,
+            userWallet,
+            amount,
+            contractId,
+            solverWallet,
+            timelock,
+            senderPubKey,
+        });
+        const dataCell: Cell = beginCell()
+            .storeInt(contractId, 257)
+            .storeInt(hashlock, 257)
+            .storeInt(timelock2, 257)
+            .endCell();
+
+        const signatureBuffer = sign(dataCell.hash(), kp.secretKey);
+        const signatureCell = beginCell().storeBuffer(signatureBuffer).endCell();
+
+        await trainContract.send(
+            solverWallet.getSender(),
+            { value: amount, bounce: true },
+            {
+                $$type: 'AddLockSig',
+                data: dataCell.beginParse(),
+                signature: signatureCell.beginParse(),
+            },
+        );
+
+        const addLocSigTx = await trainContract.send(
+            solverWallet.getSender(),
+            { value: amount, bounce: true },
+            {
+                $$type: 'AddLockSig',
+                data: dataCell.beginParse(),
+                signature: signatureCell.beginParse(),
+            },
+        );
+
+        expect(addLocSigTx.transactions).toHaveTransaction({
+            from: solverWallet.address,
+            to: trainContract.address,
+            success: false,
+            op: Train.opcodes.AddLockSig,
+            exitCode: Train.errors['Hashlock Already Set'],
+        });
+    });
+
+    it('AddLockSig fails Not Future Timelock', async () => {
+        const contractId = BigInt(Date.now());
+        const amount = toNano('1');
+        const timelock = BigInt(blockchain.now! + 1800);
+        const timelock2 = BigInt(blockchain.now!);
+        const hashlock = BigInt(randomInt(256));
+        await commit({
+            trainContract,
+            userWallet,
+            amount,
+            contractId,
+            solverWallet,
+            timelock,
+            senderPubKey,
+        });
+        const dataCell: Cell = beginCell()
+            .storeInt(contractId, 257)
+            .storeInt(hashlock, 257)
+            .storeInt(timelock2, 257)
+            .endCell();
+
+        const signatureBuffer = sign(dataCell.hash(), kp.secretKey);
+        const signatureCell = beginCell().storeBuffer(signatureBuffer).endCell();
+
+        const addLocSigTx = await trainContract.send(
+            solverWallet.getSender(),
+            { value: amount, bounce: true },
+            {
+                $$type: 'AddLockSig',
+                data: dataCell.beginParse(),
+                signature: signatureCell.beginParse(),
+            },
+        );
+
+        expect(addLocSigTx.transactions).toHaveTransaction({
+            from: solverWallet.address,
+            to: trainContract.address,
+            success: false,
+            op: Train.opcodes.AddLockSig,
+            exitCode: Train.errors['Not Future Timelock'],
         });
     });
 });
