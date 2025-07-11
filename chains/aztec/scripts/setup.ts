@@ -42,7 +42,9 @@ async function main(): Promise<void> {
     deriveSigningKey(secretKey),
     salt,
   );
-  let tx = await schnorrAccount.deploy({ fee: { paymentMethod } }).wait();
+  let tx = await schnorrAccount
+    .deploy({ fee: { paymentMethod } })
+    .wait({ timeout: 120000 });
   let userWallet = await schnorrAccount.getWallet();
   let userAddress = userWallet.getAddress();
 
@@ -56,7 +58,9 @@ async function main(): Promise<void> {
     salt2,
   );
 
-  let tx2 = await schnorrAccount2.deploy({ fee: { paymentMethod } }).wait();
+  let tx2 = await schnorrAccount2
+    .deploy({ fee: { paymentMethod } })
+    .wait({ timeout: 120000 });
   let solverWallet = await schnorrAccount2.getWallet();
   let solverAddress = solverWallet.getAddress();
 
@@ -70,7 +74,9 @@ async function main(): Promise<void> {
     salt3,
   );
 
-  let tx3 = await schnorrAccount3.deploy({ fee: { paymentMethod } }).wait();
+  let tx3 = await schnorrAccount3
+    .deploy({ fee: { paymentMethod } })
+    .wait({ timeout: 120000 });
   let deployer = await schnorrAccount3.getWallet();
   let deployerAddress = deployer.getAddress();
 
@@ -109,17 +115,17 @@ async function main(): Promise<void> {
   const mintTx = await contract3.methods
     .mint_to_public(deployer.getAddress(), amount)
     .send({ fee: { paymentMethod } })
-    .wait();
+    .wait({ timeout: 120000 });
   console.log(`Public mint successful in block ${mintTx.blockNumber}`);
 
   await contract3.methods
     .transfer_to_private(userWallet.getAddress(), amount / 2n)
     .send({ fee: { paymentMethod } })
-    .wait();
+    .wait({ timeout: 120000 });
   await contract3.methods
     .transfer_to_private(solverWallet.getAddress(), amount / 2n)
     .send({ fee: { paymentMethod } })
-    .wait();
+    .wait({ timeout: 120000 });
 
   const contract1 = await Contract.at(
     AztecAddress.fromString(token.address.toString()),
@@ -150,12 +156,15 @@ async function main(): Promise<void> {
     userSecretKey: secretKey,
     userSalt: salt,
     userAddress: userAddress,
+    userPartialAddress: userWallet.getCompleteAddress().partialAddress,
     solverSecretKey: secretKey2,
     solverSalt: salt2,
     solverAddress: solverAddress,
+    solverPartialAddress: solverWallet.getCompleteAddress().partialAddress,
     deployerSecretKey: secretKey3,
     deployerSalt: salt3,
     deployerAddress: deployerAddress,
+    deployerPartailAddress: deployer.getCompleteAddress().partialAddress,
     tokenAddress: token.address.toString(),
   });
 

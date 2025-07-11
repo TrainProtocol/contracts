@@ -221,7 +221,7 @@ pub contract Train {
 
         storage.contracts_public.at(Id).schedule_value_change(modified_htlc_public);
         let log_msg = TokenRefunded { Id };
-        context.emit_public_log(log_msg);
+        context.emit_public_log(log_msg.pack());
     }
 
     #[private]
@@ -303,9 +303,9 @@ pub contract Train {
             hashlock: hashlock,
             ownership_hash: ownership_hash,
             amount: amount,
+            timelock: timelock,
             src_receiver: AztecAddress::zero(),
             token: token,
-            timelock: timelock,
             dst_chain: dst_chain,
             dst_asset: dst_asset,
             dst_address: dst_address,

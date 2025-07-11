@@ -117,7 +117,7 @@ async function main(): Promise<void> {
       randomness,
     )
     .send({ authWitnesses: [witness], fee: { paymentMethod } })
-    .wait();
+    .wait({ timeout: 120000 });
 
   console.log('tx : ', commitTx);
   console.log(
@@ -129,7 +129,7 @@ async function main(): Promise<void> {
 
   await publicLogs(pxe1);
   updateData({ commitId: Id.toString() });
-  await simulateBlockPassing(pxe3, assetMinter, deployerWallet, 2);
+  // await simulateBlockPassing(pxe3, assetMinter, deployerWallet, 2);
   await getHTLCDetails(contract, Id);
 }
 

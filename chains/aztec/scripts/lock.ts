@@ -125,7 +125,7 @@ async function main(): Promise<void> {
       dst_address,
     )
     .send({ authWitnesses: [witness], fee: { paymentMethod } })
-    .wait();
+    .wait({ timeout: 120000 });
   console.log('tx : ', lockTx);
 
   const privateBalanceAfter = await asset.methods
