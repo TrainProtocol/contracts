@@ -34,50 +34,56 @@ import {
   type WrappedFieldLike,
 } from '@aztec/aztec.js';
 import TrainContractArtifactJson from '../contracts/train/target/train-Train.json' with { type: 'json' };
-export const TrainContractArtifact = loadContractArtifact(TrainContractArtifactJson as NoirCompiledContract);
-
-
+export const TrainContractArtifact = loadContractArtifact(
+  TrainContractArtifactJson as NoirCompiledContract,
+);
 
 /**
  * Type-safe interface for contract Train;
  */
 export class TrainContract extends ContractBase {
-  
-  private constructor(
-    instance: ContractInstanceWithAddress,
-    wallet: Wallet,
-  ) {
+  private constructor(instance: ContractInstanceWithAddress, wallet: Wallet) {
     super(instance, TrainContractArtifact, wallet);
   }
-  
 
-  
   /**
    * Creates a contract instance.
    * @param address - The deployed contract's address.
    * @param wallet - The wallet to use when interacting with the contract.
    * @returns A promise that resolves to a new Contract instance.
    */
-  public static async at(
-    address: AztecAddress,
-    wallet: Wallet,
-  ) {
-    return Contract.at(address, TrainContract.artifact, wallet) as Promise<TrainContract>;
+  public static async at(address: AztecAddress, wallet: Wallet) {
+    return Contract.at(
+      address,
+      TrainContract.artifact,
+      wallet,
+    ) as Promise<TrainContract>;
   }
 
-  
   /**
    * Creates a tx to deploy a new instance of this contract.
    */
-  public static deploy(wallet: Wallet, ) {
-    return new DeployMethod<TrainContract>(PublicKeys.default(), wallet, TrainContractArtifact, TrainContract.at, Array.from(arguments).slice(1));
+  public static deploy(wallet: Wallet) {
+    return new DeployMethod<TrainContract>(
+      PublicKeys.default(),
+      wallet,
+      TrainContractArtifact,
+      TrainContract.at,
+      Array.from(arguments).slice(1),
+    );
   }
 
   /**
    * Creates a tx to deploy a new instance of this contract using the specified public keys hash to derive the address.
    */
-  public static deployWithPublicKeys(publicKeys: PublicKeys, wallet: Wallet, ) {
-    return new DeployMethod<TrainContract>(publicKeys, wallet, TrainContractArtifact, TrainContract.at, Array.from(arguments).slice(2));
+  public static deployWithPublicKeys(publicKeys: PublicKeys, wallet: Wallet) {
+    return new DeployMethod<TrainContract>(
+      publicKeys,
+      wallet,
+      TrainContractArtifact,
+      TrainContract.at,
+      Array.from(arguments).slice(2),
+    );
   }
 
   /**
@@ -96,9 +102,7 @@ export class TrainContract extends ContractBase {
       opts.method ?? 'constructor',
     );
   }
-  
 
-  
   /**
    * Returns this contract's artifact.
    */
@@ -110,67 +114,104 @@ export class TrainContract extends ContractBase {
    * Returns this contract's artifact with public bytecode.
    */
   public static get artifactForPublic(): ContractArtifact {
-    return loadContractArtifactForPublic(TrainContractArtifactJson as NoirCompiledContract);
+    return loadContractArtifactForPublic(
+      TrainContractArtifactJson as NoirCompiledContract,
+    );
   }
-  
 
-  public static get storage(): ContractStorageLayout<'contracts_private' | 'contracts_public'> {
-      return {
-        contracts_private: {
-      slot: new Fr(1n),
-    },
-contracts_public: {
-      slot: new Fr(2n),
-    }
-      } as ContractStorageLayout<'contracts_private' | 'contracts_public'>;
-    }
-    
+  public static get storage(): ContractStorageLayout<
+    'contracts_private' | 'contracts_public'
+  > {
+    return {
+      contracts_private: {
+        slot: new Fr(1n),
+      },
+      contracts_public: {
+        slot: new Fr(2n),
+      },
+    } as ContractStorageLayout<'contracts_private' | 'contracts_public'>;
+  }
 
   public static get notes(): ContractNotes<'UintNote' | 'HTLC_Private'> {
     return {
       UintNote: {
-          id: new NoteSelector(0),
-        },
-HTLC_Private: {
-          id: new NoteSelector(1),
-        }
+        id: new NoteSelector(0),
+      },
+      HTLC_Private: {
+        id: new NoteSelector(1),
+      },
     } as ContractNotes<'UintNote' | 'HTLC_Private'>;
   }
-  
 
   /** Type-safe wrappers for the public methods exposed by the contract. */
-  public declare methods: {
-    
+  declare public methods: {
     /** add_lock_private_user(Id: field, hashlock: array, timelock: integer) */
-    add_lock_private_user: ((Id: FieldLike, hashlock: (bigint | number)[], timelock: (bigint | number)) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    add_lock_private_user: ((
+      Id: FieldLike,
+      hashlock: (bigint | number)[],
+      timelock: bigint | number,
+    ) => ContractFunctionInteraction) &
+      Pick<ContractMethod, 'selector'>;
 
     /** commit_private_user(Id: field, src_receiver: struct, timelock: integer, token: struct, amount: integer, dst_chain: string, dst_asset: string, dst_address: string, randomness: field) */
-    commit_private_user: ((Id: FieldLike, src_receiver: AztecAddressLike, timelock: (bigint | number), token: AztecAddressLike, amount: (bigint | number), dst_chain: string, dst_asset: string, dst_address: string, randomness: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    commit_private_user: ((
+      Id: FieldLike,
+      src_receiver: AztecAddressLike,
+      timelock: bigint | number,
+      token: AztecAddressLike,
+      amount: bigint | number,
+      dst_chain: string,
+      dst_asset: string,
+      dst_address: string,
+      randomness: FieldLike,
+    ) => ContractFunctionInteraction) &
+      Pick<ContractMethod, 'selector'>;
 
     /** constructor() */
-    constructor: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    constructor: (() => ContractFunctionInteraction) &
+      Pick<ContractMethod, 'selector'>;
 
     /** get_htlc_public(key: field) */
-    get_htlc_public: ((key: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    get_htlc_public: ((key: FieldLike) => ContractFunctionInteraction) &
+      Pick<ContractMethod, 'selector'>;
 
     /** is_contract_initialized(Id: field) */
-    is_contract_initialized: ((Id: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    is_contract_initialized: ((Id: FieldLike) => ContractFunctionInteraction) &
+      Pick<ContractMethod, 'selector'>;
 
     /** lock_private_solver(Id: field, hashlock: array, amount: integer, ownership_hash: array, timelock: integer, token: struct, randomness: field, dst_chain: string, dst_asset: string, dst_address: string) */
-    lock_private_solver: ((Id: FieldLike, hashlock: (bigint | number)[], amount: (bigint | number), ownership_hash: (bigint | number)[], timelock: (bigint | number), token: AztecAddressLike, randomness: FieldLike, dst_chain: string, dst_asset: string, dst_address: string) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    lock_private_solver: ((
+      Id: FieldLike,
+      hashlock: (bigint | number)[],
+      amount: bigint | number,
+      ownership_hash: (bigint | number)[],
+      timelock: bigint | number,
+      token: AztecAddressLike,
+      randomness: FieldLike,
+      dst_chain: string,
+      dst_asset: string,
+      dst_address: string,
+    ) => ContractFunctionInteraction) &
+      Pick<ContractMethod, 'selector'>;
 
     /** public_dispatch(selector: field) */
-    public_dispatch: ((selector: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    public_dispatch: ((selector: FieldLike) => ContractFunctionInteraction) &
+      Pick<ContractMethod, 'selector'>;
 
     /** redeem_private(Id: field, secret: array, ownership_key: array) */
-    redeem_private: ((Id: FieldLike, secret: (bigint | number)[], ownership_key: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    redeem_private: ((
+      Id: FieldLike,
+      secret: (bigint | number)[],
+      ownership_key: (bigint | number)[],
+    ) => ContractFunctionInteraction) &
+      Pick<ContractMethod, 'selector'>;
 
     /** refund_private(Id: field) */
-    refund_private: ((Id: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    refund_private: ((Id: FieldLike) => ContractFunctionInteraction) &
+      Pick<ContractMethod, 'selector'>;
 
     /** sync_private_state() */
-    sync_private_state: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    sync_private_state: (() => ContractFunctionInteraction) &
+      Pick<ContractMethod, 'selector'>;
   };
-
-  
 }
