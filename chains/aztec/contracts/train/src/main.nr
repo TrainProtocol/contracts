@@ -16,7 +16,8 @@ use dep::aztec::macros::aztec;
 pub contract Train {
     use crate::lib::{bytes_to_u128_limbs, u128_limbs_to_bytes};
     use crate::types::events::{
-        TokenCommitted, TokenLockAdded, TokenLocked, TokenRedeemed, TokenRefunded,
+        TokenCommittedFirst, TokenCommittedSecond, TokenLockAdded, TokenLockedFirst,
+        TokenLockedSecond, TokenRedeemed, TokenRefunded,
     };
     use dep::aztec::messages::logs::note::encode_and_encrypt_note;
     use dep::aztec::protocol_types::traits::{Packable, Serialize};
@@ -69,9 +70,9 @@ pub contract Train {
         timelock: u64,
         token: AztecAddress,
         amount: u128,
-        dst_chain: str<8>,
-        dst_asset: str<8>,
-        dst_address: str<48>,
+        dst_chain: str<30>,
+        dst_asset: str<30>,
+        dst_address: str<90>,
         randomness: Field,
     ) {
         assert(amount > 0, "FundsNotSent");
@@ -105,9 +106,9 @@ pub contract Train {
     #[internal]
     #[public]
     fn commit_public_user(
-        dst_chain: str<8>,
-        dst_asset: str<8>,
-        dst_address: str<48>,
+        dst_chain: str<30>,
+        dst_asset: str<30>,
+        dst_address: str<90>,
         Id: Field,
         src_receiver: AztecAddress,
         timelock: u64,
@@ -131,17 +132,23 @@ pub contract Train {
             claimed: 1 as u8,
         };
         storage.contracts_public.at(Id).schedule_value_change(htlc_public);
-        let log_msg = TokenCommitted {
+        let log_msg_1 = TokenCommittedFirst {
             Id: Id,
             amount: amount,
             token: token,
             timelock: timelock,
+            src_receiver: src_receiver,
+        };
+
+        let log_msg_2 = TokenCommittedSecond {
+            Id: Id,
             dst_chain: dst_chain,
             dst_asset: dst_asset,
             dst_address: dst_address,
-            src_receiver: src_receiver,
         };
-        context.emit_public_log(log_msg.pack());
+
+        context.emit_public_log(log_msg_1.pack());
+        context.emit_public_log(log_msg_2.pack());
     }
 
     #[private]
@@ -233,9 +240,9 @@ pub contract Train {
         timelock: u64,
         token: AztecAddress,
         randomness: Field,
-        dst_chain: str<8>,
-        dst_asset: str<8>,
-        dst_address: str<48>,
+        dst_chain: str<30>,
+        dst_asset: str<30>,
+        dst_address: str<90>,
     ) {
         assert(amount > 0, "FundsNotSent");
         // Safety: The contract intentionally exposes these parameters as public.
@@ -274,9 +281,9 @@ pub contract Train {
         amount: u128,
         token: AztecAddress,
         timelock: u64,
-        dst_chain: str<8>,
-        dst_asset: str<8>,
-        dst_address: str<48>,
+        dst_chain: str<30>,
+        dst_asset: str<30>,
+        dst_address: str<90>,
     ) {
         let htlc_public_current = storage.contracts_public.at(Id).get_current_value();
         assert(htlc_public_current.amount == 0, "HTLCAlreadyExists");
@@ -298,7 +305,7 @@ pub contract Train {
         };
         storage.contracts_public.at(Id).schedule_value_change(htlc_public);
 
-        let log_msg = TokenLocked {
+        let log_msg_1 = TokenLockedFirst {
             Id: Id,
             hashlock: hashlock,
             ownership_hash: ownership_hash,
@@ -306,12 +313,17 @@ pub contract Train {
             timelock: timelock,
             src_receiver: AztecAddress::zero(),
             token: token,
+        };
+
+        let log_msg_2 = TokenLockedSecond {
+            Id: Id,
             dst_chain: dst_chain,
             dst_asset: dst_asset,
             dst_address: dst_address,
         };
 
-        context.emit_public_log(log_msg.pack());
+        context.emit_public_log(log_msg_1.pack());
+        context.emit_public_log(log_msg_2.pack());
     }
 
     #[private]
