@@ -1,3 +1,4 @@
+use crate::lib::{bytes_to_u128_limbs, u128_limbs_to_bytes};
 use dep::aztec::prelude::AztecAddress;
 use dep::aztec::protocol_types::traits::{Packable, Serialize};
 
@@ -86,35 +87,18 @@ impl Packable<5> for TokenLockAdded {
         out[0] = 0xC1D4E792;
         out[1] = self.Id;
 
-        let hb = self.hashlock;
-        let mut h1 = [0 as u8; 31];
-        for i in 0..31 {
-            h1[i] = hb[i];
-        }
-        out[2] = Field::from_be_bytes::<31>(h1);
-
-        let mut h2 = [0 as u8; 31];
-        h2[0] = hb[31];
-        out[3] = Field::from_be_bytes::<31>(h2);
-
+        let (hashlock_high, hashlock_low) = bytes_to_u128_limbs(self.hashlock);
+        out[2] = hashlock_high as Field;
+        out[3] = hashlock_low as Field;
         out[4] = self.timelock as Field;
         out
     }
 
     fn unpack(fields: [Field; 5]) -> Self {
         let Id = fields[1];
-
-        let b1 = fields[2].to_be_bytes();
-        let b2 = fields[3].to_be_bytes();
-        let mut hash = [0 as u8; 32];
-        for i in 0..31 {
-            hash[i] = b1[i];
-        }
-        hash[31] = b2[0];
-
+        let hashlock = u128_limbs_to_bytes(fields[1] as u128, fields[2] as u128);
         let timelock = fields[4] as u64;
-
-        TokenLockAdded { Id, hashlock: hash, timelock }
+        TokenLockAdded { Id, hashlock, timelock }
     }
 }
 
@@ -150,47 +134,21 @@ impl Packable<6> for TokenRedeemed {
         out[0] = 0x4F8B9A3E;
         out[1] = self.Id;
 
-        let hb = self.hashlock;
-        let mut h1 = [0 as u8; 31];
-        for i in 0..31 {
-            h1[i] = hb[i];
-        }
-        out[2] = Field::from_be_bytes::<31>(h1);
-        let mut h2 = [0 as u8; 31];
-        h2[0] = hb[31];
-        out[3] = Field::from_be_bytes::<31>(h2);
+        let (hashlock_high, hashlock_low) = bytes_to_u128_limbs(self.hashlock);
+        out[2] = hashlock_high as Field;
+        out[3] = hashlock_low as Field;
 
-        let sb = self.secret;
-        let mut s1 = [0 as u8; 31];
-        for i in 0..31 {
-            s1[i] = sb[i];
-        }
-        out[4] = Field::from_be_bytes::<31>(s1);
-        let mut s2 = [0 as u8; 31];
-        s2[0] = sb[31];
-        out[5] = Field::from_be_bytes::<31>(s2);
+        let (secret_high, secret_low) = bytes_to_u128_limbs(self.secret);
+        out[4] = secret_high as Field;
+        out[5] = secret_low as Field;
 
         out
     }
 
     fn unpack(fields: [Field; 6]) -> Self {
         let Id = fields[1];
-
-        let b1 = fields[2].to_be_bytes();
-        let b2 = fields[3].to_be_bytes();
-        let mut hashlock = [0 as u8; 32];
-        for i in 0..31 {
-            hashlock[i] = b1[i];
-        }
-        hashlock[31] = b2[0];
-
-        let b3 = fields[4].to_be_bytes();
-        let b4 = fields[5].to_be_bytes();
-        let mut secret = [0 as u8; 32];
-        for i in 0..31 {
-            secret[i] = b3[i];
-        }
-        secret[31] = b4[0];
+        let hashlock = u128_limbs_to_bytes(fields[2] as u128, fields[3] as u128);
+        let secret = u128_limbs_to_bytes(fields[4] as u128, fields[5] as u128);
 
         TokenRedeemed { Id, hashlock, secret }
     }
@@ -216,27 +174,13 @@ impl Packable<13> for TokenLocked {
         out[0] = 0x9E5A4F03;
         out[1] = self.Id;
 
-        let hb = self.hashlock;
-        let mut h1 = [0 as u8; 31];
-        for i in 0..31 {
-            h1[i] = hb[i];
-        }
-        out[2] = Field::from_be_bytes::<31>(h1);
+        let (hashlock_high, hashlock_low) = bytes_to_u128_limbs(self.hashlock);
+        out[2] = hashlock_high as Field;
+        out[3] = hashlock_low as Field;
 
-        let mut h2 = [0 as u8; 31];
-        h2[0] = hb[31];
-        out[3] = Field::from_be_bytes::<31>(h2);
-
-        let ownership = self.ownership_hash;
-        let mut o1 = [0 as u8; 31];
-        for i in 0..31 {
-            o1[i] = ownership[i];
-        }
-        out[4] = Field::from_be_bytes::<31>(o1);
-
-        let mut o2 = [0 as u8; 31];
-        o2[0] = ownership[31];
-        out[5] = Field::from_be_bytes::<31>(o2);
+        let (ownership_hash_high, ownership_hash_low) = bytes_to_u128_limbs(self.ownership_hash);
+        out[4] = ownership_hash_high as Field;
+        out[5] = ownership_hash_low as Field;
 
         let amount_field = self.amount as Field;
         let timelock_field = self.timelock as Field;

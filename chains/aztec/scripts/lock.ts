@@ -149,8 +149,8 @@ async function main(): Promise<void> {
     AztecAddress.fromString(data.tokenAddress),
     deployerWallet,
   );
-  await simulateBlockPassing(pxe3, assetMinter, deployerWallet, 2);
-  await getHTLCDetails(contract, Id);
+  // await simulateBlockPassing(pxe3, assetMinter, deployerWallet, 2);
+  // await getHTLCDetails(contract, Id);
 }
 
 main().catch((err: any) => {
