@@ -195,7 +195,7 @@ contract TrainJetton with OwnableTransferable {
                     to: msg.from,
                     value: 0,
                     bounce: false,
-                    mode: SendRemainingBalance | SendIgnoreErrors,
+                    mode: SendRemainingBalance,
                     body: "TRAINCommitExcess".asComment(),
                 });
             } else {
@@ -203,7 +203,7 @@ contract TrainJetton with OwnableTransferable {
                     to: ctx.sender,
                     value: 0,
                     bounce: false,
-                    mode: SendRemainingBalance | SendIgnoreErrors,
+                    mode: SendRemainingBalance,
                     body: TokenTransfer {
                         queryId: 1734998782,
                         amount: msg.amount,
@@ -260,7 +260,7 @@ contract TrainJetton with OwnableTransferable {
                     to: msg.from,
                     value: 0,
                     bounce: false,
-                    mode: SendRemainingBalance | SendIgnoreErrors,
+                    mode: SendRemainingBalance,
                     body: "TRAINLockExcess".asComment(),
                 });
             } else {
@@ -268,7 +268,7 @@ contract TrainJetton with OwnableTransferable {
                     to: ctx.sender,
                     value: 0,
                     bounce: false,
-                    mode: SendRemainingBalance | SendIgnoreErrors,
+                    mode: SendRemainingBalance,
                     body: TokenTransfer {
                         queryId: 317164721,
                         amount: msg.amount,
@@ -288,7 +288,7 @@ contract TrainJetton with OwnableTransferable {
                 to: ctx.sender,
                 value: 0,
                 bounce: false,
-                mode: SendRemainingBalance | SendIgnoreErrors,
+                mode: SendRemainingBalance,
                 body: TokenTransfer {
                     queryId: 832224636,
                     amount: msg.amount,
@@ -329,7 +329,7 @@ contract TrainJetton with OwnableTransferable {
             to: sender(),
             value: 0,
             bounce: false,
-            mode: SendRemainingBalance | SendIgnoreErrors,
+            mode: SendRemainingBalance,
             body: "TRAINAddLockExcess".asComment(),
         });
     }
@@ -361,7 +361,7 @@ contract TrainJetton with OwnableTransferable {
             to: sender(),
             value: 0,
             bounce: false,
-            mode: SendRemainingBalance | SendIgnoreErrors,
+            mode: SendRemainingBalance,
             body: "TRAINAddLockSigExcess".asComment(),
         });
     }
@@ -381,7 +381,7 @@ contract TrainJetton with OwnableTransferable {
                 to: self.jettonMasterToWallet.get(htlc.jettonMasterAddress)!!,
                 value: 0,
                 bounce: false,
-                mode: SendRemainingBalance | SendIgnoreErrors,
+                mode: SendRemainingBalance,
                 body: TokenTransfer {
                     queryId: 0x758db085,
                     amount: htlc.amount,
@@ -404,7 +404,7 @@ contract TrainJetton with OwnableTransferable {
                     to: self.jettonMasterToWallet.get(htlc.jettonMasterAddress)!!,
                     value: (ctx.value - self.storageReserve) / 2,
                     bounce: false,
-                    mode: SendDefaultMode | SendIgnoreErrors,
+                    mode: SendDefaultMode,
                     body: TokenTransfer {
                         queryId: 0x758db085,
                         amount: htlc.amount,
@@ -422,7 +422,7 @@ contract TrainJetton with OwnableTransferable {
                     to: self.jettonMasterToWallet.get(htlc.jettonMasterAddress)!!,
                     value: 0,
                     bounce: false,
-                    mode: SendRemainingBalance | SendIgnoreErrors,
+                    mode: SendRemainingBalance,
                     body: TokenTransfer {
                         queryId: 0x758db90,
                         amount: reward.amount,
@@ -442,7 +442,7 @@ contract TrainJetton with OwnableTransferable {
                         to: self.jettonMasterToWallet.get(htlc.jettonMasterAddress)!!,
                         value: 0,
                         bounce: false,
-                        mode: SendRemainingBalance | SendIgnoreErrors,
+                        mode: SendRemainingBalance,
                         body: TokenTransfer {
                             queryId: 0x758db085,
                             amount: htlc.amount + reward.amount,
@@ -461,7 +461,7 @@ contract TrainJetton with OwnableTransferable {
                         to: self.jettonMasterToWallet.get(htlc.jettonMasterAddress)!!,
                         value: (ctx.value - self.storageReserve) / 2,
                         bounce: false,
-                        mode: SendDefaultMode | SendIgnoreErrors,
+                        mode: SendDefaultMode,
                         body: TokenTransfer {
                             queryId: 0x758db085,
                             amount: htlc.amount,
@@ -479,7 +479,7 @@ contract TrainJetton with OwnableTransferable {
                         to: self.jettonMasterToWallet.get(htlc.jettonMasterAddress)!!,
                         value: 0,
                         bounce: false,
-                        mode: SendRemainingBalance | SendIgnoreErrors,
+                        mode: SendRemainingBalance,
                         body: TokenTransfer {
                             queryId: 0x758db085,
                             amount: reward.amount,
@@ -518,7 +518,7 @@ contract TrainJetton with OwnableTransferable {
             to: self.jettonMasterToWallet.get(htlc.jettonMasterAddress)!!,
             value: 0,
             bounce: false,
-            mode: SendIgnoreErrors | SendRemainingBalance,
+            mode: SendRemainingBalance,
             body: TokenTransfer {
                 queryId: 0xad821ef9,
                 amount: transferedAmount,
@@ -548,7 +548,7 @@ contract TrainJetton with OwnableTransferable {
             to: sender(),
             value: 0,
             bounce: false,
-            mode: SendRemainingBalance | SendIgnoreErrors,
+            mode: SendRemainingBalance,
             body: "TRAINSupportJettonExcess".asComment(),
         });
     }
@@ -562,7 +562,7 @@ contract TrainJetton with OwnableTransferable {
             to: sender(),
             value: 0,
             bounce: false,
-            mode: SendRemainingBalance | SendIgnoreErrors,
+            mode: SendRemainingBalance,
             body: "TRAINRemoveJettonExcess".asComment(),
         });
     }
@@ -573,7 +573,7 @@ contract TrainJetton with OwnableTransferable {
             to: sender(),
             value: 0,
             bounce: false,
-            mode: SendRemainingBalance | SendIgnoreErrors,
+            mode: SendRemainingBalance,
             body: "TRAINEmptyMessageNotAllowed".asComment(),
         });
     }
@@ -584,7 +584,7 @@ contract TrainJetton with OwnableTransferable {
             to: sender(),
             value: 0,
             bounce: false,
-            mode: SendRemainingBalance | SendIgnoreErrors,
+            mode: SendRemainingBalance,
             body: "TRAINTextMessageNotAllowed".asComment(),
         });
     }
@@ -595,7 +595,7 @@ contract TrainJetton with OwnableTransferable {
             to: sender(),
             value: 0,
             bounce: false,
-            mode: SendRemainingBalance | SendIgnoreErrors,
+            mode: SendRemainingBalance,
             body: "TRAINSliceMessageNotAllowed".asComment(),
         });
     }
