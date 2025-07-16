@@ -60,9 +60,9 @@ async function main(): Promise<void> {
   const token = data.tokenAddress;
   const amount = 23n;
   let solverAddress = AztecAddress.fromString(data.solverAddress);
-  const dst_chain = 'TON'.padEnd(8, ' ');
-  const dst_asset = 'Toncoin'.padEnd(8, ' ');
-  const dst_address = 'TONAddress'.padEnd(48, ' ');
+  const dst_chain = 'TON'.padStart(30, ' ');
+  const dst_asset = 'Toncoin'.padStart(30, ' ');
+  const dst_address = 'TONAddress'.padStart(90, ' ');
   const randomness = generateId();
   const TokenContractArtifact = TokenContract.artifact;
   const asset = await Contract.at(
@@ -130,7 +130,7 @@ async function main(): Promise<void> {
   await publicLogs(pxe1);
   updateData({ commitId: Id.toString() });
   // await simulateBlockPassing(pxe3, assetMinter, deployerWallet, 2);
-  await getHTLCDetails(contract, Id);
+  // await getHTLCDetails(contract, Id);
 }
 
 main().catch((err: any) => {

@@ -65,9 +65,9 @@ async function main(): Promise<void> {
   const timelock = now + 2000;
   const token: string = data.tokenAddress;
   const randomness = generateId();
-  const dst_chain = 'TON'.padEnd(8, ' ');
-  const dst_asset = 'Toncoin'.padEnd(8, ' ');
-  const dst_address = 'TONAddress'.padEnd(48, ' ');
+  const dst_chain = 'TON'.padStart(30, ' ');
+  const dst_asset = 'Toncoin'.padStart(30, ' ');
+  const dst_address = 'TONAddress'.padStart(90, ' ');
 
   // Token contract operations using auth witness
   const TokenContractArtifact = TokenContract.artifact;

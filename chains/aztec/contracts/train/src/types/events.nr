@@ -3,69 +3,41 @@ use dep::aztec::prelude::AztecAddress;
 use dep::aztec::protocol_types::traits::{Packable, Serialize};
 
 #[derive(Serialize)]
-pub struct TokenCommittedFirst {
+pub struct TokenCommitted {
     pub Id: Field,
     pub amount: u128,
     pub token: AztecAddress,
     pub timelock: u64,
     pub src_receiver: AztecAddress,
-}
-
-impl Packable<7> for TokenCommittedFirst {
-    fn pack(self) -> [Field; 7] {
-        let zero: Field = 0;
-        let mut out = [zero; 7];
-        out[0] = 0x7A3F2B1C;
-        out[1] = 0x01;
-        out[2] = self.Id;
-        out[3] = self.amount as Field;
-        out[4] = self.token.inner;
-        out[5] = self.timelock as Field;
-        out[6] = self.src_receiver.inner;
-        out
-    }
-
-    fn unpack(fields: [Field; 7]) -> Self {
-        assert(false, "unpack not implemented");
-        TokenCommittedFirst {
-            Id: fields[2] as Field,
-            amount: 0 as u128,
-            token: AztecAddress::zero(),
-            timelock: 0 as u64,
-            src_receiver: AztecAddress::zero(),
-        }
-    }
-}
-
-#[derive(Serialize)]
-pub struct TokenCommittedSecond {
-    pub Id: Field,
     pub dst_chain: str<30>,
     pub dst_asset: str<30>,
     pub dst_address: str<90>,
 }
 
-impl Packable<8> for TokenCommittedSecond {
-    fn pack(self) -> [Field; 8] {
+impl Packable<11> for TokenCommitted {
+    fn pack(self) -> [Field; 11] {
         let zero: Field = 0;
-        let mut out = [zero; 8];
+        let mut out = [zero; 11];
         out[0] = 0x7A3F2B1C;
-        out[1] = 0x02;
-        out[2] = self.Id;
+        out[1] = self.Id;
+        out[2] = self.amount as Field;
+        out[3] = self.token.inner;
+        out[4] = self.timelock as Field;
+        out[5] = self.src_receiver.inner;
 
         let dst_chain_byte_array = self.dst_chain.as_bytes();
         let mut dst_chain_byte_array_filled = [0 as u8; 30];
         for i in 0..dst_chain_byte_array.len() {
             dst_chain_byte_array_filled[i] = dst_chain_byte_array[i];
         }
-        out[3] = Field::from_be_bytes::<30>(dst_chain_byte_array_filled);
+        out[6] = Field::from_be_bytes::<30>(dst_chain_byte_array_filled);
 
         let dst_asset_byte_array = self.dst_asset.as_bytes();
         let mut dst_asset_byte_array_filled = [0 as u8; 30];
         for i in 0..dst_asset_byte_array.len() {
             dst_asset_byte_array_filled[i] = dst_asset_byte_array[i];
         }
-        out[4] = Field::from_be_bytes::<30>(dst_asset_byte_array_filled);
+        out[7] = Field::from_be_bytes::<30>(dst_asset_byte_array_filled);
 
         let dst_address_byte_array = self.dst_address.as_bytes();
         let mut dst_address_byte_array_filled_1 = [0 as u8; 30];
@@ -78,17 +50,20 @@ impl Packable<8> for TokenCommittedSecond {
             dst_address_byte_array_filled_3[i] = dst_address_byte_array[i + 60];
         }
 
-        out[5] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_1);
-        out[6] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_2);
-        out[7] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_3);
-
+        out[8] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_1);
+        out[9] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_2);
+        out[10] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_3);
         out
     }
 
-    fn unpack(fields: [Field; 8]) -> Self {
+    fn unpack(fields: [Field; 11]) -> Self {
         assert(false, "unpack not implemented");
-        TokenCommittedSecond {
-            Id: fields[2] as Field,
+        TokenCommitted {
+            Id: fields[1] as Field,
+            amount: 0 as u128,
+            token: AztecAddress::zero(),
+            timelock: 0 as u64,
+            src_receiver: AztecAddress::zero(),
             dst_chain: "000000000000000000000000000000",
             dst_asset: "000000000000000000000000000000",
             dst_address: "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
@@ -179,78 +154,39 @@ impl Packable<6> for TokenRedeemed {
 #[derive(Serialize)]
 pub struct TokenLockedFirst {
     pub Id: Field,
-    pub hashlock: [u8; 32],
-    pub ownership_hash: [u8; 32],
     pub amount: u128,
+    pub token: AztecAddress,
     pub timelock: u64,
     pub src_receiver: AztecAddress,
-    pub token: AztecAddress,
-}
-
-impl Packable<11> for TokenLockedFirst {
-    fn pack(self) -> [Field; 11] {
-        let mut out = [0 as Field; 11];
-        out[0] = 0x9E5A4F03;
-        out[1] = 0x01;
-        out[2] = self.Id;
-
-        let (hashlock_high, hashlock_low) = bytes_to_u128_limbs(self.hashlock);
-        out[3] = hashlock_high as Field;
-        out[4] = hashlock_low as Field;
-
-        let (ownership_hash_high, ownership_hash_low) = bytes_to_u128_limbs(self.ownership_hash);
-        out[5] = ownership_hash_high as Field;
-        out[6] = ownership_hash_low as Field;
-        out[7] = self.amount as Field;
-        out[8] = self.timelock as Field;
-        out[9] = self.src_receiver.inner as Field;
-        out[10] = self.token.inner;
-
-        out
-    }
-
-    fn unpack(fields: [Field; 11]) -> Self {
-        assert(false, "unpack not implemented");
-        TokenLockedFirst {
-            Id: fields[2] as Field,
-            hashlock: [0 as u8; 32],
-            ownership_hash: [0 as u8; 32],
-            amount: 0 as u128,
-            timelock: 0 as u64,
-            src_receiver: AztecAddress::zero(),
-            token: AztecAddress::zero(),
-        }
-    }
-}
-
-#[derive(Serialize)]
-pub struct TokenLockedSecond {
-    pub Id: Field,
     pub dst_chain: str<30>,
     pub dst_asset: str<30>,
     pub dst_address: str<90>,
 }
 
-impl Packable<8> for TokenLockedSecond {
-    fn pack(self) -> [Field; 8] {
-        let mut out = [0 as Field; 8];
+impl Packable<11> for TokenLockedFirst {
+    fn pack(self) -> [Field; 11] {
+        let zero: Field = 0;
+        let mut out = [zero; 11];
         out[0] = 0x9E5A4F03;
-        out[1] = 0x02;
-        out[2] = self.Id;
+        out[1] = self.Id;
+        out[2] = self.amount as Field;
+        out[3] = self.token.inner;
+        out[4] = self.timelock as Field;
+        out[5] = self.src_receiver.inner;
 
         let dst_chain_byte_array = self.dst_chain.as_bytes();
         let mut dst_chain_byte_array_filled = [0 as u8; 30];
         for i in 0..dst_chain_byte_array.len() {
             dst_chain_byte_array_filled[i] = dst_chain_byte_array[i];
         }
-        out[3] = Field::from_be_bytes::<30>(dst_chain_byte_array_filled);
+        out[6] = Field::from_be_bytes::<30>(dst_chain_byte_array_filled);
 
         let dst_asset_byte_array = self.dst_asset.as_bytes();
         let mut dst_asset_byte_array_filled = [0 as u8; 30];
         for i in 0..dst_asset_byte_array.len() {
             dst_asset_byte_array_filled[i] = dst_asset_byte_array[i];
         }
-        out[4] = Field::from_be_bytes::<30>(dst_asset_byte_array_filled);
+        out[7] = Field::from_be_bytes::<30>(dst_asset_byte_array_filled);
 
         let dst_address_byte_array = self.dst_address.as_bytes();
         let mut dst_address_byte_array_filled_1 = [0 as u8; 30];
@@ -263,20 +199,57 @@ impl Packable<8> for TokenLockedSecond {
             dst_address_byte_array_filled_3[i] = dst_address_byte_array[i + 60];
         }
 
-        out[5] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_1);
-        out[6] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_2);
-        out[7] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_3);
+        out[8] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_1);
+        out[9] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_2);
+        out[10] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_3);
+        out
+    }
+
+    fn unpack(fields: [Field; 11]) -> Self {
+        assert(false, "unpack not implemented");
+        TokenLockedFirst {
+            Id: fields[1] as Field,
+            amount: 0 as u128,
+            token: AztecAddress::zero(),
+            timelock: 0 as u64,
+            src_receiver: AztecAddress::zero(),
+            dst_chain: "000000000000000000000000000000",
+            dst_asset: "000000000000000000000000000000",
+            dst_address: "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct TokenLockedSecond {
+    pub Id: Field,
+    pub hashlock: [u8; 32],
+    pub ownership_hash: [u8; 32],
+}
+
+impl Packable<6> for TokenLockedSecond {
+    fn pack(self) -> [Field; 6] {
+        let mut out = [0 as Field; 6];
+        out[0] = 0x9E5A4F03;
+        out[1] = self.Id;
+
+        let (hashlock_high, hashlock_low) = bytes_to_u128_limbs(self.hashlock);
+        out[2] = hashlock_high as Field;
+        out[3] = hashlock_low as Field;
+
+        let (ownership_hash_high, ownership_hash_low) = bytes_to_u128_limbs(self.ownership_hash);
+        out[4] = ownership_hash_high as Field;
+        out[5] = ownership_hash_low as Field;
 
         out
     }
 
-    fn unpack(fields: [Field; 8]) -> Self {
+    fn unpack(fields: [Field; 6]) -> Self {
         assert(false, "unpack not implemented");
         TokenLockedSecond {
-            Id: fields[2] as Field,
-            dst_chain: "000000000000000000000000000000",
-            dst_asset: "000000000000000000000000000000",
-            dst_address: "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            Id: fields[1] as Field,
+            hashlock: [0 as u8; 32],
+            ownership_hash: [0 as u8; 32],
         }
     }
 }
