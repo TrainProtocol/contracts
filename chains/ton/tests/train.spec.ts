@@ -131,6 +131,7 @@ describe('TRAIN Protocol Native Asset Tests', () => {
             to: trainContract.address,
             success: false,
             op: Train.opcodes.Commit,
+            exitCode: Train.errors['Funds Not Sent'],
         });
         const htlcDetails = await trainContract.getGetHtlcDetails(contractId);
         expect(htlcDetails).toBeNull();

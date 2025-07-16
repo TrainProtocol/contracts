@@ -114,7 +114,7 @@ contract Train {
 
     receive(msg: Commit) {
         let ctx: Context = context();
-        require(ctx.value > msg.amount + self.storageReserve, "Funds Not Sent");
+        require(ctx.value > msg.amount + self.storageReserve && msg.amount != 0, "Funds Not Sent");
         nativeReserve(msg.amount + self.storageReserve, ReserveExact | ReserveAddOriginalBalance | ReserveBounceIfActionFail);
         require(msg.timelock > (now() + 900), "Not Future Timelock");
         require(!self.contracts.exists(msg.id), "Contract Already Exists");
