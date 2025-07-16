@@ -38,7 +38,6 @@
     "test:bitcoin": "npm run pre-build -w chains/bitcoin"
   },
   "dependencies": {
-    "dotenv": "^16.4.7",
-    "fuels": "^0.98.0"
+    "dotenv": "^16.4.7"
   }
 }
