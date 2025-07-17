@@ -3,28 +3,10 @@ import {
     prettyLogTransactions,
     printTransactionFees,
     SandboxContract,
-    toSandboxContract,
     TreasuryContract,
 } from '@ton/sandbox';
-import {
-    toNano,
-    beginCell,
-    Builder,
-    Dictionary,
-    internal,
-    Message,
-    CommonMessageInfoInternal,
-    CurrencyCollection,
-} from '@ton/core';
-import {
-    jettonContentToInternal,
-    JettonMinter,
-    JettonMinterConfig,
-    jettonMinterConfigToCell,
-    JettonWallet,
-    parseTransferTransaction,
-    storeJettonMinterContent,
-} from '@ton-community/assets-sdk';
+import { toNano, beginCell, Builder } from '@ton/core';
+import { JettonMinter, JettonMinterConfig, JettonWallet } from '@ton-community/assets-sdk';
 import {
     CommitData,
     TokenTransfer,
@@ -35,9 +17,8 @@ import {
 import '@ton/test-utils';
 import { randomAddress } from '@ton/test-utils';
 import { createStrMap, getTotalFees } from '../utils/utils';
-import { Address } from '@ton/core';
-import { compile, createNetworkProvider } from '@ton/blueprint';
 import { buildOnchainMetadata } from '../utils/jettonHelpers';
+import { prettyPrint } from '@tact-lang/compiler';
 
 describe('TrainJetton', () => {
     let blockchain: Blockchain;
@@ -310,7 +291,7 @@ describe('TrainJetton', () => {
             success: true,
             op: 0x0,
         });
-        
+
         expect(
             commitTx.externals.some((x) => x.body.beginParse().loadUint(32) === TrainJetton.opcodes.TokenCommitted),
         ).toBe(true);
@@ -326,5 +307,334 @@ describe('TrainJetton', () => {
         expect(details?.jettonMasterAddress.equals(jettonMaster.address)).toBe(true);
         expect((await trainContract.getGetContractsLength()) - contractsLengthBefore).toBe(1n);
         console.log('Total Fees for Commit Msg: ', getTotalFees(commitTx.transactions) / 10 ** 9, ' TON');
+    });
+
+    it('Commit fails with 0 amount', async () => {
+        const commitId = BigInt(Date.now());
+        const timelock = BigInt(blockchain.now! + 1800);
+        const commitData: CommitData = {
+            dstChain,
+            dstAsset,
+            dstAddress,
+            srcAsset,
+            id: commitId,
+            srcReceiver: user.address,
+            timelock,
+            jettonMasterAddress: jettonMaster.address,
+            senderPubKey,
+            hopChains,
+            hopAssets,
+            hopAddresses,
+            $$type: 'CommitData',
+        };
+
+        const writeCommitData = storeCommitData(commitData);
+        const forwardPayload = new Builder();
+        writeCommitData(forwardPayload);
+
+        const finalForwardPayload = beginCell()
+            .storeUint(1, 1)
+            .storeRef(beginCell().storeUint(1734998782, 32).storeBuilder(forwardPayload).endCell())
+            .endCell()
+            .asSlice();
+
+        const queryId = BigInt(Date.now());
+        const amount = 0n;
+        const tokenTransferMessage: TokenTransfer = {
+            $$type: 'TokenTransfer',
+            queryId,
+            amount,
+            destination: trainContract.address,
+            responseDestination: user.address,
+            customPayload: beginCell().storeInt(0, 32).storeStringTail('Success').endCell(),
+            forwardTonAmount: toNano('0.3'),
+            forwardPayload: finalForwardPayload,
+        };
+
+        const writeTokenTransfer = storeTokenTransfer(tokenTransferMessage);
+        const body = new Builder();
+        writeTokenTransfer(body);
+        const contractsLengthBefore = await trainContract.getGetContractsLength();
+        const balanceBefore = (await userJettonWallet.getData()).balance;
+        const commitTx = await user.send({
+            value: toNano('0.5'),
+            to: userJettonWallet.address,
+            sendMode: 1,
+            body: body.asCell(),
+        });
+        expect(commitTx.transactions).toHaveTransaction({
+            from: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            to: trainContract.address,
+            success: true,
+            op: TrainJetton.opcodes.TokenNotification,
+        });
+
+        expect(commitTx.transactions).toHaveTransaction({
+            from: trainContract.address,
+            to: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            success: true,
+            op: TrainJetton.opcodes.TokenTransfer,
+        });
+
+        expect(commitTx.transactions).toHaveTransaction({
+            from: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            to: userJettonWallet.address,
+            success: true,
+            op: 0x178d4519, // internal transfer
+        });
+
+        const details = await trainContract.getGetHtlcDetails(commitId);
+        expect(details).toBeFalsy();
+        expect((await trainContract.getGetContractsLength()) - contractsLengthBefore).toBe(0n);
+        expect((await userJettonWallet.getData()).balance - balanceBefore).toBe(0n);
+    });
+
+    it('Commit fails not future timelock', async () => {
+        const commitId = BigInt(Date.now());
+        const timelock = BigInt(blockchain.now! + 899);
+        const commitData: CommitData = {
+            dstChain,
+            dstAsset,
+            dstAddress,
+            srcAsset,
+            id: commitId,
+            srcReceiver: user.address,
+            timelock,
+            jettonMasterAddress: jettonMaster.address,
+            senderPubKey,
+            hopChains,
+            hopAssets,
+            hopAddresses,
+            $$type: 'CommitData',
+        };
+
+        const writeCommitData = storeCommitData(commitData);
+        const forwardPayload = new Builder();
+        writeCommitData(forwardPayload);
+
+        const finalForwardPayload = beginCell()
+            .storeUint(1, 1)
+            .storeRef(beginCell().storeUint(1734998782, 32).storeBuilder(forwardPayload).endCell())
+            .endCell()
+            .asSlice();
+
+        const queryId = BigInt(Date.now());
+        const amount = 1n;
+        const tokenTransferMessage: TokenTransfer = {
+            $$type: 'TokenTransfer',
+            queryId,
+            amount,
+            destination: trainContract.address,
+            responseDestination: user.address,
+            customPayload: beginCell().storeInt(0, 32).storeStringTail('Success').endCell(),
+            forwardTonAmount: toNano('0.3'),
+            forwardPayload: finalForwardPayload,
+        };
+
+        const writeTokenTransfer = storeTokenTransfer(tokenTransferMessage);
+        const body = new Builder();
+        writeTokenTransfer(body);
+        const contractsLengthBefore = await trainContract.getGetContractsLength();
+        const balanceBefore = (await userJettonWallet.getData()).balance;
+        const commitTx = await user.send({
+            value: toNano('0.5'),
+            to: userJettonWallet.address,
+            sendMode: 1,
+            body: body.asCell(),
+        });
+        expect(commitTx.transactions).toHaveTransaction({
+            from: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            to: trainContract.address,
+            success: true,
+            op: TrainJetton.opcodes.TokenNotification,
+        });
+
+        expect(commitTx.transactions).toHaveTransaction({
+            from: trainContract.address,
+            to: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            success: true,
+            op: TrainJetton.opcodes.TokenTransfer,
+        });
+
+        expect(commitTx.transactions).toHaveTransaction({
+            from: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            to: userJettonWallet.address,
+            success: true,
+            op: 0x178d4519, // internal transfer
+        });
+
+        const details = await trainContract.getGetHtlcDetails(commitId);
+        expect(details).toBeFalsy();
+        expect((await trainContract.getGetContractsLength()) - contractsLengthBefore).toBe(0n);
+        expect((await userJettonWallet.getData()).balance - balanceBefore).toBe(0n);
+    });
+
+    it('Commit fails with existing Id', async () => {
+        const commitId = BigInt(Date.now());
+        const timelock = BigInt(blockchain.now! + 901);
+        const commitData: CommitData = {
+            dstChain,
+            dstAsset,
+            dstAddress,
+            srcAsset,
+            id: commitId,
+            srcReceiver: user.address,
+            timelock,
+            jettonMasterAddress: jettonMaster.address,
+            senderPubKey,
+            hopChains,
+            hopAssets,
+            hopAddresses,
+            $$type: 'CommitData',
+        };
+
+        const writeCommitData = storeCommitData(commitData);
+        const forwardPayload = new Builder();
+        writeCommitData(forwardPayload);
+
+        const finalForwardPayload = beginCell()
+            .storeUint(1, 1)
+            .storeRef(beginCell().storeUint(1734998782, 32).storeBuilder(forwardPayload).endCell())
+            .endCell()
+            .asSlice();
+
+        const queryId = BigInt(Date.now());
+        const amount = 1n;
+        const tokenTransferMessage: TokenTransfer = {
+            $$type: 'TokenTransfer',
+            queryId,
+            amount,
+            destination: trainContract.address,
+            responseDestination: user.address,
+            customPayload: beginCell().storeInt(0, 32).storeStringTail('Success').endCell(),
+            forwardTonAmount: toNano('0.3'),
+            forwardPayload: finalForwardPayload,
+        };
+
+        const writeTokenTransfer = storeTokenTransfer(tokenTransferMessage);
+        const body = new Builder();
+        writeTokenTransfer(body);
+        await user.send({
+            value: toNano('0.5'),
+            to: userJettonWallet.address,
+            sendMode: 1,
+            body: body.asCell(),
+        });
+        const contractsLengthBefore = await trainContract.getGetContractsLength();
+        const balanceBefore = (await userJettonWallet.getData()).balance;
+        const commitTx = await user.send({
+            value: toNano('0.5'),
+            to: userJettonWallet.address,
+            sendMode: 1,
+            body: body.asCell(),
+        });
+        expect(commitTx.transactions).toHaveTransaction({
+            from: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            to: trainContract.address,
+            success: true,
+            op: TrainJetton.opcodes.TokenNotification,
+        });
+
+        expect(commitTx.transactions).toHaveTransaction({
+            from: trainContract.address,
+            to: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            success: true,
+            op: TrainJetton.opcodes.TokenTransfer,
+        });
+
+        expect(commitTx.transactions).toHaveTransaction({
+            from: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            to: userJettonWallet.address,
+            success: true,
+            op: 0x178d4519, // internal transfer
+        });
+
+        expect((await trainContract.getGetContractsLength()) - contractsLengthBefore).toBe(0n);
+        expect((await userJettonWallet.getData()).balance - balanceBefore).toBe(0n);
+    });
+
+    it('Deposit fails wrong opcode', async () => {
+        const commitId = BigInt(Date.now());
+        const timelock = BigInt(blockchain.now! + 901);
+        const commitData: CommitData = {
+            dstChain,
+            dstAsset,
+            dstAddress,
+            srcAsset,
+            id: commitId,
+            srcReceiver: user.address,
+            timelock,
+            jettonMasterAddress: jettonMaster.address,
+            senderPubKey,
+            hopChains,
+            hopAssets,
+            hopAddresses,
+            $$type: 'CommitData',
+        };
+
+        const writeCommitData = storeCommitData(commitData);
+        const forwardPayload = new Builder();
+        writeCommitData(forwardPayload);
+
+        const finalForwardPayload = beginCell()
+            .storeUint(1, 1)
+            .storeRef(beginCell().storeUint(1111111, 32).storeBuilder(forwardPayload).endCell())
+            .endCell()
+            .asSlice();
+
+        const queryId = BigInt(Date.now());
+        const amount = 1n;
+        const tokenTransferMessage: TokenTransfer = {
+            $$type: 'TokenTransfer',
+            queryId,
+            amount,
+            destination: trainContract.address,
+            responseDestination: user.address,
+            customPayload: beginCell().storeInt(0, 32).storeStringTail('Success').endCell(),
+            forwardTonAmount: toNano('0.3'),
+            forwardPayload: finalForwardPayload,
+        };
+
+        const writeTokenTransfer = storeTokenTransfer(tokenTransferMessage);
+        const body = new Builder();
+        writeTokenTransfer(body);
+        await user.send({
+            value: toNano('0.5'),
+            to: userJettonWallet.address,
+            sendMode: 1,
+            body: body.asCell(),
+        });
+        const contractsLengthBefore = await trainContract.getGetContractsLength();
+        const balanceBefore = (await userJettonWallet.getData()).balance;
+        const commitTx = await user.send({
+            value: toNano('0.5'),
+            to: userJettonWallet.address,
+            sendMode: 1,
+            body: body.asCell(),
+        });
+
+        expect(commitTx.transactions).toHaveTransaction({
+            from: (await jettonMaster.getWalletAddress(trainContract.address)) ?? undefined,
+            to: trainContract.address,
+            success: true,
+            op: TrainJetton.opcodes.TokenNotification,
+        });
+
+        expect(commitTx.transactions).toHaveTransaction({
+            from: trainContract.address,
+            to: (await jettonMaster.getWalletAddress(trainContract.address)) ?? undefined,
+            success: true,
+            op: TrainJetton.opcodes.TokenTransfer,
+        });
+
+        expect(commitTx.transactions).toHaveTransaction({
+            from: (await jettonMaster.getWalletAddress(trainContract.address)) ?? undefined,
+            to: userJettonWallet.address,
+            success: true,
+            op: 0x178d4519, // internal transfer
+        });
+
+        expect((await trainContract.getGetContractsLength()) - contractsLengthBefore).toBe(0n);
+        expect((await userJettonWallet.getData()).balance - balanceBefore).toBe(0n);
     });
 });

@@ -1,9 +1,7 @@
 import { Dictionary, Transaction } from '@ton/core';
 import { StringImpl } from '../build/train/tact_Train';
 import { Address } from '@ton/ton';
-import { createHash, randomBytes, randomInt } from 'crypto';
-import { sha256 } from 'ton-crypto';
-import { hash } from '@tact-lang/compiler/dist/asm/runtime/util';
+import { createHash, randomBytes } from 'crypto';
 
 function delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));

@@ -23,7 +23,7 @@ export async function run() {
 
     const hashlock = BigInt(process.env.hashlock!);
     const timelock = BigInt(Math.floor(Date.now() / 1000) + 1830);
-    const srcReceiver = Address.parse('0QD_T3AacDxDFLLPZ9TmOvq9wHKh7dvm8MHoEh8GfHIWkgKJ');
+    const srcReceiver = Address.parse('0QAS8JNB0G4zVkdxABCLVG-Vy3KXE3W3zz1yxpnfu4J-B40y');
     const srcAsset = 'TON';
     const dstChain = 'STARKNET_SEPOLIA';
     const dstAddress = '0x0430a74277723D1EBba7119339F0F8276ca946c1B2c73DE7636Fd9EBA31e1c1f';

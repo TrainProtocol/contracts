@@ -15,6 +15,11 @@ module.exports = {
   },
 
   networks: {
+    binanceMainnet: {
+      url: 'https://bsc-dataseed1.binance.org/',
+      chainId: 56,
+      accounts: [process.env.mainnet],
+    },
     linea_mainnet: {
       url: process.env.lineaRPC,
       accounts: [process.env.mainnet],
@@ -113,6 +118,7 @@ module.exports = {
 
   etherscan: {
     apiKey: {
+      binanceMainnet: process.env.BSCSCAN_API_KEY,
       berachain: process.env.berachain,
       unichainSepolia: process.env.unichainSepolia,
       immutableTestnet: process.env.immutableTestnet,
@@ -133,6 +139,14 @@ module.exports = {
       linea_mainnet: process.env.linea_mainnet,
     },
     customChains: [
+      {
+        network: "binanceMainnet",
+        chainId: 56,
+        urls: {
+          apiURL: "https://api.etherscan.io/v2/api?chainid=56",
+          browserURL: "https://bscscan.com"
+        }
+      },
       {
         network: 'linea_mainnet',
         chainId: 59144,
