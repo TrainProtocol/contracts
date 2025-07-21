@@ -1,24 +1,21 @@
-import {
-    Blockchain,
-    prettyLogTransactions,
-    printTransactionFees,
-    SandboxContract,
-    TreasuryContract,
-} from '@ton/sandbox';
-import { toNano, beginCell, Builder } from '@ton/core';
+import { Blockchain, printTransactionFees, SandboxContract, TreasuryContract } from '@ton/sandbox';
+import { toNano, beginCell, Builder, Cell } from '@ton/core';
 import { JettonMinter, JettonMinterConfig, JettonWallet } from '@ton-community/assets-sdk';
 import {
+    AddLock,
     CommitData,
+    LockData,
     TokenTransfer,
     TrainJetton,
     storeCommitData,
+    storeLockData,
     storeTokenTransfer,
 } from '../build/jetton_train/tact_TrainJetton';
 import '@ton/test-utils';
 import { randomAddress } from '@ton/test-utils';
-import { createStrMap, getTotalFees } from '../utils/utils';
+import { commitJetton, createHashlockSecretPair, createStrMap, getTotalFees, lockJetton } from '../utils/utils';
 import { buildOnchainMetadata } from '../utils/jettonHelpers';
-import { prettyPrint } from '@tact-lang/compiler';
+import { keyPairFromSeed, getSecureRandomBytes, sign } from '@ton/crypto';
 
 describe('TrainJetton', () => {
     let blockchain: Blockchain;
@@ -35,12 +32,14 @@ describe('TrainJetton', () => {
     const dstAsset = 'USDC';
     const dstAddress = '0xF6517026847B4c166AAA176fe0C5baD1A245778D';
     const srcAsset = 'TESTJ';
-    const senderPubKey = 12345n;
     const hopChains = createStrMap([[0n, { $$type: 'StringImpl', data: 'ARBITRUM_SEPOLIA' }]]);
     const hopAssets = createStrMap([[0n, { $$type: 'StringImpl', data: 'USDC' }]]);
     const hopAddresses = createStrMap([
         [0n, { $$type: 'StringImpl', data: '0xF6517026847B4c166AAA176fe0C5baD1A245778D' }],
     ]);
+    let userSeed;
+    let kp: { publicKey: any; secretKey: any };
+    let senderPubKey: bigint;
 
     beforeEach(async () => {
         blockchain = await Blockchain.create();
@@ -48,6 +47,9 @@ describe('TrainJetton', () => {
         deployer = await blockchain.treasury('deployer');
         user = await blockchain.treasury('user');
         solver = await blockchain.treasury('solver');
+        userSeed = await getSecureRandomBytes(32);
+        kp = keyPairFromSeed(userSeed);
+        senderPubKey = BigInt('0x' + kp.publicKey.toString('hex'));
         const walletCode = JettonWallet.code;
         const minterCode = JettonMinter.code;
 
@@ -636,5 +638,1138 @@ describe('TrainJetton', () => {
 
         expect((await trainContract.getGetContractsLength()) - contractsLengthBefore).toBe(0n);
         expect((await userJettonWallet.getData()).balance - balanceBefore).toBe(0n);
+    });
+
+    it('Lock successful', async () => {
+        const lockId = BigInt(Date.now());
+        const timelock = BigInt(blockchain.now! + 1801);
+        const rewardTimelock = BigInt(blockchain.now! + 1700);
+        const rewardAmount = 1n;
+        const hashlock = createHashlockSecretPair().hashlock;
+
+        const lockData: LockData = {
+            $$type: 'LockData',
+            id: lockId,
+            hashlock: hashlock,
+            timelock: timelock,
+            srcReceiver: user.address,
+            srcAsset: srcAsset,
+            dstChain: dstChain,
+            dstAddress: dstAddress,
+            dstAsset: dstAsset,
+            reward: rewardAmount,
+            rewardTimelock: rewardTimelock,
+            jettonMasterAddress: jettonMaster.address,
+        };
+
+        const writeLockData = storeLockData(lockData);
+        const forwardPayload = new Builder();
+        writeLockData(forwardPayload);
+
+        const finalForwardPayload = beginCell()
+            .storeUint(1, 1)
+            .storeRef(beginCell().storeUint(317164721, 32).storeBuilder(forwardPayload).endCell())
+            .endCell()
+            .asSlice();
+
+        const queryId = BigInt(Date.now());
+        const amount = 3n;
+        const tokenTransferMessage: TokenTransfer = {
+            $$type: 'TokenTransfer',
+            queryId,
+            amount,
+            destination: trainContract.address,
+            responseDestination: solver.address,
+            customPayload: beginCell().storeInt(0, 32).storeStringTail('Success').endCell(),
+            forwardTonAmount: toNano('0.1'),
+            forwardPayload: finalForwardPayload,
+        };
+
+        const writeTokenTransfer = storeTokenTransfer(tokenTransferMessage);
+        const body = new Builder();
+        writeTokenTransfer(body);
+        const contractsLengthBefore = await trainContract.getGetContractsLength();
+        const rewardsLengthBefore = await trainContract.getGetRewardsLength();
+        const lockTx = await solver.send({
+            value: toNano('0.5'),
+            to: solverJettonWallet.address,
+            sendMode: 1,
+            body: body.asCell(),
+        });
+
+        expect(lockTx.transactions).toHaveTransaction({
+            from: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            to: trainContract.address,
+            success: true,
+            op: TrainJetton.opcodes.TokenNotification,
+        });
+
+        expect(lockTx.transactions).toHaveTransaction({
+            from: trainContract.address,
+            to: solver.address,
+            success: true,
+            op: 0x0,
+        });
+
+        expect(lockTx.externals.some((x) => x.body.beginParse().loadUint(32) === TrainJetton.opcodes.TokenLocked)).toBe(
+            true,
+        );
+
+        const details = await trainContract.getGetHtlcDetails(lockId);
+        expect(details).toBeTruthy();
+        expect(details?.sender.equals(solver.address)).toBe(true);
+        expect(details?.amount).toBe(amount - rewardAmount);
+        expect(details?.timelock).toBe(timelock);
+        expect(details?.srcReceiver.equals(user.address)).toBe(true);
+        expect(details?.senderPubKey).toBe(1n);
+        expect(details?.hashlock).toBe(hashlock);
+        expect(details?.jettonMasterAddress.equals(jettonMaster.address)).toBe(true);
+        expect((await trainContract.getGetContractsLength()) - contractsLengthBefore).toBe(1n);
+
+        const rewardDetails = await trainContract.getGetRewardDetails(lockId);
+        expect(rewardDetails).toBeTruthy();
+        expect(rewardDetails?.amount).toBe(rewardAmount);
+        expect(rewardDetails?.timelock).toBe(rewardTimelock);
+        expect((await trainContract.getGetRewardsLength()) - rewardsLengthBefore).toBe(1n);
+        console.log('Total Fees for Lock Msg: ', getTotalFees(lockTx.transactions) / 10 ** 9, ' TON');
+    });
+
+    it('Lock successful with 0 reward', async () => {
+        const lockId = BigInt(Date.now());
+        const timelock = BigInt(blockchain.now! + 1801);
+        const rewardTimelock = BigInt(blockchain.now! + 1700);
+        const rewardAmount = 0n;
+        const hashlock = createHashlockSecretPair().hashlock;
+
+        const lockData: LockData = {
+            $$type: 'LockData',
+            id: lockId,
+            hashlock: hashlock,
+            timelock: timelock,
+            srcReceiver: user.address,
+            srcAsset: srcAsset,
+            dstChain: dstChain,
+            dstAddress: dstAddress,
+            dstAsset: dstAsset,
+            reward: rewardAmount,
+            rewardTimelock: rewardTimelock,
+            jettonMasterAddress: jettonMaster.address,
+        };
+
+        const writeLockData = storeLockData(lockData);
+        const forwardPayload = new Builder();
+        writeLockData(forwardPayload);
+
+        const finalForwardPayload = beginCell()
+            .storeUint(1, 1)
+            .storeRef(beginCell().storeUint(317164721, 32).storeBuilder(forwardPayload).endCell())
+            .endCell()
+            .asSlice();
+
+        const queryId = BigInt(Date.now());
+        const amount = 3n;
+        const tokenTransferMessage: TokenTransfer = {
+            $$type: 'TokenTransfer',
+            queryId,
+            amount,
+            destination: trainContract.address,
+            responseDestination: solver.address,
+            customPayload: beginCell().storeInt(0, 32).storeStringTail('Success').endCell(),
+            forwardTonAmount: toNano('0.1'),
+            forwardPayload: finalForwardPayload,
+        };
+
+        const writeTokenTransfer = storeTokenTransfer(tokenTransferMessage);
+        const body = new Builder();
+        writeTokenTransfer(body);
+        const contractsLengthBefore = await trainContract.getGetContractsLength();
+        const rewardsLengthBefore = await trainContract.getGetRewardsLength();
+        const lockTx = await solver.send({
+            value: toNano('0.5'),
+            to: solverJettonWallet.address,
+            sendMode: 1,
+            body: body.asCell(),
+        });
+
+        expect(lockTx.transactions).toHaveTransaction({
+            from: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            to: trainContract.address,
+            success: true,
+            op: TrainJetton.opcodes.TokenNotification,
+        });
+
+        expect(lockTx.transactions).toHaveTransaction({
+            from: trainContract.address,
+            to: solver.address,
+            success: true,
+            op: 0x0,
+        });
+
+        expect(lockTx.externals.some((x) => x.body.beginParse().loadUint(32) === TrainJetton.opcodes.TokenLocked)).toBe(
+            true,
+        );
+
+        const details = await trainContract.getGetHtlcDetails(lockId);
+        expect(details).toBeTruthy();
+        expect(details?.sender.equals(solver.address)).toBe(true);
+        expect(details?.amount).toBe(amount - rewardAmount);
+        expect(details?.timelock).toBe(timelock);
+        expect(details?.srcReceiver.equals(user.address)).toBe(true);
+        expect(details?.senderPubKey).toBe(1n);
+        expect(details?.hashlock).toBe(hashlock);
+        expect(details?.jettonMasterAddress.equals(jettonMaster.address)).toBe(true);
+        expect((await trainContract.getGetContractsLength()) - contractsLengthBefore).toBe(1n);
+
+        const rewardDetails = await trainContract.getGetRewardDetails(lockId);
+        expect(rewardDetails).toBeFalsy();
+        expect((await trainContract.getGetRewardsLength()) - rewardsLengthBefore).toBe(0n);
+    });
+
+    it('Lock fails existing Id', async () => {
+        const lockId = BigInt(Date.now());
+        const timelock = BigInt(blockchain.now! + 1801);
+        const rewardTimelock = BigInt(blockchain.now! + 1700);
+        const rewardAmount = 1n;
+        const hashlock = createHashlockSecretPair().hashlock;
+
+        const lockData: LockData = {
+            $$type: 'LockData',
+            id: lockId,
+            hashlock: hashlock,
+            timelock: timelock,
+            srcReceiver: user.address,
+            srcAsset: srcAsset,
+            dstChain: dstChain,
+            dstAddress: dstAddress,
+            dstAsset: dstAsset,
+            reward: rewardAmount,
+            rewardTimelock: rewardTimelock,
+            jettonMasterAddress: jettonMaster.address,
+        };
+
+        const writeLockData = storeLockData(lockData);
+        const forwardPayload = new Builder();
+        writeLockData(forwardPayload);
+
+        const finalForwardPayload = beginCell()
+            .storeUint(1, 1)
+            .storeRef(beginCell().storeUint(317164721, 32).storeBuilder(forwardPayload).endCell())
+            .endCell()
+            .asSlice();
+
+        const queryId = BigInt(Date.now());
+        const amount = 3n;
+        const tokenTransferMessage: TokenTransfer = {
+            $$type: 'TokenTransfer',
+            queryId,
+            amount,
+            destination: trainContract.address,
+            responseDestination: solver.address,
+            customPayload: beginCell().storeInt(0, 32).storeStringTail('Success').endCell(),
+            forwardTonAmount: toNano('0.1'),
+            forwardPayload: finalForwardPayload,
+        };
+
+        const writeTokenTransfer = storeTokenTransfer(tokenTransferMessage);
+        const body = new Builder();
+        writeTokenTransfer(body);
+
+        await solver.send({
+            value: toNano('0.5'),
+            to: solverJettonWallet.address,
+            sendMode: 1,
+            body: body.asCell(),
+        });
+
+        const lockTx = await solver.send({
+            value: toNano('0.5'),
+            to: solverJettonWallet.address,
+            sendMode: 1,
+            body: body.asCell(),
+        });
+
+        const contractsLengthBefore = await trainContract.getGetContractsLength();
+        const rewardsLengthBefore = await trainContract.getGetRewardsLength();
+
+        expect(lockTx.transactions).toHaveTransaction({
+            from: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            to: trainContract.address,
+            success: true,
+            op: TrainJetton.opcodes.TokenNotification,
+        });
+
+        expect(lockTx.transactions).toHaveTransaction({
+            from: trainContract.address,
+            to: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            success: true,
+            op: TrainJetton.opcodes.TokenTransfer,
+        });
+
+        expect(lockTx.transactions).toHaveTransaction({
+            from: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            to: solverJettonWallet.address,
+            success: true,
+            op: 0x178d4519, // internal transfer
+        });
+
+        const details = await trainContract.getGetHtlcDetails(lockId);
+        expect(details).toBeTruthy();
+        expect((await trainContract.getGetContractsLength()) - contractsLengthBefore).toBe(0n);
+
+        const rewardDetails = await trainContract.getGetRewardDetails(lockId);
+        expect(rewardDetails).toBeTruthy();
+        expect((await trainContract.getGetRewardsLength()) - rewardsLengthBefore).toBe(0n);
+    });
+
+    it('Lock fails msg.amount <= reward', async () => {
+        const lockId = BigInt(Date.now());
+        const timelock = BigInt(blockchain.now! + 1801);
+        const rewardTimelock = BigInt(blockchain.now! + 1700);
+        const rewardAmount = 1n;
+        const hashlock = createHashlockSecretPair().hashlock;
+
+        const lockData: LockData = {
+            $$type: 'LockData',
+            id: lockId,
+            hashlock: hashlock,
+            timelock: timelock,
+            srcReceiver: user.address,
+            srcAsset: srcAsset,
+            dstChain: dstChain,
+            dstAddress: dstAddress,
+            dstAsset: dstAsset,
+            reward: rewardAmount,
+            rewardTimelock: rewardTimelock,
+            jettonMasterAddress: jettonMaster.address,
+        };
+
+        const writeLockData = storeLockData(lockData);
+        const forwardPayload = new Builder();
+        writeLockData(forwardPayload);
+
+        const finalForwardPayload = beginCell()
+            .storeUint(1, 1)
+            .storeRef(beginCell().storeUint(317164721, 32).storeBuilder(forwardPayload).endCell())
+            .endCell()
+            .asSlice();
+
+        const queryId = BigInt(Date.now());
+        const amount = 1n;
+        const tokenTransferMessage: TokenTransfer = {
+            $$type: 'TokenTransfer',
+            queryId,
+            amount,
+            destination: trainContract.address,
+            responseDestination: solver.address,
+            customPayload: beginCell().storeInt(0, 32).storeStringTail('Success').endCell(),
+            forwardTonAmount: toNano('0.1'),
+            forwardPayload: finalForwardPayload,
+        };
+
+        const writeTokenTransfer = storeTokenTransfer(tokenTransferMessage);
+        const body = new Builder();
+        writeTokenTransfer(body);
+
+        const contractsLengthBefore = await trainContract.getGetContractsLength();
+        const rewardsLengthBefore = await trainContract.getGetRewardsLength();
+
+        const lockTx = await solver.send({
+            value: toNano('0.5'),
+            to: solverJettonWallet.address,
+            sendMode: 1,
+            body: body.asCell(),
+        });
+
+        expect(lockTx.transactions).toHaveTransaction({
+            from: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            to: trainContract.address,
+            success: true,
+            op: TrainJetton.opcodes.TokenNotification,
+        });
+
+        expect(lockTx.transactions).toHaveTransaction({
+            from: trainContract.address,
+            to: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            success: true,
+            op: TrainJetton.opcodes.TokenTransfer,
+        });
+
+        expect(lockTx.transactions).toHaveTransaction({
+            from: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            to: solverJettonWallet.address,
+            success: true,
+            op: 0x178d4519, // internal transfer
+        });
+
+        const details = await trainContract.getGetHtlcDetails(lockId);
+        expect(details).toBeFalsy();
+        expect((await trainContract.getGetContractsLength()) - contractsLengthBefore).toBe(0n);
+
+        const rewardDetails = await trainContract.getGetRewardDetails(lockId);
+        expect(rewardDetails).toBeFalsy();
+        expect((await trainContract.getGetRewardsLength()) - rewardsLengthBefore).toBe(0n);
+    });
+
+    it('Lock fails not future timelock', async () => {
+        const lockId = BigInt(Date.now());
+        const timelock = BigInt(blockchain.now! + 1800);
+        const rewardTimelock = BigInt(blockchain.now! + 1700);
+        const rewardAmount = 1n;
+        const hashlock = createHashlockSecretPair().hashlock;
+
+        const lockData: LockData = {
+            $$type: 'LockData',
+            id: lockId,
+            hashlock: hashlock,
+            timelock: timelock,
+            srcReceiver: user.address,
+            srcAsset: srcAsset,
+            dstChain: dstChain,
+            dstAddress: dstAddress,
+            dstAsset: dstAsset,
+            reward: rewardAmount,
+            rewardTimelock: rewardTimelock,
+            jettonMasterAddress: jettonMaster.address,
+        };
+
+        const writeLockData = storeLockData(lockData);
+        const forwardPayload = new Builder();
+        writeLockData(forwardPayload);
+
+        const finalForwardPayload = beginCell()
+            .storeUint(1, 1)
+            .storeRef(beginCell().storeUint(317164721, 32).storeBuilder(forwardPayload).endCell())
+            .endCell()
+            .asSlice();
+
+        const queryId = BigInt(Date.now());
+        const amount = 3n;
+        const tokenTransferMessage: TokenTransfer = {
+            $$type: 'TokenTransfer',
+            queryId,
+            amount,
+            destination: trainContract.address,
+            responseDestination: solver.address,
+            customPayload: beginCell().storeInt(0, 32).storeStringTail('Success').endCell(),
+            forwardTonAmount: toNano('0.1'),
+            forwardPayload: finalForwardPayload,
+        };
+
+        const writeTokenTransfer = storeTokenTransfer(tokenTransferMessage);
+        const body = new Builder();
+        writeTokenTransfer(body);
+
+        const contractsLengthBefore = await trainContract.getGetContractsLength();
+        const rewardsLengthBefore = await trainContract.getGetRewardsLength();
+
+        const lockTx = await solver.send({
+            value: toNano('0.5'),
+            to: solverJettonWallet.address,
+            sendMode: 1,
+            body: body.asCell(),
+        });
+
+        expect(lockTx.transactions).toHaveTransaction({
+            from: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            to: trainContract.address,
+            success: true,
+            op: TrainJetton.opcodes.TokenNotification,
+        });
+
+        expect(lockTx.transactions).toHaveTransaction({
+            from: trainContract.address,
+            to: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            success: true,
+            op: TrainJetton.opcodes.TokenTransfer,
+        });
+
+        expect(lockTx.transactions).toHaveTransaction({
+            from: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            to: solverJettonWallet.address,
+            success: true,
+            op: 0x178d4519, // internal transfer
+        });
+
+        const details = await trainContract.getGetHtlcDetails(lockId);
+        expect(details).toBeFalsy();
+        expect((await trainContract.getGetContractsLength()) - contractsLengthBefore).toBe(0n);
+
+        const rewardDetails = await trainContract.getGetRewardDetails(lockId);
+        expect(rewardDetails).toBeFalsy();
+        expect((await trainContract.getGetRewardsLength()) - rewardsLengthBefore).toBe(0n);
+    });
+
+    it('Lock fails invalid reward timelock', async () => {
+        const lockId = BigInt(Date.now());
+        const timelock = BigInt(blockchain.now! + 1801);
+        const rewardTimelock = BigInt(blockchain.now! + 1900);
+        const rewardAmount = 1n;
+        const hashlock = createHashlockSecretPair().hashlock;
+
+        const lockData: LockData = {
+            $$type: 'LockData',
+            id: lockId,
+            hashlock: hashlock,
+            timelock: timelock,
+            srcReceiver: user.address,
+            srcAsset: srcAsset,
+            dstChain: dstChain,
+            dstAddress: dstAddress,
+            dstAsset: dstAsset,
+            reward: rewardAmount,
+            rewardTimelock: rewardTimelock,
+            jettonMasterAddress: jettonMaster.address,
+        };
+
+        const writeLockData = storeLockData(lockData);
+        const forwardPayload = new Builder();
+        writeLockData(forwardPayload);
+
+        const finalForwardPayload = beginCell()
+            .storeUint(1, 1)
+            .storeRef(beginCell().storeUint(317164721, 32).storeBuilder(forwardPayload).endCell())
+            .endCell()
+            .asSlice();
+
+        const queryId = BigInt(Date.now());
+        const amount = 3n;
+        const tokenTransferMessage: TokenTransfer = {
+            $$type: 'TokenTransfer',
+            queryId,
+            amount,
+            destination: trainContract.address,
+            responseDestination: solver.address,
+            customPayload: beginCell().storeInt(0, 32).storeStringTail('Success').endCell(),
+            forwardTonAmount: toNano('0.1'),
+            forwardPayload: finalForwardPayload,
+        };
+
+        const writeTokenTransfer = storeTokenTransfer(tokenTransferMessage);
+        const body = new Builder();
+        writeTokenTransfer(body);
+
+        const contractsLengthBefore = await trainContract.getGetContractsLength();
+        const rewardsLengthBefore = await trainContract.getGetRewardsLength();
+
+        const lockTx = await solver.send({
+            value: toNano('0.5'),
+            to: solverJettonWallet.address,
+            sendMode: 1,
+            body: body.asCell(),
+        });
+
+        expect(lockTx.transactions).toHaveTransaction({
+            from: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            to: trainContract.address,
+            success: true,
+            op: TrainJetton.opcodes.TokenNotification,
+        });
+
+        expect(lockTx.transactions).toHaveTransaction({
+            from: trainContract.address,
+            to: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            success: true,
+            op: TrainJetton.opcodes.TokenTransfer,
+        });
+
+        expect(lockTx.transactions).toHaveTransaction({
+            from: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            to: solverJettonWallet.address,
+            success: true,
+            op: 0x178d4519, // internal transfer
+        });
+
+        const details = await trainContract.getGetHtlcDetails(lockId);
+        expect(details).toBeFalsy();
+        expect((await trainContract.getGetContractsLength()) - contractsLengthBefore).toBe(0n);
+
+        const rewardDetails = await trainContract.getGetRewardDetails(lockId);
+        expect(rewardDetails).toBeFalsy();
+        expect((await trainContract.getGetRewardsLength()) - rewardsLengthBefore).toBe(0n);
+    });
+
+    it('Lock fails reward timelock not future', async () => {
+        const lockId = BigInt(Date.now());
+        const timelock = BigInt(blockchain.now! + 1801);
+        const rewardTimelock = BigInt(blockchain.now! - 1900);
+        const rewardAmount = 1n;
+        const hashlock = createHashlockSecretPair().hashlock;
+
+        const lockData: LockData = {
+            $$type: 'LockData',
+            id: lockId,
+            hashlock: hashlock,
+            timelock: timelock,
+            srcReceiver: user.address,
+            srcAsset: srcAsset,
+            dstChain: dstChain,
+            dstAddress: dstAddress,
+            dstAsset: dstAsset,
+            reward: rewardAmount,
+            rewardTimelock: rewardTimelock,
+            jettonMasterAddress: jettonMaster.address,
+        };
+
+        const writeLockData = storeLockData(lockData);
+        const forwardPayload = new Builder();
+        writeLockData(forwardPayload);
+
+        const finalForwardPayload = beginCell()
+            .storeUint(1, 1)
+            .storeRef(beginCell().storeUint(317164721, 32).storeBuilder(forwardPayload).endCell())
+            .endCell()
+            .asSlice();
+
+        const queryId = BigInt(Date.now());
+        const amount = 3n;
+        const tokenTransferMessage: TokenTransfer = {
+            $$type: 'TokenTransfer',
+            queryId,
+            amount,
+            destination: trainContract.address,
+            responseDestination: solver.address,
+            customPayload: beginCell().storeInt(0, 32).storeStringTail('Success').endCell(),
+            forwardTonAmount: toNano('0.1'),
+            forwardPayload: finalForwardPayload,
+        };
+
+        const writeTokenTransfer = storeTokenTransfer(tokenTransferMessage);
+        const body = new Builder();
+        writeTokenTransfer(body);
+
+        const contractsLengthBefore = await trainContract.getGetContractsLength();
+        const rewardsLengthBefore = await trainContract.getGetRewardsLength();
+
+        const lockTx = await solver.send({
+            value: toNano('0.5'),
+            to: solverJettonWallet.address,
+            sendMode: 1,
+            body: body.asCell(),
+        });
+
+        expect(lockTx.transactions).toHaveTransaction({
+            from: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            to: trainContract.address,
+            success: true,
+            op: TrainJetton.opcodes.TokenNotification,
+        });
+
+        expect(lockTx.transactions).toHaveTransaction({
+            from: trainContract.address,
+            to: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            success: true,
+            op: TrainJetton.opcodes.TokenTransfer,
+        });
+
+        expect(lockTx.transactions).toHaveTransaction({
+            from: (await trainContract.getGetHtlcJettonWalletForMaster(jettonMaster.address)) ?? undefined,
+            to: solverJettonWallet.address,
+            success: true,
+            op: 0x178d4519, // internal transfer
+        });
+
+        const details = await trainContract.getGetHtlcDetails(lockId);
+        expect(details).toBeFalsy();
+        expect((await trainContract.getGetContractsLength()) - contractsLengthBefore).toBe(0n);
+
+        const rewardDetails = await trainContract.getGetRewardDetails(lockId);
+        expect(rewardDetails).toBeFalsy();
+        expect((await trainContract.getGetRewardsLength()) - rewardsLengthBefore).toBe(0n);
+    });
+
+    it('Lock fails not jetton wallet sender', async () => {
+        const lockId = BigInt(Date.now());
+        const timelock = BigInt(blockchain.now! + 1801);
+        const rewardTimelock = BigInt(blockchain.now! + 1700);
+        const rewardAmount = 1n;
+        const hashlock = createHashlockSecretPair().hashlock;
+
+        const lockData: LockData = {
+            $$type: 'LockData',
+            id: lockId,
+            hashlock: hashlock,
+            timelock: timelock,
+            srcReceiver: user.address,
+            srcAsset: srcAsset,
+            dstChain: dstChain,
+            dstAddress: dstAddress,
+            dstAsset: dstAsset,
+            reward: rewardAmount,
+            rewardTimelock: rewardTimelock,
+            jettonMasterAddress: jettonMaster.address,
+        };
+
+        const writeLockData = storeLockData(lockData);
+        const forwardPayload = new Builder();
+        writeLockData(forwardPayload);
+
+        const finalForwardPayload = beginCell()
+            .storeUint(1, 1)
+            .storeRef(beginCell().storeUint(317164721, 32).storeBuilder(forwardPayload).endCell())
+            .endCell()
+            .asSlice();
+
+        const queryId = BigInt(Date.now());
+        const amount = 3n;
+        const tokenTransferMessage: TokenTransfer = {
+            $$type: 'TokenTransfer',
+            queryId,
+            amount,
+            destination: trainContract.address,
+            responseDestination: solver.address,
+            customPayload: beginCell().storeInt(0, 32).storeStringTail('Success').endCell(),
+            forwardTonAmount: toNano('0.1'),
+            forwardPayload: finalForwardPayload,
+        };
+
+        const writeTokenTransfer = storeTokenTransfer(tokenTransferMessage);
+        const body = new Builder();
+        writeTokenTransfer(body);
+
+        const contractsLengthBefore = await trainContract.getGetContractsLength();
+        const rewardsLengthBefore = await trainContract.getGetRewardsLength();
+
+        await trainContract.send(
+            deployer.getSender(),
+            { value: toNano('0.2') },
+            {
+                $$type: 'RemoveJetton',
+                jettonMaster: jettonMaster.address,
+            },
+        );
+
+        const lockTx = await solver.send({
+            value: toNano('0.5'),
+            to: solverJettonWallet.address,
+            sendMode: 1,
+            body: body.asCell(),
+        });
+
+        expect(lockTx.transactions).toHaveTransaction({
+            from: (await jettonMaster.getWalletAddress(trainContract.address)) ?? undefined,
+            to: trainContract.address,
+            success: true,
+            op: TrainJetton.opcodes.TokenNotification,
+        });
+
+        expect(lockTx.transactions).toHaveTransaction({
+            from: trainContract.address,
+            to: (await jettonMaster.getWalletAddress(trainContract.address)) ?? undefined,
+            success: true,
+            op: TrainJetton.opcodes.TokenTransfer,
+        });
+
+        expect(lockTx.transactions).toHaveTransaction({
+            from: (await jettonMaster.getWalletAddress(trainContract.address)) ?? undefined,
+            to: solverJettonWallet.address,
+            success: true,
+            op: 0x178d4519, // internal transfer
+        });
+
+        const details = await trainContract.getGetHtlcDetails(lockId);
+        expect(details).toBeFalsy();
+        expect((await trainContract.getGetContractsLength()) - contractsLengthBefore).toBe(0n);
+
+        const rewardDetails = await trainContract.getGetRewardDetails(lockId);
+        expect(rewardDetails).toBeFalsy();
+        expect((await trainContract.getGetRewardsLength()) - rewardsLengthBefore).toBe(0n);
+    });
+
+    it('AddLock successful', async () => {
+        const commitTx = await commitJetton(blockchain, trainContract, user, solver, userJettonWallet, jettonMaster);
+        const id = BigInt(commitTx.commitId);
+        const hashlock = BigInt(createHashlockSecretPair().hashlock);
+        const timelock = BigInt(Math.floor(Date.now() / 1000) + 930);
+        const addLockMessage: AddLock = {
+            $$type: 'AddLock',
+            id: id,
+            hashlock: hashlock,
+            timelock: timelock,
+        };
+
+        const addLockTx = await trainContract.send(user.getSender(), { value: toNano('0.1') }, addLockMessage);
+
+        expect(addLockTx.transactions).toHaveTransaction({
+            from: user.address,
+            to: trainContract.address,
+            success: true,
+            op: TrainJetton.opcodes.AddLock,
+        });
+
+        expect(addLockTx.transactions).toHaveTransaction({
+            from: trainContract.address,
+            to: user.address,
+            success: true,
+            op: 0x0,
+        });
+
+        const details = await trainContract.getGetHtlcDetails(id);
+        expect(details).toBeTruthy();
+        expect(details?.hashlock).toBe(hashlock);
+        expect(details?.timelock).toBe(timelock);
+
+        console.log('Total Fees for AddLock Msg: ', getTotalFees(addLockTx.transactions) / 10 ** 9, ' TON');
+    });
+
+    it('AddLock fails Contract Does Not Exist', async () => {
+        const commitTx = await commitJetton(blockchain, trainContract, user, solver, userJettonWallet, jettonMaster);
+        const id = BigInt(commitTx.commitId + 1n);
+        const hashlock = BigInt(createHashlockSecretPair().hashlock);
+        const timelock = BigInt(Math.floor(Date.now() / 1000) + 930);
+        const addLockMessage: AddLock = {
+            $$type: 'AddLock',
+            id: id,
+            hashlock: hashlock,
+            timelock: timelock,
+        };
+
+        const addLockTx = await trainContract.send(user.getSender(), { value: toNano('0.1') }, addLockMessage);
+
+        expect(addLockTx.transactions).toHaveTransaction({
+            from: user.address,
+            to: trainContract.address,
+            success: false,
+            op: TrainJetton.opcodes.AddLock,
+            exitCode: TrainJetton.errors['Contract Does Not Exist'],
+        });
+
+        const details = await trainContract.getGetHtlcDetails(commitTx.commitId);
+        expect(details).toBeTruthy();
+        expect(details?.hashlock).toBe(1n);
+    });
+
+    it('AddLock fails No Allowance', async () => {
+        const commitTx = await commitJetton(blockchain, trainContract, user, solver, userJettonWallet, jettonMaster);
+        const id = BigInt(commitTx.commitId);
+        const hashlock = BigInt(createHashlockSecretPair().hashlock);
+        const timelock = BigInt(Math.floor(Date.now() / 1000) + 930);
+        const addLockMessage: AddLock = {
+            $$type: 'AddLock',
+            id: id,
+            hashlock: hashlock,
+            timelock: timelock,
+        };
+
+        const addLockTx = await trainContract.send(solver.getSender(), { value: toNano('0.1') }, addLockMessage);
+
+        expect(addLockTx.transactions).toHaveTransaction({
+            from: solver.address,
+            to: trainContract.address,
+            success: false,
+            op: TrainJetton.opcodes.AddLock,
+            exitCode: TrainJetton.errors['No Allowance'],
+        });
+
+        const details = await trainContract.getGetHtlcDetails(commitTx.commitId);
+        expect(details).toBeTruthy();
+        expect(details?.hashlock).toBe(1n);
+    });
+
+    it('AddLock fails Hashlock Already Set', async () => {
+        const commitTx = await commitJetton(blockchain, trainContract, user, solver, userJettonWallet, jettonMaster);
+        const id = BigInt(commitTx.commitId);
+        const hashlock = BigInt(createHashlockSecretPair().hashlock);
+        const timelock = BigInt(Math.floor(Date.now() / 1000) + 930);
+        const addLockMessage: AddLock = {
+            $$type: 'AddLock',
+            id: id,
+            hashlock: hashlock,
+            timelock: timelock,
+        };
+
+        await trainContract.send(user.getSender(), { value: toNano('0.1') }, addLockMessage);
+
+        const addLockTx = await trainContract.send(user.getSender(), { value: toNano('0.1') }, addLockMessage);
+
+        expect(addLockTx.transactions).toHaveTransaction({
+            from: user.address,
+            to: trainContract.address,
+            success: false,
+            op: TrainJetton.opcodes.AddLock,
+            exitCode: TrainJetton.errors['Hashlock Already Set'],
+        });
+    });
+
+    it('AddLock fails Not Future Timelock', async () => {
+        const commitTx = await commitJetton(blockchain, trainContract, user, solver, userJettonWallet, jettonMaster);
+        const id = BigInt(commitTx.commitId);
+        const hashlock = BigInt(createHashlockSecretPair().hashlock);
+        const timelock = BigInt(Math.floor(Date.now() / 1000) + 890);
+        const addLockMessage: AddLock = {
+            $$type: 'AddLock',
+            id: id,
+            hashlock: hashlock,
+            timelock: timelock,
+        };
+
+        const addLockTx = await trainContract.send(user.getSender(), { value: toNano('0.1') }, addLockMessage);
+
+        expect(addLockTx.transactions).toHaveTransaction({
+            from: user.address,
+            to: trainContract.address,
+            success: false,
+            op: TrainJetton.opcodes.AddLock,
+            exitCode: TrainJetton.errors['Not Future Timelock'],
+        });
+    });
+
+    it('AddLockSig successful', async () => {
+        const commitTx = await commitJetton(blockchain, trainContract, user, solver, userJettonWallet, jettonMaster, {
+            senderPubKey,
+        });
+        const id = BigInt(commitTx.commitId);
+        const hashlock = BigInt(createHashlockSecretPair().hashlock);
+        const timelock = BigInt(Math.floor(Date.now() / 1000) + 930);
+        const dataCell: Cell = beginCell().storeInt(id, 257).storeInt(hashlock, 257).storeInt(timelock, 257).endCell();
+
+        const signatureBuffer = sign(dataCell.hash(), kp.secretKey);
+        const signatureCell = beginCell().storeBuffer(signatureBuffer).endCell();
+
+        const addLocSigTx = await trainContract.send(
+            solver.getSender(),
+            { value: toNano('0.1'), bounce: true },
+            {
+                $$type: 'AddLockSig',
+                data: dataCell.beginParse(),
+                signature: signatureCell.beginParse(),
+            },
+        );
+
+        expect(addLocSigTx.transactions).toHaveTransaction({
+            from: solver.address,
+            to: trainContract.address,
+            success: true,
+            op: TrainJetton.opcodes.AddLockSig,
+        });
+
+        expect(addLocSigTx.transactions).toHaveTransaction({
+            from: trainContract.address,
+            to: solver.address,
+            success: true,
+            op: 0x0,
+        });
+
+        const details = await trainContract.getGetHtlcDetails(id);
+        expect(details).toBeTruthy();
+        expect(details?.hashlock).toBe(hashlock);
+        expect(details?.timelock).toBe(timelock);
+
+        console.log('Total Fees for AddLockSig Msg: ', getTotalFees(addLocSigTx.transactions) / 10 ** 9, ' TON');
+    });
+
+    it('AddLockSig fails Contract Does Not Exist', async () => {
+        const commitTx = await commitJetton(blockchain, trainContract, user, solver, userJettonWallet, jettonMaster, {
+            senderPubKey,
+        });
+        const id = BigInt(commitTx.commitId + 1n);
+        const hashlock = BigInt(createHashlockSecretPair().hashlock);
+        const timelock = BigInt(Math.floor(Date.now() / 1000) + 930);
+        const dataCell: Cell = beginCell().storeInt(id, 257).storeInt(hashlock, 257).storeInt(timelock, 257).endCell();
+
+        const signatureBuffer = sign(dataCell.hash(), kp.secretKey);
+        const signatureCell = beginCell().storeBuffer(signatureBuffer).endCell();
+
+        const addLocSigTx = await trainContract.send(
+            solver.getSender(),
+            { value: toNano('0.1'), bounce: true },
+            {
+                $$type: 'AddLockSig',
+                data: dataCell.beginParse(),
+                signature: signatureCell.beginParse(),
+            },
+        );
+
+        expect(addLocSigTx.transactions).toHaveTransaction({
+            from: solver.address,
+            to: trainContract.address,
+            success: false,
+            exitCode: TrainJetton.errors['Contract Does Not Exist'],
+            op: TrainJetton.opcodes.AddLockSig,
+        });
+    });
+
+    it('AddLockSig fails Invalid Signature', async () => {
+        const commitTx = await commitJetton(blockchain, trainContract, user, solver, userJettonWallet, jettonMaster, {
+            senderPubKey,
+        });
+        const id = BigInt(commitTx.commitId);
+        const hashlock = BigInt(createHashlockSecretPair().hashlock);
+        const timelock = BigInt(Math.floor(Date.now() / 1000) + 930);
+        const dataCell: Cell = beginCell().storeInt(id, 257).storeInt(hashlock, 257).storeInt(timelock, 257).endCell();
+
+        const signatureBuffer = sign(dataCell.hash(), keyPairFromSeed(await getSecureRandomBytes(32)).secretKey);
+        const signatureCell = beginCell().storeBuffer(signatureBuffer).endCell();
+
+        const addLocSigTx = await trainContract.send(
+            solver.getSender(),
+            { value: toNano('0.1'), bounce: true },
+            {
+                $$type: 'AddLockSig',
+                data: dataCell.beginParse(),
+                signature: signatureCell.beginParse(),
+            },
+        );
+
+        expect(addLocSigTx.transactions).toHaveTransaction({
+            from: solver.address,
+            to: trainContract.address,
+            success: false,
+            exitCode: TrainJetton.errors['Invalid Signature'],
+            op: TrainJetton.opcodes.AddLockSig,
+        });
+    });
+
+    it('AddLockSig fails Not Future Timelock', async () => {
+        const commitTx = await commitJetton(blockchain, trainContract, user, solver, userJettonWallet, jettonMaster, {
+            senderPubKey,
+        });
+        const id = BigInt(commitTx.commitId);
+        const hashlock = BigInt(createHashlockSecretPair().hashlock);
+        const timelock = BigInt(Math.floor(Date.now() / 1000) + 890);
+        const dataCell: Cell = beginCell().storeInt(id, 257).storeInt(hashlock, 257).storeInt(timelock, 257).endCell();
+
+        const signatureBuffer = sign(dataCell.hash(), kp.secretKey);
+        const signatureCell = beginCell().storeBuffer(signatureBuffer).endCell();
+
+        const addLocSigTx = await trainContract.send(
+            solver.getSender(),
+            { value: toNano('0.1'), bounce: true },
+            {
+                $$type: 'AddLockSig',
+                data: dataCell.beginParse(),
+                signature: signatureCell.beginParse(),
+            },
+        );
+        expect(addLocSigTx.transactions).toHaveTransaction({
+            from: solver.address,
+            to: trainContract.address,
+            success: false,
+            exitCode: TrainJetton.errors['Not Future Timelock'],
+            op: TrainJetton.opcodes.AddLockSig,
+        });
+    });
+
+    it('AddLockSig fails Hashlock Already Set', async () => {
+        const commitTx = await commitJetton(blockchain, trainContract, user, solver, userJettonWallet, jettonMaster, {
+            senderPubKey,
+        });
+        const id = BigInt(commitTx.commitId);
+        const hashlock = BigInt(createHashlockSecretPair().hashlock);
+        const timelock = BigInt(Math.floor(Date.now() / 1000) + 901);
+        const dataCell: Cell = beginCell().storeInt(id, 257).storeInt(hashlock, 257).storeInt(timelock, 257).endCell();
+
+        const signatureBuffer = sign(dataCell.hash(), kp.secretKey);
+        const signatureCell = beginCell().storeBuffer(signatureBuffer).endCell();
+
+        await trainContract.send(
+            solver.getSender(),
+            { value: toNano('0.1'), bounce: true },
+            {
+                $$type: 'AddLockSig',
+                data: dataCell.beginParse(),
+                signature: signatureCell.beginParse(),
+            },
+        );
+
+        const addLocSigTx = await trainContract.send(
+            solver.getSender(),
+            { value: toNano('0.1'), bounce: true },
+            {
+                $$type: 'AddLockSig',
+                data: dataCell.beginParse(),
+                signature: signatureCell.beginParse(),
+            },
+        );
+
+        expect(addLocSigTx.transactions).toHaveTransaction({
+            from: solver.address,
+            to: trainContract.address,
+            success: false,
+            exitCode: TrainJetton.errors['Hashlock Already Set'],
+            op: TrainJetton.opcodes.AddLockSig,
+        });
+    });
+
+    it('Refund successful', async () => {
+        const lockTx = await lockJetton(blockchain, trainContract, user, solver, solverJettonWallet, jettonMaster);
+        blockchain.now = Number(lockTx.timelock + 1n);
+        const contractsBefore = await trainContract.getGetContractsLength();
+        const rewardsLength = await trainContract.getGetRewardsLength();
+        const refundTx = await trainContract.send(
+            user.getSender(),
+            { value: toNano('0.35'), bounce: true },
+            {
+                $$type: 'Refund',
+                id: lockTx.lockId,
+            },
+        );
+
+        expect(refundTx.transactions).toHaveTransaction({
+            from: trainContract.address,
+            to: await jettonMaster.getWalletAddress(trainContract.address),
+            success: true,
+            op: TrainJetton.opcodes.TokenTransfer,
+        });
+
+        expect(contractsBefore - (await trainContract.getGetContractsLength())).toBe(1n);
+        expect(rewardsLength - (await trainContract.getGetRewardsLength())).toBe(1n);
+        expect(await trainContract.getGetHtlcDetails(lockTx.lockId)).toBeFalsy();
+        expect(await trainContract.getGetRewardDetails(lockTx.lockId)).toBeFalsy();
+        console.log('Total Fees for Refund Msg: ', getTotalFees(refundTx.transactions) / 10 ** 9, ' TON');
+    });
+
+    it('Refund fails Contract Does Not Exist', async () => {
+        const lockTx = await lockJetton(blockchain, trainContract, user, solver, solverJettonWallet, jettonMaster);
+        blockchain.now = Number(lockTx.timelock + 10n);
+        const contractsBefore = await trainContract.getGetContractsLength();
+        const rewardsLength = await trainContract.getGetRewardsLength();
+        const refundTx = await trainContract.send(
+            user.getSender(),
+            { value: toNano('0.35'), bounce: true },
+            {
+                $$type: 'Refund',
+                id: lockTx.lockId + 1n,
+            },
+        );
+
+        expect(refundTx.transactions).toHaveTransaction({
+            from: user.address,
+            to: trainContract.address,
+            success: false,
+            op: TrainJetton.opcodes.Refund,
+            exitCode: TrainJetton.errors['Contract Does Not Exist'],
+        });
+
+        expect(contractsBefore - (await trainContract.getGetContractsLength())).toBe(0n);
+        expect(rewardsLength - (await trainContract.getGetRewardsLength())).toBe(0n);
+        expect(await trainContract.getGetHtlcDetails(lockTx.lockId)).toBeTruthy();
+        expect(await trainContract.getGetRewardDetails(lockTx.lockId)).toBeTruthy();
+    });
+
+    it('Refund fails Not Passed Timelock', async () => {
+        const lockTx = await lockJetton(blockchain, trainContract, user, solver, solverJettonWallet, jettonMaster);
+        const contractsBefore = await trainContract.getGetContractsLength();
+        const rewardsLength = await trainContract.getGetRewardsLength();
+        const refundTx = await trainContract.send(
+            user.getSender(),
+            { value: toNano('0.35'), bounce: true },
+            {
+                $$type: 'Refund',
+                id: lockTx.lockId,
+            },
+        );
+
+        expect(refundTx.transactions).toHaveTransaction({
+            from: user.address,
+            to: trainContract.address,
+            success: false,
+            op: TrainJetton.opcodes.Refund,
+            exitCode: TrainJetton.errors['Not Passed Timelock'],
+        });
+
+        expect(contractsBefore - (await trainContract.getGetContractsLength())).toBe(0n);
+        expect(rewardsLength - (await trainContract.getGetRewardsLength())).toBe(0n);
+        expect(await trainContract.getGetHtlcDetails(lockTx.lockId)).toBeTruthy();
+        expect(await trainContract.getGetRewardDetails(lockTx.lockId)).toBeTruthy();
     });
 });
