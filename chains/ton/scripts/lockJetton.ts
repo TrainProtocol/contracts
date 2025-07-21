@@ -1,7 +1,7 @@
 require('dotenv').config();
 import { getHttpV4Endpoint } from '@orbs-network/ton-access';
 import { mnemonicToWalletKey } from 'ton-crypto';
-import { TonClient4, WalletContractV5R1, Address, Cell, beginCell, Builder, WalletContractV4 } from '@ton/ton';
+import { TonClient4, Address, Cell, beginCell, Builder, WalletContractV4 } from '@ton/ton';
 import { toNano, sleep } from '../utils/utils';
 import { TokenTransfer, LockData, storeLockData, storeTokenTransfer } from '../build/jetton_train/tact_TrainJetton';
 
@@ -29,7 +29,6 @@ export async function run() {
     const reward = 2n;
     const rewardTimelock = BigInt(Math.floor(Date.now() / 1000) + 100);
     const jettonMasterAddress = Address.parse(process.env.jettonMasterAddress!);
-    const htlcJettonWalletAddress = Address.parse(process.env.htlcJettonWalletAddress!);
 
     const lockData: LockData = {
         $$type: 'LockData',
@@ -44,7 +43,6 @@ export async function run() {
         dstAsset: dstAsset,
         hashlock: hashlock,
         jettonMasterAddress: jettonMasterAddress,
-        htlcJettonWalletAddress: htlcJettonWalletAddress,
     };
     const writeLockData = storeLockData(lockData);
     const forwardPayload = new Builder();

@@ -1,7 +1,18 @@
-import { Dictionary, Transaction } from '@ton/core';
+import { beginCell, Builder, Dictionary, Transaction } from '@ton/core';
 import { StringImpl } from '../build/train/tact_Train';
 import { Address } from '@ton/ton';
 import { createHash, randomBytes } from 'crypto';
+import { Blockchain, SandboxContract, TreasuryContract } from '@ton/sandbox';
+import { JettonMinter, JettonWallet } from '@ton-community/assets-sdk';
+import {
+    TrainJetton,
+    CommitData,
+    storeCommitData,
+    TokenTransfer,
+    storeTokenTransfer,
+    LockData,
+    storeLockData,
+} from '../build/jetton_train/tact_TrainJetton';
 
 function delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -184,6 +195,183 @@ function createHashlockSecretPair(): { secret: bigint; hashlock: bigint } {
     return { secret, hashlock };
 }
 
+async function commitJetton(
+    blockchain: Blockchain,
+    trainContract: SandboxContract<TrainJetton>,
+    user: SandboxContract<TreasuryContract>,
+    srcReceiver: SandboxContract<TreasuryContract>,
+    userJettonWallet: SandboxContract<JettonWallet>,
+    jettonMaster: SandboxContract<JettonMinter>,
+    overrides?: {
+        amount?: bigint;
+        timelockOffset?: number;
+        senderPubKey?: bigint;
+    },
+) {
+    const dstChain = 'ARBITRUM_SEPOLIA';
+    const dstAsset = 'USDC';
+    const dstAddress = '0xF6517026847B4c166AAA176fe0C5baD1A245778D';
+    const srcAsset = 'TESTJ';
+    const senderPubKey = overrides?.senderPubKey ?? 12345n;
+    const hopChains = createStrMap([[0n, { $$type: 'StringImpl', data: dstChain }]]);
+    const hopAssets = createStrMap([[0n, { $$type: 'StringImpl', data: dstAsset }]]);
+    const hopAddresses = createStrMap([[0n, { $$type: 'StringImpl', data: dstAddress }]]);
+
+    const commitId = BigInt(Date.now());
+    const timelock = BigInt((blockchain.now ?? Math.floor(Date.now() / 1000)) + (overrides?.timelockOffset ?? 1800));
+    const amount = overrides?.amount ?? 1n;
+
+    const commitData: CommitData = {
+        dstChain,
+        dstAsset,
+        dstAddress,
+        srcAsset,
+        id: commitId,
+        srcReceiver: srcReceiver.address,
+        timelock,
+        jettonMasterAddress: jettonMaster.address,
+        senderPubKey,
+        hopChains,
+        hopAssets,
+        hopAddresses,
+        $$type: 'CommitData',
+    };
+
+    const writeCommitData = storeCommitData(commitData);
+    const forwardPayload = new Builder();
+    writeCommitData(forwardPayload);
+
+    const finalForwardPayload = beginCell()
+        .storeUint(1, 1)
+        .storeRef(beginCell().storeUint(1734998782, 32).storeBuilder(forwardPayload).endCell())
+        .endCell()
+        .asSlice();
+
+    const queryId = BigInt(Date.now());
+
+    const tokenTransferMessage: TokenTransfer = {
+        $$type: 'TokenTransfer',
+        queryId,
+        amount,
+        destination: trainContract.address,
+        responseDestination: user.address,
+        customPayload: beginCell().storeInt(0, 32).storeStringTail('Success').endCell(),
+        forwardTonAmount: toNano('0.1'),
+        forwardPayload: finalForwardPayload,
+    };
+
+    const writeTokenTransfer = storeTokenTransfer(tokenTransferMessage);
+    const body = new Builder();
+    writeTokenTransfer(body);
+
+    const tx = await user.send({
+        value: toNano('0.5'),
+        to: userJettonWallet.address,
+        sendMode: 1,
+        body: body.asCell(),
+    });
+
+    return {
+        tx,
+        commitId,
+        timelock,
+        amount,
+        commitData,
+    };
+}
+
+async function lockJetton(
+    blockchain: Blockchain,
+    trainContract: SandboxContract<TrainJetton>,
+    user: SandboxContract<TreasuryContract>,
+    solver: SandboxContract<TreasuryContract>,
+    solverJettonWallet: SandboxContract<JettonWallet>,
+    jettonMaster: SandboxContract<JettonMinter>,
+    overrides?: {
+        amount?: bigint;
+        rewardAmount?: bigint;
+        timelockOffset?: number;
+        rewardTimelockOffset?: number;
+        hashlock?: bigint;
+    },
+) {
+    const dstChain = 'ARBITRUM_SEPOLIA';
+    const dstAsset = 'USDC';
+    const dstAddress = '0xF6517026847B4c166AAA176fe0C5baD1A245778D';
+    const srcAsset = 'TESTJ';
+
+    const lockId = BigInt(Date.now());
+    const now = blockchain.now ?? Math.floor(Date.now() / 1000);
+    const timelock = BigInt(now + (overrides?.timelockOffset ?? 1801));
+    const rewardTimelock = BigInt(now + (overrides?.rewardTimelockOffset ?? 1700));
+    const rewardAmount = overrides?.rewardAmount ?? 1n;
+    const hashlock = overrides?.hashlock ?? createHashlockSecretPair().hashlock;
+
+    const lockData: LockData = {
+        $$type: 'LockData',
+        id: lockId,
+        hashlock,
+        timelock,
+        srcReceiver: user.address,
+        srcAsset,
+        dstChain,
+        dstAddress,
+        dstAsset,
+        reward: rewardAmount,
+        rewardTimelock,
+        jettonMasterAddress: jettonMaster.address,
+    };
+
+    const writeLockData = storeLockData(lockData);
+    const forwardPayload = new Builder();
+    writeLockData(forwardPayload);
+
+    const finalForwardPayload = beginCell()
+        .storeUint(1, 1)
+        .storeRef(beginCell().storeUint(317164721, 32).storeBuilder(forwardPayload).endCell())
+        .endCell()
+        .asSlice();
+
+    const queryId = BigInt(Date.now());
+    const amount = overrides?.amount ?? 3n;
+
+    const tokenTransferMessage: TokenTransfer = {
+        $$type: 'TokenTransfer',
+        queryId,
+        amount,
+        destination: trainContract.address,
+        responseDestination: solver.address,
+        customPayload: beginCell().storeInt(0, 32).storeStringTail('Success').endCell(),
+        forwardTonAmount: toNano('0.1'),
+        forwardPayload: finalForwardPayload,
+    };
+
+    const writeTokenTransfer = storeTokenTransfer(tokenTransferMessage);
+    const body = new Builder();
+    writeTokenTransfer(body);
+
+    const contractsLengthBefore = await trainContract.getGetContractsLength();
+    const rewardsLengthBefore = await trainContract.getGetRewardsLength();
+
+    const tx = await solver.send({
+        value: toNano('0.5'),
+        to: solverJettonWallet.address,
+        sendMode: 1,
+        body: body.asCell(),
+    });
+
+    return {
+        tx,
+        lockId,
+        timelock,
+        rewardTimelock,
+        rewardAmount,
+        amount,
+        lockData,
+        contractsLengthBefore,
+        rewardsLengthBefore,
+    };
+}
 export {
     delay,
     toNano,
@@ -199,4 +387,6 @@ export {
     addLock,
     lock,
     createHashlockSecretPair,
+    commitJetton,
+    lockJetton,
 };
