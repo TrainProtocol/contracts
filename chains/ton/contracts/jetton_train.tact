@@ -77,7 +77,6 @@ struct LockData {
     dstAsset: String;
     hashlock: Int;
     jettonMasterAddress: Address;
-    htlcJettonWalletAddress: Address;
 }
 // Messages received by contract
 message(0x5cdd41d9) AddLock {
