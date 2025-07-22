@@ -194,6 +194,18 @@ export class TrainContract extends ContractBase {
     ) => ContractFunctionInteraction) &
       Pick<ContractMethod, 'selector'>;
 
+    /** process_message(message_ciphertext: struct, message_context: struct) */
+    process_message: ((
+      message_ciphertext: FieldLike[],
+      message_context: {
+        tx_hash: FieldLike;
+        unique_note_hashes_in_tx: FieldLike[];
+        first_nullifier_in_tx: FieldLike;
+        recipient: AztecAddressLike;
+      },
+    ) => ContractFunctionInteraction) &
+      Pick<ContractMethod, 'selector'>;
+
     /** public_dispatch(selector: field) */
     public_dispatch: ((selector: FieldLike) => ContractFunctionInteraction) &
       Pick<ContractMethod, 'selector'>;

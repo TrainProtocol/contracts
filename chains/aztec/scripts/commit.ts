@@ -60,9 +60,14 @@ async function main(): Promise<void> {
   const token = data.tokenAddress;
   const amount = 23n;
   let solverAddress = AztecAddress.fromString(data.solverAddress);
-  const dst_chain = 'TON'.padStart(30, ' ');
-  const dst_asset = 'Toncoin'.padStart(30, ' ');
-  const dst_address = 'TONAddress'.padStart(90, ' ');
+  const dst_chain = 'USDC.e'.padStart(30, ' ');
+  const dst_asset = 'PROOFOFPLAYAPEX_MAINNET'.padStart(30, ' ');
+  const dst_address =
+    '0x01ba575951852339bfe8787463503081ea0da04448b2efc58798705c27cdb3fb'.padStart(
+      90,
+      ' ',
+    );
+    
   const randomness = generateId();
   const TokenContractArtifact = TokenContract.artifact;
   const asset = await Contract.at(

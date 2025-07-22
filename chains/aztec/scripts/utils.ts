@@ -97,7 +97,7 @@ export function generateSecretAndHashlock(): [Uint8Array, Uint8Array] {
  * @returns A bigint identifier.
  */
 export function generateId(): bigint {
-  const bytes = crypto.randomBytes(24);
+  const bytes = crypto.randomBytes(31);
   return BigInt('0x' + bytes.toString('hex'));
 }
 

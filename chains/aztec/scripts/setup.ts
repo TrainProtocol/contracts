@@ -13,7 +13,6 @@ import { TokenContractArtifact } from '@aztec/noir-contracts.js/Token';
 
 async function main(): Promise<void> {
   const [pxe1, pxe2, pxe3] = await getPXEs(['pxe1', 'pxe2', 'pxe3']);
-
   const sponsoredFPC = await getSponsoredFPCInstance();
 
   await pxe1.registerContract({
@@ -30,7 +29,6 @@ async function main(): Promise<void> {
     instance: sponsoredFPC,
     artifact: SponsoredFPCContract.artifact,
   });
-
   const paymentMethod = new SponsoredFeePaymentMethod(sponsoredFPC.address);
 
   //   user wallet in PXE 1
@@ -42,6 +40,7 @@ async function main(): Promise<void> {
     deriveSigningKey(secretKey),
     salt,
   );
+
   let tx = await schnorrAccount
     .deploy({ fee: { paymentMethod } })
     .wait({ timeout: 120000 });

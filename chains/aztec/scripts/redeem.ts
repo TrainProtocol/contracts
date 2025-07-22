@@ -74,7 +74,7 @@ async function main(): Promise<void> {
   const redeemTx = await train.methods
     .redeem_private(Id, secret, ownershipKey)
     .send({ fee: { paymentMethod } })
-    .wait();
+    .wait({ timeout: 120000 });
 
   console.log('tx:', redeemTx);
   console.log(
@@ -91,8 +91,8 @@ async function main(): Promise<void> {
   );
 
   await publicLogs(pxe2);
-  await simulateBlockPassing(pxe3, asset, deployerWallet, 2);
-  await getHTLCDetails(train, Id);
+  // await simulateBlockPassing(pxe3, asset, deployerWallet, 2);
+  // await getHTLCDetails(train, Id);
 }
 
 main().catch((err) => {

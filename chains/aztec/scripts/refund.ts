@@ -101,7 +101,10 @@ async function main(): Promise<void> {
       .simulate(),
   );
 
-  const assetMinter = await TokenContract.at(AztecAddress.fromString(data.tokenAddress), deployerWallet);
+  const assetMinter = await TokenContract.at(
+    AztecAddress.fromString(data.tokenAddress),
+    deployerWallet,
+  );
   await publicLogs(pxe1);
   await simulateBlockPassing(pxe3, assetMinter, deployerWallet, 3);
   await getHTLCDetails(contract, Id);

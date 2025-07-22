@@ -1,9 +1,9 @@
 import {
+  type ContractInstanceWithAddress,
   Fr,
-  ContractInstanceWithAddress,
+  type PXE,
+  type Wallet,
   getContractInstanceFromDeployParams,
-  Wallet,
-  PXE,
 } from '@aztec/aztec.js';
 import type { LogFn } from '@aztec/foundation/log';
 import { SponsoredFPCContract } from '@aztec/noir-contracts.js/SponsoredFPC';

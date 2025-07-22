@@ -11,11 +11,11 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@aztec/accounts": "^0.87.9",
-    "@aztec/aztec.js": "^0.87.9",
-    "@aztec/bb-prover": "^0.87.9",
-    "@aztec/noir-contracts.js": "^0.87.9",
-    "@aztec/pxe": "^0.87.9",
+    "@aztec/accounts": "^1.1.2",
+    "@aztec/aztec.js": "^1.1.2",
+    "@aztec/bb-prover": "^1.1.2",
+    "@aztec/noir-contracts.js": "^1.1.2",
+    "@aztec/pxe": "^1.1.2",
     "dotenv": "^16.5.0"
   },
   "devDependencies": {

@@ -65,9 +65,13 @@ async function main(): Promise<void> {
   const timelock = now + 2000;
   const token: string = data.tokenAddress;
   const randomness = generateId();
-  const dst_chain = 'TON'.padStart(30, ' ');
-  const dst_asset = 'Toncoin'.padStart(30, ' ');
-  const dst_address = 'TONAddress'.padStart(90, ' ');
+  const dst_chain = 'USDC.e'.padStart(30, ' ');
+  const dst_asset = 'PROOFOFPLAYAPEX_MAINNET'.padStart(30, ' ');
+  const dst_address =
+    '0x01ba575951852339bfe8123463503081ea0da04448b2efc58798705c27cdb3fb'.padStart(
+      90,
+      ' ',
+    );
 
   // Token contract operations using auth witness
   const TokenContractArtifact = TokenContract.artifact;

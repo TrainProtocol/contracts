@@ -68,7 +68,7 @@ async function main(): Promise<void> {
   const addLockTx = await contract.methods
     .add_lock_private_user(Id, stringToUint8Array(pair[1].toString()), timelock)
     .send({ fee: { paymentMethod } })
-    .wait();
+    .wait({timeout: 120000});
 
   console.log('tx : ', addLockTx);
   await publicLogs(pxe1);
@@ -87,8 +87,8 @@ async function main(): Promise<void> {
     AztecAddress.fromString(data.tokenAddress),
     deployer,
   );
-  await simulateBlockPassing(pxe3, assetMinter, deployer, 2);
-  getHTLCDetails(contract, Id);
+  // await simulateBlockPassing(pxe3, assetMinter, deployer, 2);
+  // getHTLCDetails(contract, Id);
   updateData({
     hashlock: pair[1].toString(),
     secret: pair[0].toString(),

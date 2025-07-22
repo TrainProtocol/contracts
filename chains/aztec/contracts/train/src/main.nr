@@ -20,7 +20,7 @@ pub contract Train {
         TokenRefunded,
     };
     use dep::aztec::messages::logs::note::encode_and_encrypt_note;
-    use dep::aztec::protocol_types::traits::{Packable, Serialize};
+    use dep::aztec::protocol_types::traits::{Deserialize, Packable, Serialize};
     use dep::aztec::state_vars::{private_immutable::PrivateImmutable, SharedMutable};
     use dep::sha256;
     use dep::token::Token;
@@ -38,7 +38,7 @@ pub contract Train {
         owner: AztecAddress,
         randomness: Field,
     }
-    #[derive(Eq, Packable, Serialize)]
+    #[derive(Eq, Packable, Serialize, Deserialize)]
     pub struct HTLC_Public {
         src_receiver: AztecAddress,
         amount: u128,
