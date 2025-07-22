@@ -5,6 +5,7 @@ import {
     AddLock,
     CommitData,
     LockData,
+    Redeem,
     TokenTransfer,
     TrainJetton,
     storeCommitData,
@@ -26,6 +27,7 @@ describe('TrainJetton', () => {
     let jettonMaster: SandboxContract<JettonMinter>;
     let userJettonWallet: SandboxContract<JettonWallet>;
     let solverJettonWallet: SandboxContract<JettonWallet>;
+    let deployerJettonWallet: SandboxContract<JettonWallet>;
     let flag = true;
 
     const dstChain = 'ARBITRUM_SEPOLIA';
@@ -114,9 +116,12 @@ describe('TrainJetton', () => {
             );
             flag = false;
         }
-
         await jettonMaster.sendMint(deployer.getSender(), user.address, toNano('10'));
         await jettonMaster.sendMint(deployer.getSender(), solver.address, toNano('10'));
+        await jettonMaster.sendMint(deployer.getSender(), deployer.address, toNano('10'));
+        deployerJettonWallet = blockchain.openContract(
+            JettonWallet.createFromAddress(await jettonMaster.getWalletAddress(deployer.address)),
+        );
         userJettonWallet = blockchain.openContract(
             JettonWallet.createFromAddress(await jettonMaster.getWalletAddress(user.address)),
         );
@@ -1771,5 +1776,285 @@ describe('TrainJetton', () => {
         expect(rewardsLength - (await trainContract.getGetRewardsLength())).toBe(0n);
         expect(await trainContract.getGetHtlcDetails(lockTx.lockId)).toBeTruthy();
         expect(await trainContract.getGetRewardDetails(lockTx.lockId)).toBeTruthy();
+    });
+
+    it('Redeem fails Contract Does Not Exist', async () => {
+        const pair = createHashlockSecretPair();
+        const lockTx = await lockJetton(blockchain, trainContract, user, solver, solverJettonWallet, jettonMaster, {
+            hashlock: pair.hashlock,
+        });
+
+        const redeemTx = await trainContract.send(
+            user.getSender(),
+            { value: toNano('0.35'), bounce: true },
+            {
+                $$type: 'Redeem',
+                id: lockTx.lockId + 1n,
+                secret: pair.secret,
+            },
+        );
+
+        expect(redeemTx.transactions).toHaveTransaction({
+            from: user.address,
+            to: trainContract.address,
+            success: false,
+            op: TrainJetton.opcodes.Redeem,
+            exitCode: TrainJetton.errors['Contract Does Not Exist'],
+        });
+    });
+
+    it('Redeem fails Hashlock Not Match', async () => {
+        const pair = createHashlockSecretPair();
+        const lockTx = await lockJetton(blockchain, trainContract, user, solver, solverJettonWallet, jettonMaster, {
+            hashlock: pair.hashlock,
+        });
+
+        const redeemTx = await trainContract.send(
+            user.getSender(),
+            { value: toNano('0.3'), bounce: true },
+            {
+                $$type: 'Redeem',
+                id: lockTx.lockId,
+                secret: pair.secret + 1n,
+            },
+        );
+
+        expect(redeemTx.transactions).toHaveTransaction({
+            from: user.address,
+            to: trainContract.address,
+            success: false,
+            op: TrainJetton.opcodes.Redeem,
+            exitCode: TrainJetton.errors['Hashlock Not Match'],
+        });
+    });
+
+    it('Redeem successful with 0 reward', async () => {
+        const pair = createHashlockSecretPair();
+        const lockTx = await lockJetton(blockchain, trainContract, user, solver, solverJettonWallet, jettonMaster, {
+            amount: 3n,
+            hashlock: pair.hashlock,
+            rewardAmount: 0n,
+        });
+        const trainJettonwallet = await jettonMaster.getWallet(trainContract.address);
+        const balanceOfTrainBefore = (await trainJettonwallet.getData()).balance;
+        const redeemTx = await trainContract.send(
+            user.getSender(),
+            { value: toNano('0.3'), bounce: true },
+            {
+                $$type: 'Redeem',
+                id: lockTx.lockId,
+                secret: pair.secret,
+            },
+        );
+
+        expect(redeemTx.transactions).toHaveTransaction({
+            from: user.address,
+            to: trainContract.address,
+            success: true,
+            op: TrainJetton.opcodes.Redeem,
+        });
+
+        expect(redeemTx.transactions).toHaveTransaction({
+            from: trainContract.address,
+            to: await jettonMaster.getWalletAddress(trainContract.address),
+            success: true,
+            op: TrainJetton.opcodes.TokenTransfer,
+        });
+
+        expect(redeemTx.transactions).toHaveTransaction({
+            from: await jettonMaster.getWalletAddress(trainContract.address),
+            to: userJettonWallet.address,
+            success: true,
+            op: 0x178d4519, // internal transfer
+        });
+
+        expect(
+            redeemTx.externals.some((x) => x.body.beginParse().loadUint(32) === TrainJetton.opcodes.TokenRedeemed),
+        ).toBe(true);
+
+        expect(await trainContract.getGetHtlcDetails(lockTx.lockId)).toBeFalsy();
+        expect(balanceOfTrainBefore - (await trainJettonwallet.getData()).balance).toBe(3n);
+    });
+
+    it('Redeem successful with reward.timelock > now()', async () => {
+        const pair = createHashlockSecretPair();
+        const lockTx = await lockJetton(blockchain, trainContract, user, solver, solverJettonWallet, jettonMaster, {
+            amount: 3n,
+            hashlock: pair.hashlock,
+            rewardAmount: 1n,
+            rewardTimelockOffset: 1700,
+        });
+        const trainJettonwallet = await jettonMaster.getWallet(trainContract.address);
+        const balanceOfTrainBefore = (await trainJettonwallet.getData()).balance;
+        const balanceOfUserBefore = (await userJettonWallet.getData()).balance;
+        const balanceOfSolverBefore = (await solverJettonWallet.getData()).balance;
+        const redeemTx = await trainContract.send(
+            deployer.getSender(),
+            { value: toNano('0.3'), bounce: true },
+            {
+                $$type: 'Redeem',
+                id: lockTx.lockId,
+                secret: pair.secret,
+            },
+        );
+        expect(redeemTx.transactions).toHaveTransaction({
+            from: deployer.address,
+            to: trainContract.address,
+            success: true,
+            op: TrainJetton.opcodes.Redeem,
+        });
+
+        expect(redeemTx.transactions).toHaveTransaction({
+            from: trainContract.address,
+            to: await jettonMaster.getWalletAddress(trainContract.address),
+            success: true,
+            op: TrainJetton.opcodes.TokenTransfer,
+        });
+
+        expect(redeemTx.transactions).toHaveTransaction({
+            from: await jettonMaster.getWalletAddress(trainContract.address),
+            to: userJettonWallet.address,
+            success: true,
+            op: 0x178d4519, // internal transfer
+        });
+
+        expect(redeemTx.transactions).toHaveTransaction({
+            from: await jettonMaster.getWalletAddress(trainContract.address),
+            to: solverJettonWallet.address,
+            success: true,
+            op: 0x178d4519, // internal transfer
+        });
+
+        expect(
+            redeemTx.externals.some((x) => x.body.beginParse().loadUint(32) === TrainJetton.opcodes.TokenRedeemed),
+        ).toBe(true);
+
+        expect(await trainContract.getGetHtlcDetails(lockTx.lockId)).toBeFalsy();
+        expect(await trainContract.getGetRewardDetails(lockTx.lockId)).toBeFalsy();
+        expect(balanceOfTrainBefore - (await trainJettonwallet.getData()).balance).toBe(3n);
+        expect((await userJettonWallet.getData()).balance - balanceOfUserBefore).toBe(2n);
+        expect((await solverJettonWallet.getData()).balance - balanceOfSolverBefore).toBe(1n);
+    });
+
+    it('Redeem successful with reward.timelock <= now() & ctx.sender == htlc.srcReceiver', async () => {
+        const pair = createHashlockSecretPair();
+        const lockTx = await lockJetton(blockchain, trainContract, user, solver, solverJettonWallet, jettonMaster, {
+            amount: 3n,
+            hashlock: pair.hashlock,
+            rewardAmount: 1n,
+            rewardTimelockOffset: 1200,
+        });
+        const rewardDetails = await trainContract.getGetRewardDetails(lockTx.lockId);
+        expect(rewardDetails).toBeTruthy();
+        const trainJettonwallet = await jettonMaster.getWallet(trainContract.address);
+        const balanceOfTrainBefore = (await trainJettonwallet.getData()).balance;
+        const balanceOfUserBefore = (await userJettonWallet.getData()).balance;
+        const balanceOfSolverBefore = (await solverJettonWallet.getData()).balance;
+        blockchain.now = Number((rewardDetails?.timelock ?? 0n) + 10n);
+        const redeemTx = await trainContract.send(
+            user.getSender(),
+            { value: toNano('0.3'), bounce: true },
+            {
+                $$type: 'Redeem',
+                id: lockTx.lockId,
+                secret: pair.secret,
+            },
+        );
+        expect(redeemTx.transactions).toHaveTransaction({
+            from: user.address,
+            to: trainContract.address,
+            success: true,
+            op: TrainJetton.opcodes.Redeem,
+        });
+
+        expect(redeemTx.transactions).toHaveTransaction({
+            from: trainContract.address,
+            to: await jettonMaster.getWalletAddress(trainContract.address),
+            success: true,
+            op: TrainJetton.opcodes.TokenTransfer,
+        });
+
+        expect(redeemTx.transactions).toHaveTransaction({
+            from: await jettonMaster.getWalletAddress(trainContract.address),
+            to: userJettonWallet.address,
+            success: true,
+            op: 0x178d4519, // internal transfer
+        });
+
+        expect(
+            redeemTx.externals.some((x) => x.body.beginParse().loadUint(32) === TrainJetton.opcodes.TokenRedeemed),
+        ).toBe(true);
+
+        expect(await trainContract.getGetHtlcDetails(lockTx.lockId)).toBeFalsy();
+        expect(await trainContract.getGetRewardDetails(lockTx.lockId)).toBeFalsy();
+        expect(balanceOfTrainBefore - (await trainJettonwallet.getData()).balance).toBe(3n);
+        expect((await userJettonWallet.getData()).balance - balanceOfUserBefore).toBe(3n);
+        expect((await solverJettonWallet.getData()).balance - balanceOfSolverBefore).toBe(0n);
+    });
+
+    it('Redeem successful with reward.timelock <= now() & ctx.sender != htlc.srcReceiver', async () => {
+        const pair = createHashlockSecretPair();
+        const lockTx = await lockJetton(blockchain, trainContract, user, solver, solverJettonWallet, jettonMaster, {
+            amount: 3n,
+            hashlock: pair.hashlock,
+            rewardAmount: 1n,
+            rewardTimelockOffset: 1700,
+        });
+        const rewardDetails = await trainContract.getGetRewardDetails(lockTx.lockId);
+        expect(rewardDetails).toBeTruthy();
+        const trainJettonwallet = await jettonMaster.getWallet(trainContract.address);
+        const balanceOfTrainBefore = (await trainJettonwallet.getData()).balance;
+        const balanceOfUserBefore = (await userJettonWallet.getData()).balance;
+        const balanceOfSolverBefore = (await solverJettonWallet.getData()).balance;
+        const balanceOfDeployerBefore = (await deployerJettonWallet.getData()).balance;
+        blockchain.now = Number((rewardDetails?.timelock ?? 0n) + 10n);
+        const redeemTx = await trainContract.send(
+            deployer.getSender(),
+            { value: toNano('0.3'), bounce: true },
+            {
+                $$type: 'Redeem',
+                id: lockTx.lockId,
+                secret: pair.secret,
+            },
+        );
+        expect(redeemTx.transactions).toHaveTransaction({
+            from: deployer.address,
+            to: trainContract.address,
+            success: true,
+            op: TrainJetton.opcodes.Redeem,
+        });
+
+        expect(redeemTx.transactions).toHaveTransaction({
+            from: trainContract.address,
+            to: await jettonMaster.getWalletAddress(trainContract.address),
+            success: true,
+            op: TrainJetton.opcodes.TokenTransfer,
+        });
+
+        expect(redeemTx.transactions).toHaveTransaction({
+            from: await jettonMaster.getWalletAddress(trainContract.address),
+            to: userJettonWallet.address,
+            success: true,
+            op: 0x178d4519, // internal transfer
+        });
+
+        expect(redeemTx.transactions).toHaveTransaction({
+            from: await jettonMaster.getWalletAddress(trainContract.address),
+            to: deployerJettonWallet.address,
+            success: true,
+            op: 0x178d4519, // internal transfer
+        });
+
+        expect(
+            redeemTx.externals.some((x) => x.body.beginParse().loadUint(32) === TrainJetton.opcodes.TokenRedeemed),
+        ).toBe(true);
+
+        expect(await trainContract.getGetHtlcDetails(lockTx.lockId)).toBeFalsy();
+        expect(await trainContract.getGetRewardDetails(lockTx.lockId)).toBeFalsy();
+        expect(balanceOfTrainBefore - (await trainJettonwallet.getData()).balance).toBe(3n);
+        expect((await userJettonWallet.getData()).balance - balanceOfUserBefore).toBe(2n);
+        expect((await solverJettonWallet.getData()).balance - balanceOfSolverBefore).toBe(0n);
+        expect((await deployerJettonWallet.getData()).balance - balanceOfDeployerBefore).toBe(1n);
+        console.log('Total Fees for Redeem Msg: ', getTotalFees(redeemTx.transactions) / 10 ** 9, ' TON');
     });
 });
