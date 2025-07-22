@@ -106,7 +106,7 @@ async function main(): Promise<void> {
     deployerWallet,
   );
   await publicLogs(pxe1);
-  await simulateBlockPassing(pxe3, assetMinter, deployerWallet, 3);
+  // await simulateBlockPassing(pxe3, assetMinter, deployerWallet, 3);
   await getHTLCDetails(contract, Id);
 }
 

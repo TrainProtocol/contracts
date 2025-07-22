@@ -60,7 +60,7 @@ pub contract Train {
     #[storage]
     struct Storage<Context> {
         contracts_private: Map<Field, PrivateImmutable<HTLC_Private, Context>, Context>,
-        contracts_public: Map<Field, SharedMutable<HTLC_Public, 1, Context>, Context>,
+        contracts_public: Map<Field, SharedMutable<HTLC_Public, 180, Context>, Context>,
     }
 
     #[private]
