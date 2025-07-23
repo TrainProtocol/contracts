@@ -1,5 +1,7 @@
 require('dotenv').config();
 require('@nomicfoundation/hardhat-toolbox');
+// require('@nomicfoundation/hardhat-ignition');
+require('@nomicfoundation/hardhat-ignition-ethers');
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
@@ -140,12 +142,12 @@ module.exports = {
     },
     customChains: [
       {
-        network: "binanceMainnet",
+        network: 'binanceMainnet',
         chainId: 56,
         urls: {
-          apiURL: "https://api.etherscan.io/v2/api?chainid=56",
-          browserURL: "https://bscscan.com"
-        }
+          apiURL: 'https://api.etherscan.io/v2/api?chainid=56',
+          browserURL: 'https://bscscan.com',
+        },
       },
       {
         network: 'linea_mainnet',
