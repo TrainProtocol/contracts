@@ -1495,4 +1495,19 @@ describe('TRAIN Protocol Native Asset Tests', () => {
             exitCode: Train.errors['Not Future Timelock'],
         });
     });
+
+    it('returns funds when msg is empty', async () => {
+        const tx = await trainContract.send(
+            deployerWallet.getSender(),
+            { value: toNano('0.5'), bounce: true },
+            beginCell().endCell().asSlice(),
+        );
+
+        expect(tx.transactions).toHaveTransaction({
+            from: trainContract.address,
+            to: deployerWallet.address,
+            success: true,
+            op: 0x0,
+        });
+    });
 });
