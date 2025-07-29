@@ -23,6 +23,8 @@ jobs:
         sh -c "$(curl -sSfL https://release.anza.xyz/v2.2.14/install)"
         echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
         export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+    - name: Install dependencies (libudev)
+      run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
 
     - name: Install Anchor CLI
       run: |
