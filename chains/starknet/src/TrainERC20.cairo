@@ -7,7 +7,7 @@
 //    @@@       @@@       @@@           @@@  @@@   @@@          @@@
 //     @@@      @@@        @@@@       @@@@@  @@@   @@@          @@@
 //       @@@@@  @@@           @@@@@@@@@ @@@  @@@   @@@          @@@
-//1
+
 use core::hash::{HashStateExTrait, HashStateTrait};
 use core::poseidon::PoseidonTrait;
 use openzeppelin::utils::snip12::{OffchainMessageHash, SNIP12Metadata, StructHash};
