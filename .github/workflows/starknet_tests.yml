@@ -57,6 +57,7 @@ jobs:
           export PATH="$HOME/.config/.dojo/bin:$PATH"
           katana --dev --dev.no-fee 
           sleep 15
+          cat katana.log && exit 1
 
       - name: Compile Starknet Contracts
         working-directory: chains/starknet/tests
