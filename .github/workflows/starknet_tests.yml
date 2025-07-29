@@ -55,7 +55,7 @@ jobs:
       - name: Run Katana
         run: |
           export PATH="$HOME/.config/.dojo/bin:$PATH"
-          katana --accounts 5 --disable-fee --host 127.0.0.1 --port 5050 > katana.log 2>&1 &
+          katana --dev.accounts 5 --disable-fee --host 127.0.0.1 --port 5050 > katana.log 2>&1 &
           sleep 15
           curl http://127.0.0.1:5050 || (cat katana.log && exit 1)
 
