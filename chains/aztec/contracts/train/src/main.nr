@@ -402,8 +402,8 @@ pub contract Train {
     }
 
     #[view]
-    #[public]
-    fn get_htlc_public(key: Field) -> pub HTLC_Public {
+    #[utility]
+    unconstrained fn get_htlc_public(key: Field) -> pub HTLC_Public {
         storage.contracts_public.at(key).get_current_value()
     }
 }
