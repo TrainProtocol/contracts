@@ -34,25 +34,17 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      # - name: Install and Run Katana (Local Starknet Devnet)
-      #   run: |
-      #     curl -L https://foundry.paradigm.xyz | bash
-      #     export PATH="$HOME/.foundry/bin:$PATH"
-      #     foundryup
-      #     katana --accounts 5 --disable-fee --host 127.0.0.1 --port 5050 > katana.log 2>&1 &
-      #     sleep 15
-      #     curl http://127.0.0.1:5050 || (cat katana.log && exit 1)
-      #   shell: bash
       - name: Install Starkli 
         run: |
           curl https://get.starkli.sh | sh
           echo "$HOME/.starkli/bin" >> $GITHUB_PATH
-        
+          
       - name: Install Dojo (Katana)
         run: |
           curl -L https://install.dojoengine.org | bash
-          . "$HOME/.config/.dojo/env"
-          dojoup install katana
+          source "$HOME/.config/.dojo/env"
+          # Install the latest stable version of dojo
+          dojoup install stable
           echo "$HOME/.config/.dojo/bin" >> $GITHUB_PATH
 
       - name: Install Scarb
