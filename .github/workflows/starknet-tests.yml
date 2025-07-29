@@ -36,12 +36,12 @@ jobs:
 
       - name: Install and Run Katana (Local Starknet Devnet)
         run: |
-          curl -L https://foundry.paradigm.xyz | bash
-          export PATH="$HOME/.foundry/bin:$PATH"
-          $HOME/.foundry/bin/foundryup
-          $HOME/.foundry/bin/katana --accounts 5 --disable-fee --host 127.0.0.1 --port 5050 > katana.log 2>&1 &
-          sleep 15
-          curl http://127.0.0.1:5050 || (cat katana.log && exit 1)
+        curl -L https://foundry.paradigm.xyz | bash
+        source "$HOME/.bashrc"
+        foundryup
+        katana --accounts 5 --disable-fee --host 127.0.0.1 --port 5050 > katana.log 2>&1 &
+        sleep 15
+        curl http://127.0.0.1:5050 || (cat katana.log && exit 1)
         shell: bash
 
       - name: Compile Starknet Contracts
