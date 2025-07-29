@@ -200,7 +200,7 @@ describe("HTLC", () => {
       .signers([wallet.payer])
       .rpc();
 
-    console.log(`Initialized a new htlc. We will pay bob 100 tokens`);
+    // console.log(`Initialized a new htlc. We will pay bob 100 tokens`);
 
     // Assert that 100 tokens were moved from our account to the HTLC Account.
     const [, WalletBalancePost] = await readAccount(walletTokenAccount, provider);
