@@ -55,9 +55,9 @@ jobs:
       - name: Run Katana
         run: |
           export PATH="$HOME/.config/.dojo/bin:$PATH"
-          katana --dev --dev.no-fee 
-        wait-on: http://127.0.0.1:5050
-        tail: true
+          RUNNER_TRACKING_ID="" katana --dev --dev.no-fee &
+          sleep 15
+          curl http://127.0.0.1:5050
 
       - name: Compile Starknet Contracts
         working-directory: chains/starknet/tests
