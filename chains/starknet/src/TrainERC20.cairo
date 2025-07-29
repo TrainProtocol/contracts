@@ -544,9 +544,9 @@ mod TrainERC20 {
                 }
             } else {
                 // send the tokens to the receiver if the reward is set to zero
-                let transfered = IERC20Dispatcher { contract_address: htlc.tokenContract }
-                    .transfer(htlc.srcReceiver, htlc.amount);
-                assert!(transfered, "transfer failed");
+                // let transfered = IERC20Dispatcher { contract_address: htlc.tokenContract }
+                //    .transfer(htlc.srcReceiver, htlc.amount);
+                // assert!(transfered, "transfer failed");
             }
 
             self

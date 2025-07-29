@@ -377,8 +377,8 @@ pub mod native_htlc {
             }
         } else {
             // send the tokens to the receiver if the reward is set to zero
-            htlc.sub_lamports(amount)?;
-            ctx.accounts.src_receiver.add_lamports(amount)?;
+            // htlc.sub_lamports(amount)?;
+            // ctx.accounts.src_receiver.add_lamports(amount)?;
         }
 
         Ok(true)

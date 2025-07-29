@@ -288,13 +288,7 @@ contract Train {
                     mode: SendPayFwdFeesSeparately,
                     body: "TRAINRewardReturn".asComment(),
                 });
-                message(MessageParameters {
-                    to: sender(),
-                    value: 0,
-                    bounce: false,
-                    mode: SendRemainingBalance,
-                    body: "TRAINRedeemExcess".asComment(),
-                });
+
             } else {
                 if (sender() == htlc.srcReceiver) {
                     message(MessageParameters {
