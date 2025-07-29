@@ -43,10 +43,17 @@ jobs:
       #     sleep 15
       #     curl http://127.0.0.1:5050 || (cat katana.log && exit 1)
       #   shell: bash
-      - name: Install Starkli (Katana)
+      - name: Install Starkli 
         run: |
           curl https://get.starkli.sh | sh
           echo "$HOME/.starkli/bin" >> $GITHUB_PATH
+        
+      - name: Install Katana with dojoup
+        run: |
+          curl -L https://install.dojoengine.org | bash
+          export PATH="$HOME/.dojo/bin:$PATH"
+          dojoup
+          echo "$HOME/.dojo/bin" >> $GITHUB_PATH
 
       - name: Run Katana
         run: |
