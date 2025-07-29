@@ -36,4 +36,5 @@ jobs:
 
       - name: Run blueprint tests
         working-directory: chains/ton
-        run: npx blueprint test tests/train.spec.ts
+        run: |
+          npx jest tests/train.spec.ts --ci --testFailureExitCode=1 --verbose

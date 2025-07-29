@@ -36,4 +36,5 @@ jobs:
 
       - name: Run jetton tests
         working-directory: chains/ton
-        run: npx blueprint test tests/trainjetton.spec.ts
+        run: |
+          npx jest tests/trainjetton.spec.ts --ci --testFailureExitCode=1 --verbose
