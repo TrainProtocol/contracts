@@ -48,15 +48,21 @@ jobs:
           curl https://get.starkli.sh | sh
           echo "$HOME/.starkli/bin" >> $GITHUB_PATH
         
-      - name: Install Katana with dojoup
+      - name: Install Dojo (Katana)
         run: |
           curl -L https://install.dojoengine.org | bash
-          export PATH="$HOME/.dojo/bin:$PATH"
-          dojoup
-          echo "$HOME/.dojo/bin" >> $GITHUB_PATH
+          . "$HOME/.config/.dojo/env"
+          dojoup install katana
+          echo "$HOME/.config/.dojo/bin" >> $GITHUB_PATH
+
+      - name: Install Scarb
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://docs.swmansion.com/scarb/install.sh | sh
+          echo "$HOME/.scarb/bin" >> $GITHUB_PATH
 
       - name: Run Katana
         run: |
+          export PATH="$HOME/.config/.dojo/bin:$PATH"
           katana --accounts 5 --disable-fee --host 127.0.0.1 --port 5050 > katana.log 2>&1 &
           sleep 15
           curl http://127.0.0.1:5050 || (cat katana.log && exit 1)
