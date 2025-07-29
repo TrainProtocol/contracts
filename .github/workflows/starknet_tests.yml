@@ -37,7 +37,7 @@ jobs:
       - name: Install and Run Katana (Local Starknet Devnet)
         run: |
           curl -L https://foundry.paradigm.xyz | bash
-          source "$HOME/.bashrc"
+          export PATH="$HOME/.foundry/bin:$PATH"
           foundryup
           katana --accounts 5 --disable-fee --host 127.0.0.1 --port 5050 > katana.log 2>&1 &
           sleep 15
