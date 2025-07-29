@@ -34,15 +34,28 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install and Run Katana (Local Starknet Devnet)
+      # - name: Install and Run Katana (Local Starknet Devnet)
+      #   run: |
+      #     curl -L https://foundry.paradigm.xyz | bash
+      #     export PATH="$HOME/.foundry/bin:$PATH"
+      #     foundryup
+      #     katana --accounts 5 --disable-fee --host 127.0.0.1 --port 5050 > katana.log 2>&1 &
+      #     sleep 15
+      #     curl http://127.0.0.1:5050 || (cat katana.log && exit 1)
+      #   shell: bash
+      - name: Install Foundry and Katana
         run: |
           curl -L https://foundry.paradigm.xyz | bash
+          source $HOME/.bashrc
+          $HOME/.foundry/bin/foundryup
+          $HOME/.foundry/bin/foundryup -C anvil --branch nightly
+        
+      - name: Run Katana
+        run: |
           export PATH="$HOME/.foundry/bin:$PATH"
-          foundryup
           katana --accounts 5 --disable-fee --host 127.0.0.1 --port 5050 > katana.log 2>&1 &
           sleep 15
           curl http://127.0.0.1:5050 || (cat katana.log && exit 1)
-        shell: bash
 
       - name: Compile Starknet Contracts
         working-directory: chains/starknet/tests
