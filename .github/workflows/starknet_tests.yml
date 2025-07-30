@@ -38,9 +38,9 @@ jobs:
         # working-directory: chains/starknet/tests 
         run: |
           curl https://get.starkli.sh | sh
-          source "$HOME/.config/.starkli/env"
-          echo "$HOME/.starkli/bin" >> $GITHUB_PATH
-        # starkliup
+          . "$HOME/.starkli/env"
+          starkliup
+        #echo "$HOME/.starkli/bin" >> $GITHUB_PATH
           
       - name: Install Scarb
         run: |
