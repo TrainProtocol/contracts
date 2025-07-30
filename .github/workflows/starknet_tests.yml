@@ -44,8 +44,8 @@ jobs:
       
       - name: Install or update starkli
         run: |
-        source $HOME/.starkli/env
-        starkliup
+          source $HOME/.starkli/env
+          starkliup
           
       - name: Install Scarb
         run: |
