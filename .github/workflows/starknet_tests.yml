@@ -37,10 +37,10 @@ jobs:
       - name: Install Starkli CLI via starkliup
         run: |
           curl -fsSL https://get.starkli.sh | sh
-          # ensure ~/.starkli/bin is in PATH
-          echo "$HOME/.starkli/bin" >> $GITHUB_PATH
+          source "$HOME/.config/.starkli/env"
           starkliup
-          
+          echo "$HOME/.starkli/bin" >> $GITHUB_PATH
+
       - name: Install Scarb
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://docs.swmansion.com/scarb/install.sh -s -- -v 2.9.4 | sh
@@ -59,7 +59,7 @@ jobs:
         run: |
           starkli --version
           scarb --version
-          katana   --version
+          katana --version
 
       - name: Run Katana
         working-directory: chains/starknet/tests 
