@@ -31,8 +31,8 @@ jobs:
           npm install
           npm install typescript ts-node @types/node starknet
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+      # - name: Setup Rust
+      #   uses: dtolnay/rust-toolchain@stable
 
       - name: Install Starkli 
         run: |
