@@ -34,16 +34,11 @@ jobs:
       # - name: Setup Rust
       #   uses: dtolnay/rust-toolchain@stable
 
-      - name: Install Starkli 
-        # working-directory: chains/starknet/tests 
+      - name: Install Starkli CLI via starkliup
         run: |
-          curl https://get.starkli.sh | sh
-          source "$HOME/.starkli/env" >> $GITHUB_PATH
+          curl -fsSL https://get.starkli.sh | sh
+          # ensure ~/.starkli/bin is in PATH
           echo "$HOME/.starkli/bin" >> $GITHUB_PATH
-      
-      - name: Install or update starkli
-        run: |
-          source $HOME/.starkli/bin
           starkliup
           
       - name: Install Scarb
