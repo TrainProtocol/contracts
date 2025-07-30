@@ -38,6 +38,7 @@ jobs:
         # working-directory: chains/starknet/tests 
         run: |
           curl https://get.starkli.sh | sh
+          source "$HOME/.config/.starkli/env"
           echo "$HOME/.starkli/bin" >> $GITHUB_PATH
         # starkliup
           
