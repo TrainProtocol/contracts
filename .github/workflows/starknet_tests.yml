@@ -41,11 +41,6 @@ jobs:
           starkliup
           echo "$HOME/.starkli/bin" >> $GITHUB_PATH
 
-      - name: Install Scarb
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://docs.swmansion.com/scarb/install.sh -s -- -v 2.9.4 | sh
-          echo "$HOME/.scarb/bin" >> $GITHUB_PATH
-
       - name: Install Dojo (Katana)
         working-directory: chains/starknet/tests 
         run: |
@@ -53,6 +48,11 @@ jobs:
           source "$HOME/.config/.dojo/env"
           dojoup 
           echo "$HOME/.config/.dojo/bin" >> $GITHUB_PATH
+
+      - name: Install Scarb
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://docs.swmansion.com/scarb/install.sh -s -- -v 2.9.4 | sh
+          echo "$HOME/.scarb/bin" >> $GITHUB_PATH
 
       - name: Add tools to PATH
         run: |
