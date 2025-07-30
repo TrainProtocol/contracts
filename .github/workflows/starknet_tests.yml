@@ -35,11 +35,13 @@ jobs:
       #   uses: dtolnay/rust-toolchain@stable
 
       - name: Install Starkli 
+        working-directory: chains/starknet/tests 
         run: |
           curl https://get.starkli.sh | sh
           echo "$HOME/.starkli/bin" >> $GITHUB_PATH
           
       - name: Install Dojo (Katana)
+        working-directory: chains/starknet/tests 
         run: |
           curl -L https://install.dojoengine.org | bash
           source "$HOME/.config/.dojo/env"
@@ -53,6 +55,7 @@ jobs:
       #     echo "$HOME/.scarb/bin" >> $GITHUB_PATH
 
       - name: Run Katana
+        working-directory: chains/starknet/tests 
         run: |
           export PATH="$HOME/.config/.dojo/bin:$PATH"
           RUNNER_TRACKING_ID="" katana --dev --dev.no-fee &

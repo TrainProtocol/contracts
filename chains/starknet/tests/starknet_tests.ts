@@ -849,7 +849,7 @@ async function main() {
         fs.readFileSync("./htlc_compiled.casm.json").toString("ascii")
     );
     console.log('starting to declare ');
-    // Declare and deploy the HTLC contract on the localnet
+    // Declare and deploy the HTLC contract on the localnet;
     const deployResponse = await account.declareAndDeploy({
         contract: sierraHTLC,
         casm: casmHTLC,
