@@ -59,8 +59,14 @@ jobs:
         run: |
           export PATH="$HOME/.config/.dojo/bin:$PATH"
           RUNNER_TRACKING_ID="" katana --dev --dev.no-fee &
-          sleep 15
+          sleep 10
           curl http://127.0.0.1:5050
+      
+      - name: Verify installations
+        run: |
+          starkli --version
+          scarb --version
+          katana   --version
 
       - name: Compile Starknet Contracts
         working-directory: chains/starknet/tests
