@@ -41,6 +41,11 @@ jobs:
           . "$HOME/.starkli/env"
           starkliup
         #echo "$HOME/.starkli/bin" >> $GITHUB_PATH
+      
+      - name: Install or update starkli
+        run: |
+        source $HOME/.starkli/env
+        starkliup
           
       - name: Install Scarb
         run: |
