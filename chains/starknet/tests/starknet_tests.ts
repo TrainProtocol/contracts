@@ -25,7 +25,7 @@ const local_privateKey = '0x3e3979c1ed728490308054fe357a9f49cf67f80f9721f44cc572
 const local_address = '0x6677fe62ee39c7b07401f754138502bab7fac99d2d3c5d37df7d1c6fab10819';
 const account = new Account(provider, local_address, local_privateKey);
 const tokenContract = '0x49d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7';
-console.log('token contract-', tokenContract);
+console.log('token contract', tokenContract);
 /// Run this to get the ABI of the ETH Token
 // const compressedContract = await provider.getClassAt(tokenContract);
 // fs.writeFileSync('./eth_token_abi.json', json.stringify(compressedContract.abi, undefined, 2));

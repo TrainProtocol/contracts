@@ -54,6 +54,13 @@ jobs:
           dojoup 
           echo "$HOME/.config/.dojo/bin" >> $GITHUB_PATH
 
+      - name: Verify installations
+        working-directory: chains/starknet/tests 
+        run: |
+          starkli --version
+          scarb --version
+          katana   --version
+
       - name: Run Katana
         working-directory: chains/starknet/tests 
         run: |
@@ -61,12 +68,6 @@ jobs:
           RUNNER_TRACKING_ID="" katana --dev --dev.no-fee &
           sleep 10
           curl http://127.0.0.1:5050
-      
-      - name: Verify installations
-        run: |
-          starkli --version
-          scarb --version
-          katana   --version
 
       - name: Compile Starknet Contracts
         working-directory: chains/starknet/tests
