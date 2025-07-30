@@ -35,7 +35,7 @@ jobs:
       #   uses: dtolnay/rust-toolchain@stable
 
       - name: Install Starkli 
-        working-directory: chains/starknet/tests 
+        # working-directory: chains/starknet/tests 
         run: |
           curl https://get.starkli.sh | sh
           echo "$HOME/.starkli/bin" >> $GITHUB_PATH
