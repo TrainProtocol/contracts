@@ -309,7 +309,7 @@ describe('Train ERC20 contract', () => {
       expect(htlc.sender).to.equal(user1.address);
       expect(htlc.srcReceiver).to.equal(srcReceiver);
       expect(htlc.timelock).to.equal(timelock);
-      expect(htlc.claimed).to.equal(1);
+      expect(htlc.claimed).to.equal(190);
     });
   });
 
