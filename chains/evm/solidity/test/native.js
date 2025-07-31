@@ -232,9 +232,9 @@ describe('Train native tests', () => {
       const tx = await train
         .connect(user1)
         .commit(
-          hopChains,
-          hopAssets,
-          hopAddresses,
+          [],
+          [],
+          [],
           dstChain,
           dstAsset,
           dstAddress,
@@ -248,7 +248,7 @@ describe('Train native tests', () => {
         );
 
       const receipt = await tx.wait();
-      console.log(`Actual gas used commit (hop depth is 1): ${receipt.gasUsed.toString()}`);
+      console.log(`Actual gas used commit (hop depth is 0): ${receipt.gasUsed.toString()}`);
 
       const htlc = await train.getHTLCDetails(Id);
       expect(htlc.amount).to.equal(value);
