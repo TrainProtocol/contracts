@@ -62,9 +62,7 @@ async function createPreHTLC(Id: any, amount: any, timelock: any) {
     ]);
 
     const calls = [allowanceTx, commitTx];
-
-    const { suggestedMaxFee: maxFee } = await account.estimateInvokeFee(calls);
-    const tx = await account.execute(calls, undefined, { maxFee });
+    const tx = await account.execute(calls, undefined);
 }
 
 async function createPreHTLC_with_alowance(Id: any, amount: any, timelock: any, allowance: any) {
@@ -90,8 +88,7 @@ async function createPreHTLC_with_alowance(Id: any, amount: any, timelock: any, 
 
     const calls = [allowanceTx, commitTx];
 
-    const { suggestedMaxFee: maxFee } = await account.estimateInvokeFee(calls);
-    const tx = await account.execute(calls, undefined, { maxFee });
+    const tx = await account.execute(calls, undefined);
 }
 
 /// Function for creating HTLC.
@@ -123,9 +120,7 @@ async function createHTLC(Id: any, rewardTimelock: any, timelock: any, amount: a
     ]);
 
     const calls = [allowanceTx, lockTx];
-
-    const { suggestedMaxFee: maxFee } = await account.estimateInvokeFee(calls);
-    const tx = await account.execute(calls, undefined, { maxFee });
+    const tx = await account.execute(calls, undefined);
 }
 
 async function createHTLC_with_allowance(Id: any, rewardTimelock: any, timelock: any, amount: any, allowance: any) {
@@ -155,9 +150,7 @@ async function createHTLC_with_allowance(Id: any, rewardTimelock: any, timelock:
     ]);
 
     const calls = [allowanceTx, lockTx];
-
-    const { suggestedMaxFee: maxFee } = await account.estimateInvokeFee(calls);
-    const tx = await account.execute(calls, undefined, { maxFee });
+    const tx = await account.execute(calls, undefined);
 }
 
 /// Function for signing add_lock data.
@@ -226,7 +219,7 @@ async function T0_1() {
     const redeemTx = htlc_contract.populate('redeem', [Id, secret]);
 
     await account.estimateInvokeFee([redeemTx]).catch(e => console.log(e));
-    // const tx = await account.execute(calls, undefined, { maxFee }).catch(e => console.log(e));
+    // const tx = await account.execute(calls, undefined).catch(e => console.log(e));
 }
 
 /// Can't refund if the (Pre)HTLC with the given Id does not exist.
@@ -276,7 +269,7 @@ async function T1_1() {
     const amount = { low: 1000, high: 0 };
     const secret = { low: `0x0909d9466347bfe7f3019809cf90e541`, high: `0x00` };
     const rewardTimelock = { low: Math.floor(Date.now() / 1000) + 500, high: 0 };
-    const timelock = { low: Math.floor(Date.now() / 1000) + 1000, high: 0 };
+    const timelock = { low: Math.floor(Date.now() / 1000) + 2000, high: 0 };
 
     await createHTLC(Id, rewardTimelock, timelock, amount);
 
@@ -295,7 +288,7 @@ async function T1_2() {
     //this is not the right secret
     const wrong_secret = { low: `0x0909d9466347bfe7f3019809cf90e541`, high: `0x01` };
     const rewardTimelock = { low: Math.floor(Date.now() / 1000) + 500, high: 0 };
-    const timelock = { low: Math.floor(Date.now() / 1000) + 1000, high: 0 };
+    const timelock = { low: Math.floor(Date.now() / 1000) + 2000, high: 0 };
 
     await createHTLC(Id, rewardTimelock, timelock, amount);
     await wait(20000);
@@ -343,7 +336,7 @@ async function T2() {
     const amount = { low: 1000, high: 0 };
     const secret = { low: `0x0909d9466347bfe7f3019809cf90e541`, high: `0x00` };
     const rewardTimelock = { low: Math.floor(Date.now() / 1000) + 500, high: 0 };
-    const timelock = { low: Math.floor(Date.now() / 1000) + 1000, high: 0 };
+    const timelock = { low: Math.floor(Date.now() / 1000) + 2000, high: 0 };
     const hashlock = { low: `0x064a62282e241f27696c475a0fbece39`, high: `0x0eaa55cd755940d5fd1466fcbd515999` };
     const signature: Signature = await signHTLC(account, Id, hashlock, timelock);
 
@@ -373,7 +366,7 @@ async function T3_1() {
     const Id = { low: `0x31`, high: `0x31` };
     const amount = { low: 1000, high: 0 };
     const rewardTimelock = { low: Math.floor(Date.now() / 1000) + 500, high: 0 };
-    const timelock = { low: Math.floor(Date.now() / 1000) + 1000, high: 0 };
+    const timelock = { low: Math.floor(Date.now() / 1000) + 2000, high: 0 };
 
     await createHTLC(Id, rewardTimelock, timelock, amount);
     // The contract forces at least 15 minute tinelock 
@@ -388,7 +381,7 @@ async function T3_2() {
     const Id = { low: `0x32`, high: `0x00012` };
     const amount = { low: 1000, high: 0 };
     const rewardTimelock = { low: Math.floor(Date.now() / 1000) + 500, high: 0 };
-    const timelock = { low: Math.floor(Date.now() / 1000) + 1000, high: 0 };
+    const timelock = { low: Math.floor(Date.now() / 1000) + 2000, high: 0 };
 
     await createHTLC(Id, rewardTimelock, timelock, amount);
     await wait(20000);
@@ -413,7 +406,7 @@ async function T4() {
     const amount = { low: 1000, high: 0 };
     const secret = { low: `0x0909d9466347bfe7f3019809cf90e541`, high: `0x00` };
     const rewardTimelock = { low: Math.floor(Date.now() / 1000) + 500, high: 0 };
-    const timelock = { low: Math.floor(Date.now() / 1000) + 1000, high: 0 };
+    const timelock = { low: Math.floor(Date.now() / 1000) + 2000, high: 0 };
     const hashlock = { low: `0x064a62282e241f27696c475a0fbece39`, high: `0x0eaa55cd755940d5fd1466fcbd515999` };
     const signature: Signature = await signHTLC(account, Id, hashlock, timelock);
 
@@ -452,7 +445,7 @@ async function T5_1() {
 async function T5_2() {
 
     const Id = { low: `0x52`, high: `0x25` };
-    const timelock = { low: Math.floor(Date.now() / 1000) + 1000, high: 0 };
+    const timelock = { low: Math.floor(Date.now() / 1000) + 2000, high: 0 };
     const rewardTimelock = { low: Math.floor(Date.now() / 1000) + 500, high: 0 };
     const amount = { low: 1000, high: 0 };
     await createHTLC(Id, rewardTimelock, timelock, amount);
@@ -483,7 +476,7 @@ async function T6_1() {
 async function T6_2() {
 
     const Id = { low: `0x62`, high: `0x26` };
-    const timelock = { low: Math.floor(Date.now() / 1000) + 1000, high: 0 };
+    const timelock = { low: Math.floor(Date.now() / 1000) + 2000, high: 0 };
     const rewardTimelock = { low: Math.floor(Date.now() / 1000) + 500, high: 0 };
     // amount is set to zero
     const amount = { low: 0, high: 0 };
@@ -513,7 +506,7 @@ async function T7_1() {
 async function T7_2() {
 
     const Id = { low: `0x72`, high: `0x00` };
-    const timelock = { low: Math.floor(Date.now() / 1000) + 1000, high: 0 };
+    const timelock = { low: Math.floor(Date.now() / 1000) + 2000, high: 0 };
     const rewardTimelock = { low: Math.floor(Date.now() / 1000) + 500, high: 0 };
     // account does not this much balance 
     const amount = { low: `0x064a62282e241f27696c475a0fbece39`, high: `0x064a62282e241f27696c475a0fbece39` };
@@ -546,7 +539,7 @@ async function T8_1() {
 async function T8_2() {
 
     const Id = { low: `0x82`, high: `0x28` };
-    const timelock = { low: Math.floor(Date.now() / 1000) + 1000, high: 0 };
+    const timelock = { low: Math.floor(Date.now() / 1000) + 2000, high: 0 };
     const rewardTimelock = { low: Math.floor(Date.now() / 1000) + 500, high: 0 };
     const allowance = { low: 1, high: 0 };
     const amount = { low: 1000, high: 0 };
@@ -599,7 +592,7 @@ async function T9() {
 async function T10_1() {
 
     const Id = { low: `0x101`, high: `0x101` };
-    const timelock = { low: Math.floor(Date.now() / 1000) + 1000, high: 0 };
+    const timelock = { low: Math.floor(Date.now() / 1000) + 2000, high: 0 };
     // not future reward timelock
     const rewardTimelock = { low: Math.floor(Date.now() / 1000) - 500, high: 0 };
     const amount = { low: 1000, high: 0 };
@@ -611,7 +604,7 @@ async function T10_1() {
 async function T10_2() {
 
     const Id = { low: `0x102`, high: `0x201` };
-    const timelock = { low: Math.floor(Date.now() / 1000) + 1000, high: 0 };
+    const timelock = { low: Math.floor(Date.now() / 1000) + 2000, high: 0 };
     // Reward timelock is bigger than HTLC timelock
     const rewardTimelock = { low: Math.floor(Date.now() / 1000) + 1500, high: 0 };
     const amount = { low: 1000, high: 0 };
@@ -639,9 +632,7 @@ async function T11_1() {
     await wait(20000);
 
     const addLockTx = htlc_contract.populate('addLock', [Id, hashlock, timelock]);
-    const call = [addLockTx]
-    const { suggestedMaxFee: maxFee } = await account.estimateInvokeFee(call);
-    const tx = await account.execute(call, undefined, { maxFee });
+    const tx = await account.execute([addLockTx], undefined);
 }
 
 /// Other users can't add lock to PreHTLC.
@@ -655,10 +646,8 @@ async function T11_2() {
     await wait(20000);
 
     const addLockTx = htlc_contract.populate('addLock', [Id, hashlock, timelock]);
-    const call = [addLockTx]
-    const { suggestedMaxFee: maxFee } = await account.estimateInvokeFee(call);
     // calling with other account
-    const tx = await other_account.execute(call, undefined, { maxFee }).catch(e => console.log(e));
+    const tx = await other_account.execute([addLockTx], undefined).catch(e => console.log(e));
 }
 
 /// Can't add lock if hashlock is already set.
@@ -672,13 +661,11 @@ async function T11_3() {
     await wait(20000);
 
     const addLockTx1 = htlc_contract.populate('addLock', [Id, hashlock, timelock]);
-    const call1 = [addLockTx1]
-    const { suggestedMaxFee: maxFee } = await account.estimateInvokeFee(call1);
-    const tx1 = await account.execute(call1, undefined, { maxFee });
+    const tx1 = await account.execute([addLockTx1], undefined);
     await wait(20000);
+
     const addLockTx2 = htlc_contract.populate('addLock', [Id, hashlock, timelock]);
-    const call2 = [addLockTx2]
-    const tx2 = await account.execute(call2, undefined, { maxFee }).catch(e => console.log(e));
+    const tx2 = await account.execute([addLockTx2], undefined).catch(e => console.log(e));
 }
 
 /// Can't add lock with wrong timelock.
@@ -720,8 +707,7 @@ async function T12_1() {
     const signature = await signHTLC(account, Id, hashlock, timelock);
 
     const addLockSignTx = htlc_contract.populate('addLockSig', [Id, hashlock, timelock, [signature.r, signature.s]]);
-    const { suggestedMaxFee: maxFee } = await account.estimateInvokeFee([addLockSignTx]);
-    const tx = await account.execute([addLockSignTx], undefined, { maxFee });
+    const tx = await account.execute([addLockSignTx], undefined);
 }
 
 
@@ -736,14 +722,12 @@ async function T12_2() {
     await wait(20000);
 
     const addLockTx1 = htlc_contract.populate('addLock', [Id, hashlock, timelock]);
-    const call1 = [addLockTx1]
-    const { suggestedMaxFee: maxFee } = await account.estimateInvokeFee(call1);
-    const tx1 = await account.execute(call1, undefined, { maxFee });
+    const tx1 = await account.execute([addLockTx1], undefined);
     await wait(20000);
 
     const signature = await signHTLC(account, Id, hashlock, timelock);
     const addLockSignTx = htlc_contract.populate('addLockSig', [Id, hashlock, timelock, [signature.r, signature.s]]);
-    const tx2 = await account.execute([addLockSignTx], undefined, { maxFee }).catch(e => console.log(e));
+    const tx2 = await account.execute([addLockSignTx], undefined).catch(e => console.log(e));
 }
 
 /// Can't add lock signature with wrong timelock.

@@ -22,7 +22,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
 
       - name: Install Dependencies
         working-directory: chains/starknet/tests 
@@ -51,7 +51,7 @@ jobs:
 
       - name: Install Scarb
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://docs.swmansion.com/scarb/install.sh -s -- -v 2.9.4 | sh
+          curl --proto '=https' --tlsv1.2 -sSf https://docs.swmansion.com/scarb/install.sh | sh -s -- -v 2.9.4
           echo "$HOME/.scarb/bin" >> $GITHUB_PATH
 
       - name: Add tools to PATH
