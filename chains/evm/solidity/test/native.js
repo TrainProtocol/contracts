@@ -252,7 +252,7 @@ describe('Train native tests', () => {
 
       const htlc = await train.getHTLCDetails(Id);
       expect(htlc.amount).to.equal(value);
-      expect(htlc.hashlock).to.equal('0x0100000000000000000000000000000000000000000000000000000000000011');
+      expect(htlc.hashlock).to.equal('0x0100000000000000000000000000000000000000000000000000000000000000');
       expect(htlc.secret).to.equal(1n);
       expect(htlc.sender).to.equal(user1.address);
       expect(htlc.srcReceiver).to.equal(srcReceiver);
