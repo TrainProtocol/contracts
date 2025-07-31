@@ -1,12 +1,31 @@
 require('dotenv').config();
-require('@nomicfoundation/hardhat-toolbox');
-// require('@nomicfoundation/hardhat-ignition');
+require('@nomicfoundation/hardhat-ignition');
 require('@nomicfoundation/hardhat-ignition-ethers');
+require('@nomicfoundation/hardhat-chai-matchers');
+require('@nomicfoundation/hardhat-network-helpers');
+require('@nomicfoundation/hardhat-ethers');
+require('hardhat-gas-reporter');
+require('solidity-coverage');
+require('@typechain/hardhat');
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
   solidity: {
-    version: '0.8.23',
+    compilers: [{ version: '0.8.24' }],
+    overrides: {
+      'contracts/TestToken.sol': {
+        version: '0.8.23',
+        settings: { optimizer: { enabled: true, runs: 200 }, viaIR: true },
+      },
+      'contracts/TrainERC20.sol': {
+        version: '0.8.23',
+        settings: { optimizer: { enabled: true, runs: 200 }, viaIR: true },
+      },
+      'contracts/Train.sol': {
+        version: '0.8.23',
+        settings: { optimizer: { enabled: true, runs: 200 }, viaIR: true },
+      },
+    },
     settings: {
       optimizer: {
         enabled: true,
