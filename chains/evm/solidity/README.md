@@ -28,6 +28,23 @@ The **Train Contract** enables secure, atomic cross-chain swaps.
 - `TokenRedeemed`: Swap completed.
 - `TokenRefunded`: Funds refunded.
 
+## Gas Estimates (Native Token)
+
+> _The following gas usage was measured from Hardhat tests on the native ETH implementation._
+
+
+| Function     | Description                                 | Gas Used (Typical, hop depth = 1) |
+|--------------|---------------------------------------------|-----------------------------------|
+| commit       | Open HTLC (no hashlock)                     | ~155,255                          |
+| lock         | Open HTLC (with hashlock, no reward)        | ~148,214                          |
+| addLock      | Add hashlock/timelock to open HTLC          | ~39,456                           |
+| addLockSig   | Add hashlock/timelock via EIP-712 signature | ~47,626                           |
+| redeem       | Redeem funds (no reward)                    | ~52,706                           |
+| refund       | Refund sender (no reward)                   | ~44,066                           |
+
+_Values are from Hardhat test suite (`test/native.js`).  
+Real-world values depend on chain state and input complexity (e.g., hop depth, reward, etc)._
+
 ## Usage
 
 Deploy with Solidity `0.8.23` and OpenZeppelin. Use Hardhat, Foundry, or Remix.
