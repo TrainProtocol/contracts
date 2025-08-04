@@ -9,7 +9,7 @@ import ECPairFactory, { ECPairInterface } from 'ecpair';
 import * as ecc from 'tiny-secp256k1';
 
 /**
- * bitcoin 系のコインのインターフェース
+ * TRAIN Protocol Bitcoin
  */
 export default abstract class Bitcoin {
   readonly mempool: MempoolReturn['bitcoin'];
@@ -27,17 +27,23 @@ export default abstract class Bitcoin {
   }
 
   public createHashPair(): HashPair {
-    const s = randomBytes(32);
-    const p1 = createHash('sha256').update(s).digest();
-    const p2 = createHash('sha256').update(p1).digest();
+    const secret = randomBytes(32);
+    const hashlock = createHash('sha256').update(secret).digest();
     return {
-      proof: s.toString('hex'),
-      secret: p2.toString('hex'),
+      hashlock: hashlock.toString('hex'),
+      secret: secret.toString('hex'),
     };
   }
 
-  protected async getCurrentBlockHeight(): Promise<number> {
-    return await this.mempool.blocks.getBlocksTipHeight();
+  protected async getCurrentBlockInfo(): Promise<{ height: number; timestamp: number }> {
+    const height = await this.mempool.blocks.getBlocksTipHeight();
+    const hash = await this.mempool.blocks.getBlocksTipHash();
+    const block = await this.mempool.blocks.getBlock({ hash });
+
+    return {
+      height,
+      timestamp: block.timestamp,
+    };
   }
 
   protected async postTransaction(txhex: string): Promise<any> {
@@ -85,6 +91,7 @@ export default abstract class Bitcoin {
     return utxos;
   }
 
+  // TODO: modify to use taproot
   protected buildAndSignTx(
     sender: ECPairInterface,
     address: string,
@@ -179,19 +186,19 @@ export default abstract class Bitcoin {
   ): Buffer {
     return script.fromASM(
       `
-           OP_HASH256
-           ${paymentHash}
-           OP_EQUAL
-           OP_IF
-           ${receiverPublicKey.toString('hex')}
-           OP_ELSE
-           ${script.number.encode(timelock).toString('hex')}
-           OP_CHECKLOCKTIMEVERIFY
-           OP_DROP
-           ${userRefundPublicKey.toString('hex')}
-           OP_ENDIF
-           OP_CHECKSIG
-           `
+      OP_SHA256
+      ${paymentHash}
+      OP_EQUAL
+      OP_IF
+        ${receiverPublicKey.toString('hex')}
+      OP_ELSE
+        ${script.number.encode(timelock).toString('hex')}
+        OP_CHECKLOCKTIMEVERIFY
+        OP_DROP
+        ${userRefundPublicKey.toString('hex')}
+      OP_ENDIF
+      OP_CHECKSIG
+    `
         .trim()
         .replace(/\s+/g, ' ')
     );

@@ -5,8 +5,8 @@ export interface LockOptions {
 }
 
 export interface HashPair {
+  hashlock: string;
   secret: string;
-  proof: string;
 }
 
 export interface Utxo {
