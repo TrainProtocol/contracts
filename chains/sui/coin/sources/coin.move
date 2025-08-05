@@ -254,7 +254,7 @@ public entry fun commit_hop<CoinType>(
 /// @param timelock UNIX epoch seconds time that the lock expires at.
 ///                  Refunds can be made after this time.
 /// @return Id of the new HTLC. This is needed for subsequent calls.
-/// If there is need to lock reward coins too, use the lock_with_reward instead
+/// If there is need to lock reward coins too, use the lockWithReward instead
 public entry fun lock<CoinType>(
   htlcs: &mut HTLCs,
   htlc_id: u256,
@@ -307,7 +307,7 @@ public entry fun lock<CoinType>(
 }
 
 /// Lock function to create a new HTLC with reward
-public entry fun lock_with_reward<CoinType>(
+public entry fun lockWithReward<CoinType>(
   htlcs: &mut HTLCs,
   rewards: &mut Rewards,
   htlc_id: u256,
@@ -326,7 +326,7 @@ public entry fun lock_with_reward<CoinType>(
 ) {
   //Check that the ID is unique
   assert!(!df::exists_(&htlcs.id, htlc_id), EHTLCAlreadytExist);
-  assert!(timelock > ctx.epoch_timestamp_ms() + 900000, EInvalidTimelock);
+  assert!(timelock > ctx.epoch_timestamp_ms() + 1800000, EInvalidTimelock);
   assert!(rewardTimelock > ctx.epoch_timestamp_ms() && rewardTimelock <= timelock, EInvalidRewardTimelock);
   assert!(coins.value() != 0, EFundsNotSent);
   //Write the HTLC and the Reward data into the storage
@@ -451,7 +451,7 @@ public entry fun addLockSig(
 /// @param Id of the HTLC.
 /// @param secret sha256(secret) should equal the contract hashlock.
 /// @return bool true on success
-/// If there are also locked reward coins use the redeem_with_reward instead
+/// If there are also locked reward coins use the redeemWithReward instead
 public entry fun redeem<CoinType>(htlcs: &mut HTLCs, htlc_id: u256, secret: vector<u8>, ctx: &mut TxContext) {
   assert!(df::exists_(&htlcs.id, htlc_id), EHTLCNotExist);
   let htlc: &mut HTLC = df::borrow_mut(&mut htlcs.id, htlc_id);
@@ -474,7 +474,7 @@ public entry fun redeem<CoinType>(htlcs: &mut HTLCs, htlc_id: u256, secret: vect
   transfer::public_transfer(locked_coins, htlc.srcReceiver);
 }
 
-public entry fun redeem_with_reward<CoinType>(
+public entry fun redeemWithReward<CoinType>(
   htlcs: &mut HTLCs,
   rewards: &mut Rewards,
   htlc_id: u256,
@@ -525,7 +525,7 @@ public entry fun redeem_with_reward<CoinType>(
 ///
 /// @param Id of the HTLC to refund from.
 /// @return bool true on success
-/// If there are also locked reward coins use the refund_with_reward instead
+/// If there are also locked reward coins use the refundWithReward instead
 public entry fun refund<CoinType>(htlcs: &mut HTLCs, htlc_id: u256, ctx: &mut TxContext) {
   assert!(df::exists_(&htlcs.id, htlc_id), EHTLCNotExist);
   let htlc: &mut HTLC = df::borrow_mut(&mut htlcs.id, htlc_id);
@@ -543,7 +543,7 @@ public entry fun refund<CoinType>(htlcs: &mut HTLCs, htlc_id: u256, ctx: &mut Tx
   transfer::public_transfer(locked_coins, htlc.sender);
 }
 
-public entry fun refund_with_reward<CoinType>(
+public entry fun refundWithReward<CoinType>(
   htlcs: &mut HTLCs,
   rewards: &mut Rewards,
   htlc_id: u256,
