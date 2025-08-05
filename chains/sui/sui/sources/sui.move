@@ -1,3 +1,13 @@
+//     @@                                    @@@
+//    @@@
+//    @@@        @@   @@@@      @@@@@         @     @    @@@@@
+//  @@@@@@@@@   @@@@@@      @@@@    @@@@@    @@@   @@@@@@    @@@@
+//    @@@       @@@       @@@           @@@  @@@   @@@          @@@
+//    @@@       @@@       @@@           @@@  @@@   @@@          @@@
+//    @@@       @@@       @@@           @@@  @@@   @@@          @@@
+//     @@@      @@@        @@@@       @@@@@  @@@   @@@          @@@
+//       @@@@@  @@@           @@@@@@@@@ @@@  @@@   @@@          @@@
+
 module trainSui::train;
 
 use std::bcs;
@@ -32,7 +42,7 @@ public struct HTLC has key, store {
   hashlock: vector<u8>,
   secret: vector<u8>,
   timelock: u64,
-  claimed: bool,
+  claimed: u8,
   sender: address,
   senderKey: vector<u8>,
   srcReceiver: address,
@@ -126,7 +136,13 @@ fun init(ctx: &mut TxContext) {
   });
 }
 
-/// commit function to create a new PreHTLC
+/// @dev Sender / Payer sets up a new pre-hash timelock contract depositing the
+/// funds and providing the reciever/srcReceiver and terms.
+/// @param srcReceiver reciever of the funds.
+/// @param timelock UNIX epoch seconds time that the lock expires at.
+///                  Refunds can be made after this time.
+/// @return Id of the new HTLC. This is needed for subsequent calls.
+/// If there is need in intermediate chains use commit_hop function instead
 public entry fun commit(
   htlcs: &mut HTLCs,
   htlc_id: u256,
@@ -140,17 +156,19 @@ public entry fun commit(
   dstAsset: String,
   ctx: &mut TxContext,
 ) {
+  //Check that the ID is unique
   assert!(!df::exists_(&htlcs.id, htlc_id), EHTLCAlreadytExist);
   assert!(timelock > ctx.epoch_timestamp_ms() + 900000, EInvalidTimelock);
   assert!(coins.value() != 0, EFundsNotSent);
 
+  //Write the PreHTLC data into the storage
   let mut htlc = HTLC {
     id: object::new(ctx),
     amount: coins.value(),
     hashlock: vector[],
     secret: vector[],
     timelock: timelock,
-    claimed: false,
+    claimed: 1,
     sender: ctx.sender(),
     senderKey: senderKey,
     srcReceiver: srcReceiver,
@@ -171,6 +189,7 @@ public entry fun commit(
     timelock: timelock,
   });
 
+  // transfer the token from the user into the HTLC object
   df::add(&mut htlc.id, HTLCObjectKey(), coins);
   df::add(&mut htlcs.id, htlc_id, htlc);
 }
@@ -192,17 +211,19 @@ public entry fun commit_hop(
   dstAsset: String,
   ctx: &mut TxContext,
 ) {
+  //Check that the ID is unique
   assert!(!df::exists_(&htlcs.id, htlc_id), EHTLCAlreadytExist);
   assert!(timelock > ctx.epoch_timestamp_ms() + 900000, EInvalidTimelock);
   assert!(coins.value() != 0, EFundsNotSent);
 
+  //Write the PreHTLC data into the storage
   let mut htlc = HTLC {
     id: object::new(ctx),
     amount: coins.value(),
     hashlock: vector[],
     secret: vector[],
     timelock: timelock,
-    claimed: false,
+    claimed: 1,
     sender: ctx.sender(),
     senderKey: senderKey,
     srcReceiver: srcReceiver,
@@ -221,12 +242,19 @@ public entry fun commit_hop(
     amount: coins.value(),
     timelock: timelock,
   });
-
+  // transfer the token from the user into the HTLC object
   df::add(&mut htlc.id, HTLCObjectKey(), coins);
   df::add(&mut htlcs.id, htlc_id, htlc);
 }
 
-/// Lock function to create a new HTLC
+/// @dev Sender / Payer sets up a new hash time lock contract depositing the
+/// funds and providing the reciever and terms.
+/// @param srcReceiver receiver of the funds.
+/// @param hashlock A sha-256 hash hashlock.
+/// @param timelock UNIX epoch seconds time that the lock expires at.
+///                  Refunds can be made after this time.
+/// @return Id of the new HTLC. This is needed for subsequent calls.
+/// If there is need to lock reward coins too, use the lock_with_reward instead
 public entry fun lock(
   htlcs: &mut HTLCs,
   htlc_id: u256,
@@ -241,17 +269,19 @@ public entry fun lock(
   dstAsset: String,
   ctx: &mut TxContext,
 ) {
+  //Check that the ID is unique
   assert!(!df::exists_(&htlcs.id, htlc_id), EHTLCAlreadytExist);
   assert!(timelock > ctx.epoch_timestamp_ms() + 900000, EInvalidTimelock);
   assert!(coins.value() != 0, EFundsNotSent);
 
+  //Write the HTLC data into the storage
   let mut htlc = HTLC {
     id: object::new(ctx),
     amount: coins.value(),
     hashlock: hashlock,
     secret: vector[],
     timelock: timelock,
-    claimed: false,
+    claimed: 1,
     sender: ctx.sender(),
     senderKey: senderKey,
     srcReceiver: srcReceiver,
@@ -272,6 +302,7 @@ public entry fun lock(
     rewardTimelock: 0,
   });
 
+  // transfer the token from the user into the HTC object
   df::add(&mut htlc.id, HTLCObjectKey(), coins);
   df::add(&mut htlcs.id, htlc_id, htlc);
 }
@@ -294,18 +325,20 @@ public entry fun lock_with_reward(
   dstAsset: String,
   ctx: &mut TxContext,
 ) {
+  //Check that the ID is unique
   assert!(!df::exists_(&htlcs.id, htlc_id), EHTLCAlreadytExist);
   assert!(timelock > ctx.epoch_timestamp_ms() + 900000, EInvalidTimelock);
   assert!(rewardTimelock > ctx.epoch_timestamp_ms() && rewardTimelock <= timelock, EInvalidRewardTimelock);
   assert!(coins.value() != 0, EFundsNotSent);
 
+  //Write the HTLC and the Reward data into the storage
   let mut htlc = HTLC {
     id: object::new(ctx),
     amount: coins.value(),
     hashlock: hashlock,
     secret: vector[],
     timelock: timelock,
-    claimed: false,
+    claimed: 1,
     sender: ctx.sender(),
     senderKey: senderKey,
     srcReceiver: srcReceiver,
@@ -326,6 +359,7 @@ public entry fun lock_with_reward(
     rewardTimelock: rewardTimelock,
   });
 
+  // transfer the tokens from the user into the HTLC and Reward objects
   df::add(&mut htlc.id, HTLCObjectKey(), coins);
   df::add(&mut htlcs.id, htlc_id, htlc);
   let mut reward = Reward {
@@ -337,15 +371,24 @@ public entry fun lock_with_reward(
   df::add(&mut rewards.id, htlc_id, reward);
 }
 
+/// @dev Called by the sender to add hashlock to the HTLC
+///
+/// @param Id of the HTLC.
+/// @param hashlock to be added.
+/// @return Id of the locked HTLC
 public entry fun addLock(htlcs: &mut HTLCs, htlc_id: u256, hashlock: vector<u8>, timelock: u64, ctx: &mut TxContext) {
   assert!(df::exists_(&htlcs.id, htlc_id), EHTLCNotExist);
   let htlc: &mut HTLC = df::borrow_mut(&mut htlcs.id, htlc_id);
 
+  // check that the hashlock is not set
+  // funds are not claimed
+  // the caller is the sender
   assert!(timelock > ctx.epoch_timestamp_ms() + 900000, EInvalidTimelock);
-  assert!(!htlc.claimed, EAlreadyClaimed);
+  assert!(htlc.claimed==1, EAlreadyClaimed);
   assert!(htlc.hashlock.is_empty(), EHashlockAlreadySet);
   assert!(htlc.sender == ctx.sender(), EUnAuthorizedAccess);
 
+  // update the hashlock and the timelock
   htlc.hashlock = hashlock;
   htlc.timelock = timelock;
 
@@ -368,8 +411,11 @@ public entry fun addLockSig(
   let htlc: &mut HTLC = df::borrow_mut(&mut htlcs.id, htlc_id);
   let sender_public_key = htlc.senderKey;
 
+  // check that the hashlock is not set
+  // funds are not claimed
+  // the senderKey is the htlc.senders public key
   assert!(timelock > ctx.epoch_timestamp_ms() + 900000, EInvalidTimelock);
-  assert!(!htlc.claimed, EAlreadyClaimed);
+  assert!(htlc.claimed==1, EAlreadyClaimed);
   assert!(htlc.hashlock.is_empty(), EHashlockAlreadySet);
   assert!(sender_public_key.length() == 32, EInvalidKeyLen);
 
@@ -378,6 +424,7 @@ public entry fun addLockSig(
   let sender_address: address = sui::address::from_bytes(sui::hash::blake2b256(&concatened));
   assert!(htlc.sender == sender_address, EUnAuthorizedAccess);
 
+  // construct and hash the message
   let msg = AddLockMsg {
     id: htlc_id,
     hashlock: hashlock,
@@ -386,9 +433,10 @@ public entry fun addLockSig(
   let mut intent_msg = vector[3u8, 0u8, 0u8];
   vector::append(&mut intent_msg, bcs::to_bytes(&msg));
   let msg_hash = hash::sha2_256(intent_msg);
-
+  // construct and hash the message
   assert!(ed25519::ed25519_verify(&signature, &sender_public_key, &msg_hash), EInvalidSignature);
 
+  // update the hashlcok and the timelock
   htlc.hashlock = hashlock;
   htlc.timelock = timelock;
   event::emit(TokenLockAdded {
@@ -398,11 +446,19 @@ public entry fun addLockSig(
   });
 }
 
+/// @dev Called by the srcReceiver once they know the secret of the hashlock.
+/// This will transfer the locked funds to their address.
+///
+/// @param Id of the HTLC.
+/// @param secret sha256(secret) should equal the contract hashlock.
+/// @return bool true on success
+/// If there are also locked reward coins use the redeem_with_reward instead
 public entry fun redeem(htlcs: &mut HTLCs, htlc_id: u256, secret: vector<u8>, ctx: &TxContext) {
   assert!(df::exists_(&htlcs.id, htlc_id), EHTLCNotExist);
   let htlc: &mut HTLC = df::borrow_mut(&mut htlcs.id, htlc_id);
 
-  assert!(!htlc.claimed, EAlreadyClaimed);
+  // remove the coins from the HTLC object and transfer them
+  assert!(htlc.claimed==1, EAlreadyClaimed);
   assert!(hash::sha2_256(secret) == htlc.hashlock, EHashlockNoMatch);
 
   let locked_coins: Coin<SUI> = df::remove(&mut htlc.id, HTLCObjectKey());
@@ -413,7 +469,8 @@ public entry fun redeem(htlcs: &mut HTLCs, htlc_id: u256, secret: vector<u8>, ct
     hashlock: htlc.hashlock,
   });
 
-  htlc.claimed = true;
+  // set claimed to 3 and update the secret
+  htlc.claimed = 3;
   htlc.secret = secret;
   transfer::public_transfer(locked_coins, htlc.srcReceiver);
 }
@@ -430,9 +487,10 @@ public entry fun redeem_with_reward(
   let htlc: &mut HTLC = df::borrow_mut(&mut htlcs.id, htlc_id);
   let reward: &mut Reward = df::borrow_mut(&mut rewards.id, htlc_id);
 
-  assert!(!htlc.claimed, EAlreadyClaimed);
+  assert!(htlc.claimed==1, EAlreadyClaimed);
   assert!(hash::sha2_256(secret) == htlc.hashlock, EHashlockNoMatch);
 
+  // remove the coins from the HTLC and Reward objects and transfer them
   let locked_coins: Coin<SUI> = df::remove(&mut htlc.id, HTLCObjectKey());
   let reward_coins: Coin<SUI> = df::remove(&mut reward.id, RewardObjectKey());
   event::emit(TokenRedeemed {
@@ -442,14 +500,18 @@ public entry fun redeem_with_reward(
     hashlock: htlc.hashlock,
   });
 
-  htlc.claimed = true;
+  // set claimed to 3 and update the secret
+  htlc.claimed = 3;
   htlc.secret = secret;
 
   if (reward.timelock > ctx.epoch_timestamp_ms()) {
+    // if redeem is called before the reward_timelock sender should get the reward back
     transfer::public_transfer(locked_coins, htlc.srcReceiver);
     transfer::public_transfer(reward_coins, htlc.sender);
   } else {
     if (ctx.sender() == htlc.srcReceiver) {
+      // if the caller is the receiver then they should get
+      //and the amount, and the reward
       transfer::public_transfer(locked_coins, htlc.srcReceiver);
       transfer::public_transfer(reward_coins, htlc.srcReceiver);
     } else {
@@ -459,14 +521,22 @@ public entry fun redeem_with_reward(
   };
 }
 
+/// @dev Called by the sender if there was no redeem AND the timelock has
+/// expired. This will refund the contract amount.
+///
+/// @param Id of the HTLC to refund from.
+/// @return bool true on success
+/// If there are also locked reward coins use the refund_with_reward instead
 public entry fun refund(htlcs: &mut HTLCs, htlc_id: u256, ctx: &TxContext) {
   assert!(df::exists_(&htlcs.id, htlc_id), EHTLCNotExist);
-
   let htlc: &mut HTLC = df::borrow_mut(&mut htlcs.id, htlc_id);
-  assert!(!htlc.claimed, EAlreadyClaimed);
+
+  //check that the timelock is passed and the tokens are not claimed
+  assert!(htlc.claimed==1, EAlreadyClaimed);
   assert!(htlc.timelock <= ctx.epoch_timestamp_ms(), ENotPassedTimelock);
 
-  htlc.claimed = true;
+  // set claimed to 2 and send the tokens back to the sender
+  htlc.claimed = 2;
 
   let locked_coins: Coin<SUI> = df::remove(&mut htlc.id, HTLCObjectKey());
   event::emit(TokenRefunded { id: htlc_id });
@@ -476,13 +546,15 @@ public entry fun refund(htlcs: &mut HTLCs, htlc_id: u256, ctx: &TxContext) {
 
 public entry fun refund_with_reward(htlcs: &mut HTLCs, rewards: &mut Rewards, htlc_id: u256, ctx: &TxContext) {
   assert!(df::exists_(&htlcs.id, htlc_id), EHTLCNotExist);
-
   let htlc: &mut HTLC = df::borrow_mut(&mut htlcs.id, htlc_id);
   let reward: &mut Reward = df::borrow_mut(&mut rewards.id, htlc_id);
-  assert!(!htlc.claimed, EAlreadyClaimed);
+
+  //check that the timelock is passed and the tokens are not claimed
+  assert!(htlc.claimed==1, EAlreadyClaimed);
   assert!(htlc.timelock <= ctx.epoch_timestamp_ms(), ENotPassedTimelock);
 
-  htlc.claimed = true;
+  // set claimed to 2 and send the tokens back to the sender
+  htlc.claimed = 2;
 
   let locked_coins: Coin<SUI> = df::remove(&mut htlc.id, HTLCObjectKey());
   let reward_coins: Coin<SUI> = df::remove(&mut reward.id, RewardObjectKey());
@@ -497,7 +569,7 @@ public entry fun refund_with_reward(htlcs: &mut HTLCs, rewards: &mut Rewards, ht
 public fun getDetails(
   htlcs: &HTLCs,
   htlc_id: u256,
-): (u64, vector<u8>, vector<u8>, u64, bool, address, vector<u8>, address) {
+): (u64, vector<u8>, vector<u8>, u64, u8, address, vector<u8>, address) {
   assert!(df::exists_(&htlcs.id, htlc_id), EHTLCNotExist);
   let htlc: &HTLC = df::borrow(&htlcs.id, htlc_id);
   (htlc.amount, htlc.hashlock, htlc.secret, htlc.timelock, htlc.claimed, htlc.sender, htlc.senderKey, htlc.srcReceiver)
