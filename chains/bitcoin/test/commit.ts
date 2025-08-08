@@ -1,19 +1,20 @@
 import 'dotenv/config';
 import { initEccLib, networks, payments, script as bscript } from 'bitcoinjs-lib';
 import * as ecc from 'tiny-secp256k1';
+import { join } from 'path';
 initEccLib(ecc);
 
 import { ECPairFactory } from 'ecpair';
 import { BIP32Factory } from 'bip32';
-import { BitcoinTrain } from '../src/BitcoinTrain';
 import * as bip39 from 'bip39';
+import { writeFileSync } from 'fs';
+import { BitcoinTrain } from '../src/BitcoinTrain';
 
-// Factories
 const ECPair = ECPairFactory(ecc);
 const bip32 = BIP32Factory(ecc);
 
-// Path for 2nd wallet (testnet, BIP84)
-const SECOND_WALLET_PATH = "m/84'/1'/0'/0/1";
+const SENDER_PATH = "m/84'/1'/0'/0/0";
+const RECEIVER_PATH = "m/84'/1'/0'/0/1";
 
 class TestnetBitcoin extends BitcoinTrain {
   constructor() {
@@ -24,66 +25,88 @@ class TestnetBitcoin extends BitcoinTrain {
 (async () => {
   const svc = new TestnetBitcoin();
 
-  // 1. Load mnemonic
   const MNEMONIC = process.env.TESTNET3_MNEMONIC!;
-  if (!bip39.validateMnemonic(MNEMONIC)) {
-    console.error('❌ Invalid mnemonic; set TESTNET3_MNEMONIC.');
+  if (!MNEMONIC || !bip39.validateMnemonic(MNEMONIC)) {
     process.exit(1);
   }
 
-  // 2. Derive key
   const seed = await bip39.mnemonicToSeed(MNEMONIC);
   const root = bip32.fromSeed(seed, networks.testnet);
-  const child = root.derivePath(SECOND_WALLET_PATH);
-  if (!child.privateKey) throw new Error('Failed to derive private key');
-  const keyPair = ECPair.fromPrivateKey(child.privateKey, { network: networks.testnet });
 
-  // 3. Get address and UTXOs
-  const senderAddress = payments.p2wpkh({ pubkey: keyPair.publicKey, network: networks.testnet }).address!;
-  console.log('🔑 Address:', senderAddress);
+  const senderNode = root.derivePath(SENDER_PATH);
+  const recvNode = root.derivePath(RECEIVER_PATH);
+  if (!senderNode.privateKey || !recvNode.publicKey) throw new Error('Key derivation failed');
 
-  const utxosRaw = (await svc.getUtxos(senderAddress)) as Array<{
-    hash: string;
-    index: number;
-    value: number;
-  }>;
+  const sender = ECPair.fromPrivateKey(senderNode.privateKey, { network: networks.testnet });
+  const srcReceiverPubKey = recvNode.publicKey;
 
-  const utxos = utxosRaw.map((u) => ({
-    txid: u.hash,
-    vout: u.index,
-    value: u.value,
-  }));
+  const senderAddress = payments.p2wpkh({ pubkey: sender.publicKey, network: networks.testnet }).address!;
+  console.log('🔑 Sender:', senderAddress);
 
-  if (utxos.length === 0) {
-    console.error('❌ No UTXOs; fund via a Testnet faucet.');
+  const utxosRaw = await svc.getUtxos(senderAddress);
+  if (!utxosRaw.length) {
     process.exit(1);
   }
-  console.log('🔎 UTXOs:', utxos);
+  console.log('🔎 UTXOs:', utxosRaw);
 
-  const total = utxos.reduce((sum, u) => sum + u.value, 0);
-  const fee = 1_000;
-  const lockAmount = total - fee;
-  const timelock = Math.floor(Date.now() / 1000) + 3600; // +1h
-  console.log(`🔒 Locking ${lockAmount} sats until ${timelock}`);
+  const amount = 200;
+  const fee = 100;
+  console.log(`🔒 Locking ${amount} sats for ~20m (fee: ${fee})`);
 
-  // 4. Dummy inner script (replace with your real script hex)
-  const innerHex = '51'; // OP_TRUE
-
-  // 5. Commit to Taproot (script-path)
   const {
     txid,
     contractAddress,
-    preHtlcScript,
-    htlc_wshash,
-    timelock: returnedTimelock,
-  } = await svc.commit(keyPair, innerHex, lockAmount, timelock, { fee });
+    leaf_multisig_hex,
+    leaf_refund_hex,
+    timelock,
+    internalPubkeyHex,
+    p2trScriptPubKeyHex,
+    contractVout,
+    ctrlblock_multisig_hex,
+    ctrlblock_refund_hex,
+  } = await svc.commit(sender, srcReceiverPubKey, amount, 1200, { fee });
 
   console.log('✅ commit TXID:', txid);
   console.log('📫 P2TR address:', contractAddress);
-  console.log('📜 script1 hex:', preHtlcScript);
-  console.log('🖋 script1 ASM:', bscript.toASM(Buffer.from(preHtlcScript, 'hex')));
-  console.log('🔑 wshash:', htlc_wshash);
-  console.log('⏰ timelock:', returnedTimelock);
+  console.log('📜 leaf (2-of-2) ASM:', bscript.toASM(Buffer.from(leaf_multisig_hex, 'hex')));
+  console.log('📜 leaf (refund) ASM:', bscript.toASM(Buffer.from(leaf_refund_hex, 'hex')));
+  console.log('⏰ timelock:', timelock, '(unix time)');
+
+  const meta = {
+    txid,
+    contractVout,
+    value: amount,
+    contractAddress,
+    p2trScriptPubKeyHex,
+    tapleaf_refund: {
+      leafVersion: 0xc0,
+      scriptHex: leaf_refund_hex,
+      controlBlockHex: ctrlblock_refund_hex,
+    },
+    tapleaf_multisig: {
+      leafVersion: 0xc0,
+      scriptHex: leaf_multisig_hex,
+      controlBlockHex: ctrlblock_multisig_hex,
+    },
+    timelock,
+    requiredSequence: 0xfffffffe,
+    sighashType: 'DEFAULT',
+    refundSignerPubkeyHex: Buffer.from(sender.publicKey).toString('hex'),
+    refundDestination: {
+      type: 'p2wpkh',
+      address: senderAddress,
+      network: 'testnet',
+    },
+    internalPubkeyHex,
+    createdAt: new Date().toISOString(),
+    network: 'testnet',
+  };
+
+  writeFileSync(join(__dirname, '../metadata/commit_meta.json'), JSON.stringify(meta, null, 2));
+  console.log('📝 wrote commit_meta.json');
 
   process.exit(0);
-})();
+})().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

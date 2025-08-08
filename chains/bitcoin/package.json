@@ -42,6 +42,7 @@
     "varuint-bitcoin": "^1.1.2"
   },
   "dependencies": {
-    "@cmdcode/tapscript": "^1.5.3"
+    "@cmdcode/tapscript": "^1.5.3",
+    "@noble/secp256k1": "^2.3.0"
   }
 }

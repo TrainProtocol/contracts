@@ -1,4 +1,3 @@
-import { Address, Signer, Tap, Tx } from '@cmdcode/tapscript';
 import axios from 'axios';
 import mempoolJS from '@mempool/mempool.js';
 import varuint from 'varuint-bitcoin';
@@ -6,6 +5,7 @@ import { MempoolReturn } from '@mempool/mempool.js/lib/interfaces/index';
 import { networks, payments, script } from 'bitcoinjs-lib';
 import { randomBytes, createHash } from 'crypto';
 import { HashPair } from './Core';
+import { Point, utils } from '@noble/secp256k1';
 
 /**
  * TRAIN Protocol Bitcoin
@@ -88,128 +88,172 @@ export default abstract class Bitcoin {
     return utxos;
   }
 
-  /**
-   * Build and sign a Taproot (P2TR) transaction with key, script, or both spending modes.
-   * @param senderKey   An ECPair (containing private and public key) for the Taproot internal key.
-   * @param utxos       Array of UTXOs to spend, each with { txid, vout, value, address? or scriptPubKey? }.
-   * @param recipient   Recipient address to send funds to.
-   * @param amountSat   Amount in satoshis to send to the recipient.
-   * @param feeSat      Fee in satoshis for the transaction.
-   * @param mode        Signing mode: 'key' | 'script' | 'both'.
-   * @param scriptLeaves  Optional array of tapleaf scripts (Buffers), each with an optional `leafVersion` (default 0xc0).
-   * @param opReturnData Optional Buffer or string for OP_RETURN output data (will be hex-encoded if string).
-   * @param changeAddr   Optional change address (if not provided, change is sent back to sender's Taproot address).
-   * @returns Hex string of the fully signed transaction.
-   */
-  protected buildTaprootTx(
-    senderKey: { publicKey: Uint8Array; privateKey: Uint8Array },
-    utxos: Array<{
-      txid: string;
-      vout: number;
-      value: number;
-    }>,
-    recipient: string,
-    amountSat: number,
-    feeSat: number,
-    mode: 'key' | 'script' | 'both',
-    scriptLeaves: Array<Uint8Array | { script: Uint8Array; leafVersion?: number }> = [],
-    opReturnData?: Uint8Array | string,
-    changeAddr?: string
-  ): string {
-    const UNSPENDABLE_INTERNAL = Buffer.from('50929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac0', 'hex');
-    const internalPub = mode === 'script' ? UNSPENDABLE_INTERNAL : senderKey.publicKey;
-    const internalPriv = mode === 'script' ? Buffer.alloc(32, 0) : senderKey.privateKey;
-
-    let tweakedPub: string;
-    let controlBlock: string | undefined;
-    let targetLeaf: string | undefined;
-    let tweakedPriv: Uint8Array;
-    let tapTree: string[] | undefined;
-
-    if (mode === 'key' || scriptLeaves.length === 0) {
-      // key-path only
-      [tweakedPub] = Tap.getPubKey(internalPub);
-      const sec = Tap.getSecKey(internalPriv);
-      tweakedPriv = Buffer.from(sec as any);
-    } else {
-      // build tapleaf hashes array
-      tapTree = scriptLeaves.map((obj) => {
-        const scriptBuf = obj instanceof Uint8Array ? obj : obj.script;
-        const version = obj instanceof Uint8Array ? 0xc0 : (obj.leafVersion ?? 0xc0);
-        return Tap.tree.getLeaf(scriptBuf, version);
-      });
-
-      if (mode === 'script') {
-        // script-path: reveal first leaf
-        targetLeaf = tapTree[0];
-        [tweakedPub, controlBlock] = Tap.getPubKey(internalPub, {
-          tree: tapTree,
-          target: targetLeaf,
-        });
-        // use original privkey for script-path (extension-based)
-        tweakedPriv = Buffer.from(internalPriv);
-      } else {
-        // both: commit scripts, spend via key-path
-        [tweakedPub] = Tap.getPubKey(internalPub, { tree: tapTree });
-        const sec = Tap.getSecKey(internalPriv, { tree: tapTree });
-        tweakedPriv = Buffer.from(sec as any);
-      }
-    }
-
-    // Build inputs & outputs
-    const vin = utxos.map((u) => ({
-      txid: u.txid,
-      vout: u.vout,
-      prevout: {
-        value: u.value,
-        scriptPubKey: payments.p2wpkh({
-          pubkey: payments.p2wpkh({ pubkey: Buffer.from(senderKey.publicKey), network: this.network }).output!,
-          network: this.network,
-        }).output!,
-      },
-    }));
-    const totalIn = utxos.reduce((sum, u) => sum + u.value, 0);
-
-    const vout: Array<{ value: number; scriptPubKey: any }> = [
-      { value: amountSat, scriptPubKey: Address.toScriptPubKey(recipient) },
-    ];
-    if (opReturnData !== undefined) {
-      const dataBuf = opReturnData instanceof Uint8Array ? opReturnData : Buffer.from(opReturnData, 'utf8');
-      vout.push({ value: 0, scriptPubKey: ['OP_RETURN', dataBuf] });
-    }
-    const changeAmt = totalIn - amountSat - feeSat;
-    if (changeAmt < 0) {
-      throw new Error(`Insufficient funds: have ${totalIn}, need ${amountSat + feeSat}`);
-    }
-    if (changeAmt > 0) {
-      const ca = changeAddr ?? Address.p2tr.fromPubKey(tweakedPub);
-      vout.push({
-        value: changeAmt,
-        scriptPubKey: Address.toScriptPubKey(ca),
-      });
-    }
-
-    const tx = Tx.create({ vin, vout });
-
-    // Sign each input
-    for (let i = 0; i < vin.length; i++) {
-      if (mode === 'script') {
-        // script-path: sign with original priv + extension
-        const sig = Signer.taproot.sign(tweakedPriv, tx, i, {
-          extension: targetLeaf!,
-        });
-        // witness: [sig, script, controlBlock]
-        const origScript = scriptLeaves[0] instanceof Uint8Array ? scriptLeaves[0] : scriptLeaves[0].script;
-        tx.vin[i].witness = [sig.hex, origScript, controlBlock!];
-      } else {
-        // key-path (key or both)
-        const sig = Signer.taproot.sign(tweakedPriv, tx, i);
-        tx.vin[i].witness = [sig.hex];
-      }
-    }
-
-    return Tx.encode(tx).hex;
+  protected toXOnly(pubkey: Buffer): Buffer {
+    if (pubkey.length !== 33) throw new Error('Expected 33-byte compressed pubkey');
+    const first = pubkey[0];
+    if (first !== 0x02 && first !== 0x03) throw new Error('Pubkey must be compressed (02/03)');
+    return Buffer.from(pubkey.subarray(1, 33));
   }
+
+  /**
+   * Generate a hidden, unspendable Taproot internal key (H + rG)
+   */
+  protected getHiddenUnspendableInternalKey() {
+    // BIP341 NUMS x-coordinate
+    const H_x = '50929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac0';
+
+    // Lift NUMS x-only point to a full point (try even and odd parity)
+    let H: Point | undefined = undefined;
+    for (const prefix of ['02', '03']) {
+      try {
+        H = Point.fromHex(prefix + H_x);
+        break;
+      } catch {}
+    }
+    if (!H) throw new Error('Could not lift NUMS x to a secp256k1 point');
+
+    // Must be a valid curve point
+    H.assertValidity();
+
+    // Generate random scalar r (randomPrivateKey() is already valid)
+    const r = utils.randomPrivateKey();
+
+    // r*G
+    const rG = Point.fromPrivateKey(r);
+    rG.assertValidity();
+
+    // H + rG
+    const internalPoint = H.add(rG);
+    internalPoint.assertValidity();
+
+    // x-only pubkey (32 bytes)
+    const x = internalPoint.toAffine().x;
+    const hex = x.toString(16).padStart(64, '0');
+    return Buffer.from(hex, 'hex'); // or new Uint8Array(Buffer.from(hex, 'hex'))
+  }
+
+  // /**
+  //  * Build and sign a Taproot (P2TR) transaction with key, script, or both spending modes.
+  //  * @param senderKey   An ECPair (containing private and public key) for the Taproot internal key.
+  //  * @param utxos       Array of UTXOs to spend, each with { txid, vout, value, address? or scriptPubKey? }.
+  //  * @param recipient   Recipient address to send funds to.
+  //  * @param amountSat   Amount in satoshis to send to the recipient.
+  //  * @param feeSat      Fee in satoshis for the transaction.
+  //  * @param mode        Signing mode: 'key' | 'script' | 'both'.
+  //  * @param scriptLeaves  Optional array of tapleaf scripts (Buffers), each with an optional `leafVersion` (default 0xc0).
+  //  * @param opReturnData Optional Buffer or string for OP_RETURN output data (will be hex-encoded if string).
+  //  * @param changeAddr   Optional change address (if not provided, change is sent back to sender's Taproot address).
+  //  * @returns Hex string of the fully signed transaction.
+  //  */
+  // protected buildTaprootTx(
+  //   senderKey: { publicKey: Uint8Array; privateKey: Uint8Array },
+  //   utxos: Array<{
+  //     txid: string;
+  //     vout: number;
+  //     value: number;
+  //   }>,
+  //   recipient: string,
+  //   amountSat: number,
+  //   feeSat: number,
+  //   mode: 'key' | 'script' | 'both',
+  //   scriptLeaves: Array<Uint8Array | { script: Uint8Array; leafVersion?: number }> = [],
+  //   opReturnData?: Uint8Array | string,
+  //   changeAddr?: string
+  // ): string {
+  //   const UNSPENDABLE_INTERNAL = Buffer.from('50929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac0', 'hex');
+  //   const internalPub = mode === 'script' ? UNSPENDABLE_INTERNAL : senderKey.publicKey;
+  //   const internalPriv = mode === 'script' ? Buffer.alloc(32, 0) : senderKey.privateKey;
+
+  //   let tweakedPub: string;
+  //   let controlBlock: string | undefined;
+  //   let targetLeaf: string | undefined;
+  //   let tweakedPriv: Uint8Array;
+  //   let tapTree: string[] | undefined;
+
+  //   if (mode === 'key' || scriptLeaves.length === 0) {
+  //     // key-path only
+  //     [tweakedPub] = Tap.getPubKey(internalPub);
+  //     const sec = Tap.getSecKey(internalPriv);
+  //     tweakedPriv = Buffer.from(sec as any);
+  //   } else {
+  //     // build tapleaf hashes array
+  //     tapTree = scriptLeaves.map((obj) => {
+  //       const scriptBuf = obj instanceof Uint8Array ? obj : obj.script;
+  //       const version = obj instanceof Uint8Array ? 0xc0 : (obj.leafVersion ?? 0xc0);
+  //       return Tap.tree.getLeaf(scriptBuf, version);
+  //     });
+
+  //     if (mode === 'script') {
+  //       // script-path: reveal first leaf
+  //       targetLeaf = tapTree[0];
+  //       [tweakedPub, controlBlock] = Tap.getPubKey(internalPub, {
+  //         tree: tapTree,
+  //         target: targetLeaf,
+  //       });
+  //       // use original privkey for script-path (extension-based)
+  //       tweakedPriv = Buffer.from(internalPriv);
+  //     } else {
+  //       // both: commit scripts, spend via key-path
+  //       [tweakedPub] = Tap.getPubKey(internalPub, { tree: tapTree });
+  //       const sec = Tap.getSecKey(internalPriv, { tree: tapTree });
+  //       tweakedPriv = Buffer.from(sec as any);
+  //     }
+  //   }
+
+  //   // Build inputs & outputs
+  //   const vin = utxos.map((u) => ({
+  //     txid: u.txid,
+  //     vout: u.vout,
+  //     prevout: {
+  //       value: u.value,
+  //       scriptPubKey: payments.p2wpkh({
+  //         pubkey: payments.p2wpkh({ pubkey: Buffer.from(senderKey.publicKey), network: this.network }).output!,
+  //         network: this.network,
+  //       }).output!,
+  //     },
+  //   }));
+  //   const totalIn = utxos.reduce((sum, u) => sum + u.value, 0);
+
+  //   const vout: Array<{ value: number; scriptPubKey: any }> = [
+  //     { value: amountSat, scriptPubKey: Address.toScriptPubKey(recipient) },
+  //   ];
+  //   if (opReturnData !== undefined) {
+  //     const dataBuf = opReturnData instanceof Uint8Array ? opReturnData : Buffer.from(opReturnData, 'utf8');
+  //     vout.push({ value: 0, scriptPubKey: ['OP_RETURN', dataBuf] });
+  //   }
+  //   const changeAmt = totalIn - amountSat - feeSat;
+  //   if (changeAmt < 0) {
+  //     throw new Error(`Insufficient funds: have ${totalIn}, need ${amountSat + feeSat}`);
+  //   }
+  //   if (changeAmt > 0) {
+  //     const ca = changeAddr ?? Address.p2tr.fromPubKey(tweakedPub);
+  //     vout.push({
+  //       value: changeAmt,
+  //       scriptPubKey: Address.toScriptPubKey(ca),
+  //     });
+  //   }
+
+  //   const tx = Tx.create({ vin, vout });
+
+  //   // Sign each input
+  //   for (let i = 0; i < vin.length; i++) {
+  //     if (mode === 'script') {
+  //       // script-path: sign with original priv + extension
+  //       const sig = Signer.taproot.sign(tweakedPriv, tx, i, {
+  //         extension: targetLeaf!,
+  //       });
+  //       // witness: [sig, script, controlBlock]
+  //       const origScript = scriptLeaves[0] instanceof Uint8Array ? scriptLeaves[0] : scriptLeaves[0].script;
+  //       tx.vin[i].witness = [sig.hex, origScript, controlBlock!];
+  //     } else {
+  //       // key-path (key or both)
+  //       const sig = Signer.taproot.sign(tweakedPriv, tx, i);
+  //       tx.vin[i].witness = [sig.hex];
+  //     }
+  //   }
+
+  //   return Tx.encode(tx).hex;
+  // }
 
   protected witnessStackToScriptWitness(witness: any): Buffer {
     let buffer = Buffer.allocUnsafe(0);
