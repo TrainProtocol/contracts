@@ -447,7 +447,11 @@ impl Train for Contract {
                 }
             }
         } else {
-
+            transfer(
+                Identity::Address(htlc.srcReceiver),
+                htlc.assetId,
+                htlc.amount,
+            );
         }
         log(TokenRedeemed {
             Id,
