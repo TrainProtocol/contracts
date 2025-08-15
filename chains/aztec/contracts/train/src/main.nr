@@ -70,6 +70,7 @@ pub contract Train {
         timelock: u64,
         token: AztecAddress,
         amount: u128,
+        src_asset: str<30>,
         dst_chain: str<30>,
         dst_asset: str<30>,
         dst_address: str<90>,
@@ -80,6 +81,7 @@ pub contract Train {
         // Safety: The contract intentionally exposes these parameters as public.
         Train::at(context.this_address())
             .commit_public_user(
+                src_asset,
                 dst_chain,
                 dst_asset,
                 dst_address,
@@ -106,6 +108,7 @@ pub contract Train {
     #[internal]
     #[public]
     fn commit_public_user(
+        src_asset: str<30>,
         dst_chain: str<30>,
         dst_asset: str<30>,
         dst_address: str<90>,
@@ -138,6 +141,7 @@ pub contract Train {
             token: token,
             timelock: timelock,
             src_receiver: src_receiver,
+            src_asset: src_asset,
             dst_chain: dst_chain,
             dst_asset: dst_asset,
             dst_address: dst_address,
@@ -234,6 +238,7 @@ pub contract Train {
         timelock: u64,
         token: AztecAddress,
         randomness: Field,
+        src_asset: str<30>,
         dst_chain: str<30>,
         dst_asset: str<30>,
         dst_address: str<90>,
@@ -248,6 +253,7 @@ pub contract Train {
                 amount,
                 token,
                 timelock,
+                src_asset,
                 dst_chain,
                 dst_asset,
                 dst_address,
@@ -275,6 +281,7 @@ pub contract Train {
         amount: u128,
         token: AztecAddress,
         timelock: u64,
+        src_asset: str<30>,
         dst_chain: str<30>,
         dst_asset: str<30>,
         dst_address: str<90>,
@@ -305,6 +312,7 @@ pub contract Train {
             token: token,
             timelock: timelock,
             src_receiver: AztecAddress::zero(),
+            src_asset: src_asset,
             dst_chain: dst_chain,
             dst_asset: dst_asset,
             dst_address: dst_address,

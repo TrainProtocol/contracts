@@ -60,6 +60,7 @@ async function main(): Promise<void> {
   const token = data.tokenAddress;
   const amount = 23n;
   let solverAddress = AztecAddress.fromString(data.solverAddress);
+  const src_asset = 'USDC.e'.padStart(30, ' ');
   const dst_chain = 'USDC.e'.padStart(30, ' ');
   const dst_asset = 'PROOFOFPLAYAPEX_MAINNET'.padStart(30, ' ');
   const dst_address =
@@ -116,6 +117,7 @@ async function main(): Promise<void> {
       timelock,
       AztecAddress.fromString(token),
       amount,
+      src_asset,
       dst_chain,
       dst_asset,
       dst_address,

@@ -65,6 +65,7 @@ async function main(): Promise<void> {
   const timelock = now + 2000;
   const token: string = data.tokenAddress;
   const randomness = generateId();
+  const src_asset = 'USDC.e'.padStart(30, ' ');
   const dst_chain = 'USDC.e'.padStart(30, ' ');
   const dst_asset = 'PROOFOFPLAYAPEX_MAINNET'.padStart(30, ' ');
   const dst_address =
@@ -124,6 +125,7 @@ async function main(): Promise<void> {
       timelock,
       token,
       randomness,
+      src_asset,
       dst_chain,
       dst_asset,
       dst_address,

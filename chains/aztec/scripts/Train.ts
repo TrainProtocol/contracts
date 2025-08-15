@@ -153,13 +153,14 @@ export class TrainContract extends ContractBase {
     ) => ContractFunctionInteraction) &
       Pick<ContractMethod, 'selector'>;
 
-    /** commit_private_user(Id: field, src_receiver: struct, timelock: integer, token: struct, amount: integer, dst_chain: string, dst_asset: string, dst_address: string, randomness: field) */
+    /** commit_private_user(Id: field, src_receiver: struct, timelock: integer, token: struct, amount: integer, src_asset: string, dst_chain: string, dst_asset: string, dst_address: string, randomness: field) */
     commit_private_user: ((
       Id: FieldLike,
       src_receiver: AztecAddressLike,
       timelock: bigint | number,
       token: AztecAddressLike,
       amount: bigint | number,
+      src_asset: string,
       dst_chain: string,
       dst_asset: string,
       dst_address: string,
@@ -179,7 +180,7 @@ export class TrainContract extends ContractBase {
     is_contract_initialized: ((Id: FieldLike) => ContractFunctionInteraction) &
       Pick<ContractMethod, 'selector'>;
 
-    /** lock_private_solver(Id: field, hashlock: array, amount: integer, ownership_hash: array, timelock: integer, token: struct, randomness: field, dst_chain: string, dst_asset: string, dst_address: string) */
+    /** lock_private_solver(Id: field, hashlock: array, amount: integer, ownership_hash: array, timelock: integer, token: struct, randomness: field, src_asset: string, dst_chain: string, dst_asset: string, dst_address: string) */
     lock_private_solver: ((
       Id: FieldLike,
       hashlock: (bigint | number)[],
@@ -188,6 +189,7 @@ export class TrainContract extends ContractBase {
       timelock: bigint | number,
       token: AztecAddressLike,
       randomness: FieldLike,
+      src_asset: string,
       dst_chain: string,
       dst_asset: string,
       dst_address: string,

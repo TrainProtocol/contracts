@@ -9,15 +9,16 @@ pub struct TokenCommitted {
     pub token: AztecAddress,
     pub timelock: u64,
     pub src_receiver: AztecAddress,
+    pub src_asset: str<30>,
     pub dst_chain: str<30>,
     pub dst_asset: str<30>,
     pub dst_address: str<90>,
 }
 
-impl Packable<11> for TokenCommitted {
-    fn pack(self) -> [Field; 11] {
+impl Packable<12> for TokenCommitted {
+    fn pack(self) -> [Field; 12] {
         let zero: Field = 0;
-        let mut out = [zero; 11];
+        let mut out = [zero; 12];
         out[0] = 0x7A3F2B1C;
         out[1] = self.Id;
         out[2] = self.amount as Field;
@@ -25,19 +26,26 @@ impl Packable<11> for TokenCommitted {
         out[4] = self.timelock as Field;
         out[5] = self.src_receiver.inner;
 
+        let src_asset_byte_array = self.src_asset.as_bytes();
+        let mut src_asset_byte_array_filled = [0 as u8; 30];
+        for i in 0..src_asset_byte_array.len() {
+            src_asset_byte_array_filled[i] = src_asset_byte_array[i];
+        }
+        out[6] = Field::from_be_bytes::<30>(src_asset_byte_array_filled);
+
         let dst_chain_byte_array = self.dst_chain.as_bytes();
         let mut dst_chain_byte_array_filled = [0 as u8; 30];
         for i in 0..dst_chain_byte_array.len() {
             dst_chain_byte_array_filled[i] = dst_chain_byte_array[i];
         }
-        out[6] = Field::from_be_bytes::<30>(dst_chain_byte_array_filled);
+        out[7] = Field::from_be_bytes::<30>(dst_chain_byte_array_filled);
 
         let dst_asset_byte_array = self.dst_asset.as_bytes();
         let mut dst_asset_byte_array_filled = [0 as u8; 30];
         for i in 0..dst_asset_byte_array.len() {
             dst_asset_byte_array_filled[i] = dst_asset_byte_array[i];
         }
-        out[7] = Field::from_be_bytes::<30>(dst_asset_byte_array_filled);
+        out[8] = Field::from_be_bytes::<30>(dst_asset_byte_array_filled);
 
         let dst_address_byte_array = self.dst_address.as_bytes();
         let mut dst_address_byte_array_filled_1 = [0 as u8; 30];
@@ -50,13 +58,13 @@ impl Packable<11> for TokenCommitted {
             dst_address_byte_array_filled_3[i] = dst_address_byte_array[i + 60];
         }
 
-        out[8] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_1);
-        out[9] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_2);
-        out[10] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_3);
+        out[9] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_1);
+        out[10] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_2);
+        out[11] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_3);
         out
     }
 
-    fn unpack(fields: [Field; 11]) -> Self {
+    fn unpack(fields: [Field; 12]) -> Self {
         assert(false, "unpack not implemented");
         TokenCommitted {
             Id: fields[1] as Field,
@@ -64,6 +72,7 @@ impl Packable<11> for TokenCommitted {
             token: AztecAddress::zero(),
             timelock: 0 as u64,
             src_receiver: AztecAddress::zero(),
+            src_asset: "000000000000000000000000000000",
             dst_chain: "000000000000000000000000000000",
             dst_asset: "000000000000000000000000000000",
             dst_address: "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
@@ -158,15 +167,16 @@ pub struct TokenLockedFirst {
     pub token: AztecAddress,
     pub timelock: u64,
     pub src_receiver: AztecAddress,
+    pub src_asset: str<30>,
     pub dst_chain: str<30>,
     pub dst_asset: str<30>,
     pub dst_address: str<90>,
 }
 
-impl Packable<11> for TokenLockedFirst {
-    fn pack(self) -> [Field; 11] {
+impl Packable<12> for TokenLockedFirst {
+    fn pack(self) -> [Field; 12] {
         let zero: Field = 0;
-        let mut out = [zero; 11];
+        let mut out = [zero; 12];
         out[0] = 0x9E5A4F03;
         out[1] = self.Id;
         out[2] = self.amount as Field;
@@ -174,19 +184,26 @@ impl Packable<11> for TokenLockedFirst {
         out[4] = self.timelock as Field;
         out[5] = self.src_receiver.inner;
 
+        let src_asset_byte_array = self.src_asset.as_bytes();
+        let mut src_asset_byte_array_filled = [0 as u8; 30];
+        for i in 0..src_asset_byte_array.len() {
+            src_asset_byte_array_filled[i] = src_asset_byte_array[i];
+        }
+        out[6] = Field::from_be_bytes::<30>(src_asset_byte_array_filled);
+
         let dst_chain_byte_array = self.dst_chain.as_bytes();
         let mut dst_chain_byte_array_filled = [0 as u8; 30];
         for i in 0..dst_chain_byte_array.len() {
             dst_chain_byte_array_filled[i] = dst_chain_byte_array[i];
         }
-        out[6] = Field::from_be_bytes::<30>(dst_chain_byte_array_filled);
+        out[7] = Field::from_be_bytes::<30>(dst_chain_byte_array_filled);
 
         let dst_asset_byte_array = self.dst_asset.as_bytes();
         let mut dst_asset_byte_array_filled = [0 as u8; 30];
         for i in 0..dst_asset_byte_array.len() {
             dst_asset_byte_array_filled[i] = dst_asset_byte_array[i];
         }
-        out[7] = Field::from_be_bytes::<30>(dst_asset_byte_array_filled);
+        out[8] = Field::from_be_bytes::<30>(dst_asset_byte_array_filled);
 
         let dst_address_byte_array = self.dst_address.as_bytes();
         let mut dst_address_byte_array_filled_1 = [0 as u8; 30];
@@ -199,13 +216,13 @@ impl Packable<11> for TokenLockedFirst {
             dst_address_byte_array_filled_3[i] = dst_address_byte_array[i + 60];
         }
 
-        out[8] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_1);
-        out[9] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_2);
-        out[10] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_3);
+        out[9] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_1);
+        out[10] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_2);
+        out[11] = Field::from_be_bytes::<30>(dst_address_byte_array_filled_3);
         out
     }
 
-    fn unpack(fields: [Field; 11]) -> Self {
+    fn unpack(fields: [Field; 12]) -> Self {
         assert(false, "unpack not implemented");
         TokenLockedFirst {
             Id: fields[1] as Field,
@@ -213,6 +230,7 @@ impl Packable<11> for TokenLockedFirst {
             token: AztecAddress::zero(),
             timelock: 0 as u64,
             src_receiver: AztecAddress::zero(),
+            src_asset: "000000000000000000000000000000",
             dst_chain: "000000000000000000000000000000",
             dst_asset: "000000000000000000000000000000",
             dst_address: "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
