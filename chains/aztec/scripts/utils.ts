@@ -82,14 +82,32 @@ export function readData(): Record<string, any> {
   }
 }
 
+function uint8ArrayToBigInt(uint8Array: Uint8Array): bigint {
+  let result = 0n;
+  for (let i = 0; i < uint8Array.length; i++) {
+    result = (result << 8n) | BigInt(uint8Array[i]);
+  }
+  return result;
+}
+
 /**
- * Generates a secret and its SHA-256 hash lock.
- * @returns A tuple with the secret and hash lock as Uint8Arrays.
+ * Generates a secret and its SHA-256 hash lock, split into high and low halves.
+ * @returns A tuple with [secretHigh, secretLow, hashlockHigh, hashlockLow] as u128 bigint numbers.
  */
-export function generateSecretAndHashlock(): [Uint8Array, Uint8Array] {
+export function generateSecretAndHashlock(): [bigint, bigint, bigint, bigint] {
   const secret = crypto.randomBytes(32);
   const hashlock = crypto.createHash('sha256').update(secret).digest();
-  return [new Uint8Array(secret), new Uint8Array(hashlock)];
+
+  const secretUint8 = new Uint8Array(secret);
+  const hashlockUint8 = new Uint8Array(hashlock);
+
+  const secretHigh = uint8ArrayToBigInt(secretUint8.slice(0, 16));
+  const secretLow = uint8ArrayToBigInt(secretUint8.slice(16, 32));
+
+  const hashlockHigh = uint8ArrayToBigInt(hashlockUint8.slice(0, 16));
+  const hashlockLow = uint8ArrayToBigInt(hashlockUint8.slice(16, 32));
+
+  return [secretHigh, secretLow, hashlockHigh, hashlockLow];
 }
 
 /**

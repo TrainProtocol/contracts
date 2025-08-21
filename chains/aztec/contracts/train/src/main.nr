@@ -150,7 +150,8 @@ pub contract Train {
     }
 
     #[private]
-    fn add_lock_private_user(Id: Field, hashlock: [u8; 32], timelock: u64) {
+    fn add_lock_private_user(Id: Field, hashlock_high: u128, hashlock_low: u128, timelock: u64) {
+        let hashlock = u128_limbs_to_bytes(hashlock_high, hashlock_low);
         let htlc_private = storage.contracts_private.at(Id).get_note();
         assert(htlc_private.owner == context.msg_sender(), "NoAllowance");
 
@@ -232,7 +233,8 @@ pub contract Train {
     #[private]
     fn lock_private_solver(
         Id: Field,
-        hashlock: [u8; 32],
+        hashlock_high: u128,
+        hashlock_low: u128,
         amount: u128,
         ownership_hash: [u8; 32],
         timelock: u64,
@@ -244,6 +246,7 @@ pub contract Train {
         dst_address: str<90>,
     ) {
         assert(amount > 0, "FundsNotSent");
+        let hashlock = u128_limbs_to_bytes(hashlock_high, hashlock_low);
         // Safety: The contract intentionally exposes these parameters as public.
         Train::at(context.this_address())
             .lock_public_solver(
@@ -326,7 +329,16 @@ pub contract Train {
     }
 
     #[private]
-    fn redeem_private(Id: Field, secret: [u8; 32], ownership_key: [u8; 32]) {
+    fn redeem_private(
+        Id: Field,
+        secret_high: u128,
+        secret_low: u128,
+        ownership_key_high: u128,
+        ownership_key_low: u128,
+    ) {
+        let secret = u128_limbs_to_bytes(secret_high, secret_low);
+        let ownership_key = u128_limbs_to_bytes(ownership_key_high, ownership_key_low);
+
         // Safety: The contract intentionally exposes these parameters as public.
         Train::at(context.this_address()).redeem_public(Id, secret, ownership_key).enqueue(
             &mut context,

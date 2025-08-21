@@ -50,7 +50,8 @@ async function main(): Promise<void> {
   const deployer = await schnorWallet1.getWallet();
   console.log(`Using wallet: ${senderWallet.getAddress()}`);
 
-  const pair = generateSecretAndHashlock();
+  const [secretHigh, secretLow, hashlockHigh, hashlockLow] =
+    generateSecretAndHashlock();
   const Id = BigInt(data.commitId);
   // const now = await cc.eth.timestamp();
   const now = Math.floor(new Date().getTime() / 1000);
@@ -66,9 +67,9 @@ async function main(): Promise<void> {
     .simulate();
   if (!is_contract_initialized) throw new Error('HTLC Does Not Exsist');
   const addLockTx = await contract.methods
-    .add_lock_private_user(Id, stringToUint8Array(pair[1].toString()), timelock)
+    .add_lock_private_user(Id, hashlockHigh, hashlockLow, timelock)
     .send({ fee: { paymentMethod } })
-    .wait({timeout: 120000});
+    .wait({ timeout: 120000 });
 
   console.log('tx : ', addLockTx);
   await publicLogs(pxe1);
@@ -90,8 +91,10 @@ async function main(): Promise<void> {
   // await simulateBlockPassing(pxe3, assetMinter, deployer, 2);
   // getHTLCDetails(contract, Id);
   updateData({
-    hashlock: pair[1].toString(),
-    secret: pair[0].toString(),
+    secretHigh: secretHigh,
+    secretLow: secretLow,
+    hashlockHigh: hashlockHigh,
+    hashlockLow: hashlockLow,
   });
 }
 

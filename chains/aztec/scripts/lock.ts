@@ -55,11 +55,15 @@ async function main(): Promise<void> {
   console.log(`Using wallet: ${solver.toString()}`);
 
   const Id = generateId();
-  const pair = generateSecretAndHashlock();
-  const hashlock = pair[1];
+  const [secretHigh2, secretLow2, hashlockHigh2, hashlockLow2] =
+    generateSecretAndHashlock();
   const amount = 7n;
-  const pair2 = generateSecretAndHashlock();
-  const ownership_hash = pair2[1];
+  const [
+    ownershipKeyHigh,
+    ownershipKeyLow,
+    ownershipHashHigh,
+    ownershipHashLow,
+  ] = generateSecretAndHashlock();
   // const now = await cc.eth.timestamp();
   const now = Math.floor(new Date().getTime() / 1000);
   const timelock = now + 2000;
@@ -119,9 +123,11 @@ async function main(): Promise<void> {
   const lockTx = await contract.methods
     .lock_private_solver(
       Id,
-      hashlock,
+      hashlockHigh2,
+      hashlockLow2,
       amount,
-      ownership_hash,
+      ownershipHashHigh,
+      ownershipHashLow,
       timelock,
       token,
       randomness,
@@ -146,10 +152,12 @@ async function main(): Promise<void> {
 
   updateData({
     lockId: Id.toString(),
-    hashlock2: pair[1].toString(),
-    secret2: pair[0].toString(),
-    ownership_hash: pair2[1].toString(),
-    ownership_key: pair2[0].toString(),
+    hashlockHigh2: hashlockHigh2,
+    hashlockLow2: hashlockLow2,
+    ownershipKeyHigh: ownershipKeyHigh,
+    ownershipKeyLow: ownershipKeyLow,
+    ownershipHashHigh: ownershipHashHigh,
+    ownershipHashLow: ownershipHashLow,
   });
   const assetMinter = await TokenContract.at(
     AztecAddress.fromString(data.tokenAddress),

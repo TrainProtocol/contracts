@@ -40,8 +40,10 @@ async function main(): Promise<void> {
   const deployerWallet = await schnorrDeployer.getWallet();
 
   const Id = Fr.fromString(data.lockId);
-  const secret = Array.from(stringToUint8Array(data.secret2));
-  const ownershipKey = Array.from(stringToUint8Array(data.ownership_key));
+  const secretHigh = data.secretHigh;
+  const secretLow = data.secretLow;
+  const ownershipKeyHigh = data.ownershipKeyHigh;
+  const ownershipKeyLow = data.ownershipKeyLow;
   const asset = await TokenContract.at(
     AztecAddress.fromString(data.tokenAddress),
     deployerWallet,
@@ -72,7 +74,13 @@ async function main(): Promise<void> {
 
   if (!is_contract_initialized) throw new Error('HTLC Does Not Exsist');
   const redeemTx = await train.methods
-    .redeem_private(Id, secret, ownershipKey)
+    .redeem_private(
+      Id,
+      secretHigh,
+      secretLow,
+      ownershipKeyHigh,
+      ownershipKeyLow,
+    )
     .send({ fee: { paymentMethod } })
     .wait({ timeout: 120000 });
 
