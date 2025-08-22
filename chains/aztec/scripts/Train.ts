@@ -157,8 +157,8 @@ HTLC_Private: {
     /** is_contract_initialized(Id: field) */
     is_contract_initialized: ((Id: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** lock_private_solver(Id: field, hashlock_high: integer, hashlock_low: integer, amount: integer, ownership_hash: array, timelock: integer, token: struct, randomness: field, src_asset: string, dst_chain: string, dst_asset: string, dst_address: string) */
-    lock_private_solver: ((Id: FieldLike, hashlock_high: (bigint | number), hashlock_low: (bigint | number), amount: (bigint | number), ownership_hash: (bigint | number)[], timelock: (bigint | number), token: AztecAddressLike, randomness: FieldLike, src_asset: string, dst_chain: string, dst_asset: string, dst_address: string) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** lock_private_solver(Id: field, hashlock_high: integer, hashlock_low: integer, amount: integer, ownership_hash_high: integer, ownership_hash_low: integer, timelock: integer, token: struct, randomness: field, src_asset: string, dst_chain: string, dst_asset: string, dst_address: string) */
+    lock_private_solver: ((Id: FieldLike, hashlock_high: (bigint | number), hashlock_low: (bigint | number), amount: (bigint | number), ownership_hash_high: (bigint | number), ownership_hash_low: (bigint | number), timelock: (bigint | number), token: AztecAddressLike, randomness: FieldLike, src_asset: string, dst_chain: string, dst_asset: string, dst_address: string) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** process_message(message_ciphertext: struct, message_context: struct) */
     process_message: ((message_ciphertext: FieldLike[], message_context: { tx_hash: FieldLike, unique_note_hashes_in_tx: FieldLike[], first_nullifier_in_tx: FieldLike, recipient: AztecAddressLike }) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;

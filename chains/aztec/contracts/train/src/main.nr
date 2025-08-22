@@ -236,7 +236,8 @@ pub contract Train {
         hashlock_high: u128,
         hashlock_low: u128,
         amount: u128,
-        ownership_hash: [u8; 32],
+        ownership_hash_high: u128,
+        ownership_hash_low: u128,
         timelock: u64,
         token: AztecAddress,
         randomness: Field,
@@ -247,6 +248,7 @@ pub contract Train {
     ) {
         assert(amount > 0, "FundsNotSent");
         let hashlock = u128_limbs_to_bytes(hashlock_high, hashlock_low);
+        let ownership_hash = u128_limbs_to_bytes(ownership_hash_high, ownership_hash_low);
         // Safety: The contract intentionally exposes these parameters as public.
         Train::at(context.this_address())
             .lock_public_solver(
