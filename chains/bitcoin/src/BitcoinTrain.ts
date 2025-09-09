@@ -3,6 +3,8 @@ import { networks, opcodes, payments, Psbt, script } from 'bitcoinjs-lib';
 import { Taptree } from 'bitcoinjs-lib/src/types';
 import { ECPairInterface, ECPairFactory } from 'ecpair';
 import * as ecc from 'tiny-secp256k1';
+import { CommitLog } from './Core';
+import { createHash } from 'crypto';
 
 const ECPair = ECPairFactory(ecc);
 
@@ -43,9 +45,15 @@ export class BitcoinTrain extends Bitcoin {
   }> {
     const fee = options?.fee ?? 1800;
 
-    const { timestamp: now } = await this.getCurrentBlockInfo();
+    const tipHash = await this.mempool.blocks.getBlocksTipHash();
+    const tip = await this.mempool.blocks.getBlock({ hash: tipHash });
+    const mtp = (tip as any).median_time ?? (tip as any).mediantime ?? (tip as any).time;
+
     if (delaySeconds < 900) throw new Error('Timelock must be ≥ 900 seconds');
-    const timelock = now + delaySeconds;
+
+    //CLTV timestamp = MTP + delay
+    const timelock = mtp + delaySeconds;
+
     if (timelock < 500_000_000) throw new Error('Timelock must be a UNIX timestamp');
 
     // leaves
@@ -119,19 +127,27 @@ export class BitcoinTrain extends Bitcoin {
       });
     }
 
-    // contract at vout 0 for determinism
-    const contractVout = 0;
-    psbt.addOutput({ address: contractAddress, value: amount });
+    const DUST_P2WPKH = 331; // ~dust limit for P2WPKH change (policy)
 
-    const change = totalIn - needed;
-    if (change > 0) {
+    let change = totalIn - needed;
+    if (change < 0) throw new Error(`Insufficient funds: need ${needed}, have ${totalIn}`);
+
+    // contract first for determinism; vout stays 0
+    const contractVout = 0;
+
+    // If change would be dust, fold it into the contract amount to avoid creating a dust output
+    const contractValue = amount + (change > 0 && change < DUST_P2WPKH ? change : 0);
+    psbt.addOutput({ address: contractAddress, value: contractValue });
+
+    // If change is spendable (>= dust), add it as a separate output
+    if (change >= DUST_P2WPKH) {
       psbt.addOutput({ address: senderAddress, value: change });
     }
 
+    // OP_RETURN
     if (options?.data !== undefined) {
-      const { script: opretScript, value } = this.createOpReturnOutput(
-        typeof options.data === 'string' ? options.data : Buffer.from(options.data).toString('utf8')
-      );
+      const raw: string | Buffer = typeof options.data === 'string' ? options.data : Buffer.from(options.data);
+      const { script: opretScript, value } = this.createOpReturnOutput(raw);
       psbt.addOutput({ script: opretScript, value });
     }
 
@@ -170,103 +186,55 @@ export class BitcoinTrain extends Bitcoin {
     };
   }
 
-  // /**
-  //  * Commit funds to a PreHTLC:
-  //  *   - Early "upgrade" to a specific HTLC script hash (user can spend anytime to that WSH)
-  //  *   - Refund by user after timelock expiry
-  //  *
-  //  * @param sender User's ECPair
-  //  * @param htlcWitnessScriptHex The FULL witness script for the future HTLC (hex)
-  //  * @param amount Amount in satoshis
-  //  * @param delaySeconds How many seconds in the future the timelock should be (recommended: >= 900)
-  //  * @param options Optional: fee, data, etc.
-  //  */
-  // public async commit(
-  //   sender: ECPairInterface,
-  //   htlcWitnessScriptHex: string,
-  //   amount: number,
-  //   delaySeconds: number,
-  //   options?: { fee?: number; data?: Uint8Array | string }
-  // ): Promise<{
-  //   txid: string;
-  //   contractAddress: string;
-  //   preHtlcScript: string;
-  //   htlc_wshash: string;
-  //   timelock: number;
-  // }> {
-  //   const fee = options?.fee ?? 1800;
+  // 32 + 6 + 4 + 20 + 4 + 12 = 78 bytes
+  public encodeCommitLog(m: CommitLog): Buffer {
+    if (!m.commitId || m.commitId.length !== 32) throw new Error('commitId must be 32 bytes');
 
-  //   // 1) Timelock validation
-  //   const { timestamp: now } = await this.getCurrentBlockInfo();
-  //   if (delaySeconds < 900) throw new Error('Timelock must be ≥ 900 seconds');
-  //   const timelock = now + delaySeconds;
-  //   if (timelock < 500_000_000) throw new Error('Computed timelock is not a valid UNIX timestamp');
+    const tl6 = Buffer.alloc(6);
+    const t = BigInt(m.timelock);
+    if (t < 0n || t > 0xffffffffffffn) throw new Error('timelock out of uint48 range');
+    tl6.writeUIntBE(Number(t), 0, 6);
 
-  //   // 2) Build & hash the PreHTLC script
-  //   const htlcScript = Buffer.from(htlcWitnessScriptHex, 'hex');
-  //   const htlc_wshash = createHash('sha256').update(htlcScript).digest();
-  //   const preHtlcScript = script.compile([
-  //     opcodes.OP_IF,
-  //     opcodes.OP_SHA256,
-  //     htlc_wshash,
-  //     opcodes.OP_EQUALVERIFY,
-  //     sender.publicKey,
-  //     opcodes.OP_CHECKSIG,
-  //     opcodes.OP_ELSE,
-  //     script.number.encode(timelock),
-  //     opcodes.OP_CHECKLOCKTIMEVERIFY,
-  //     opcodes.OP_DROP,
-  //     sender.publicKey,
-  //     opcodes.OP_CHECKSIG,
-  //     opcodes.OP_ENDIF,
-  //   ]);
+    const dstChain = (() => {
+      const b = Buffer.from(m.dstChain ?? '', 'utf8');
+      const out = Buffer.alloc(4);
+      b.copy(out, 0, 0, Math.min(4, b.length));
+      return out;
+    })();
 
-  //   const taptreeLeaf = { output: preHtlcScript, version: 0xc0 };
-  //   const scriptLeavesParam = [{ script: preHtlcScript, leafVersion: 0xc0 }];
+    const dstAddress = (() => {
+      let b: Buffer;
+      try {
+        b = Buffer.from((m.dstAddress || '').replace(/^0x/, '').toLowerCase(), 'hex');
+      } catch {
+        b = Buffer.from(m.dstAddress || '', 'utf8');
+      }
+      return b.length === 20 ? b : createHash('sha256').update(b).digest().subarray(0, 20);
+    })();
 
-  //   const p2trPayment = payments.p2tr({
-  //     internalPubkey: this.UNSPENDABLE_KEY,
-  //     scriptTree: taptreeLeaf,
-  //     network: this.network,
-  //   });
-  //   const contractAddress = p2trPayment.address!;
-  //   if (!contractAddress) throw new Error('Failed to derive Taproot address');
+    const dstAsset = (() => {
+      const b = Buffer.from(m.dstAsset ?? '', 'utf8');
+      const out = Buffer.alloc(4);
+      b.copy(out, 0, 0, Math.min(4, b.length));
+      return out;
+    })();
 
-  //   const senderAddress = payments.p2wpkh({
-  //     pubkey: sender.publicKey,
-  //     network: this.network,
-  //   }).address!;
-  //   const rawUtxos = await this.getUtxos(senderAddress);
-  //   if (rawUtxos.length === 0) {
-  //     throw new Error(`No UTXOs found for ${senderAddress}`);
-  //   }
-  //   const utxos = rawUtxos.map((u) => ({
-  //     txid: u.hash,
-  //     vout: u.index,
-  //     value: u.value,
-  //   }));
+    const srcReceiver = (() => {
+      // Always interpret as UTF-8
+      const raw = m.srcReceiver ?? '';
+      const b = Buffer.from(raw, 'utf8'); // UTF-8 bytes
 
-  //   const txHex = this.buildTaprootTx(
-  //     { publicKey: sender.publicKey, privateKey: sender.privateKey! },
-  //     utxos,
-  //     contractAddress, // recipient = new Taproot HTLC address
-  //     amount, // amount to lock
-  //     fee, // fee
-  //     'script',
-  //     scriptLeavesParam, // your singleleaf tapscript entry
-  //     options?.data, // optional OP_RETURN
-  //     senderAddress // change → sender
-  //   );
+      // Truncate to first 12 bytes, or right-pad with zeros to 12 bytes
+      if (b.length >= 12) return b.subarray(0, 12);
 
-  //   const txid = await this.postTransaction(txHex);
-  //   return {
-  //     txid,
-  //     contractAddress,
-  //     preHtlcScript: preHtlcScript.toString('hex'),
-  //     htlc_wshash: htlc_wshash.toString('hex'),
-  //     timelock,
-  //   };
-  // }
+      const out = Buffer.alloc(12);
+      b.copy(out, 0);
+      return out;
+    })();
+
+    // total = 78 bytes
+    return Buffer.concat([m.commitId, tl6, dstChain, dstAddress, dstAsset, srcReceiver]);
+  }
 
   // /**
   //  * Upgrade ALL PreHTLC UTXOs to a new HTLC contract.

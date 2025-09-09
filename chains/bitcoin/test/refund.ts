@@ -48,9 +48,16 @@ class TestnetBitcoin extends BitcoinTrain {
 
   const destAddress =
     meta.refundDestination.address || payments.p2wpkh({ pubkey: sender.publicKey, network: networks.testnet }).address!;
-  const fee = 150;
+  const DUST_P2WPKH = 294;
+  let fee = 331;
+  if (fee > meta.value - DUST_P2WPKH) fee = Math.max(meta.value - DUST_P2WPKH, 1);
+
   const sendValue = meta.value - fee;
-  if (sendValue <= 0) throw new Error('fee too high');
+  if (sendValue < DUST_P2WPKH) {
+    throw new Error(
+      `Refund output would be dust (${sendValue} < ${DUST_P2WPKH}). Increase commit amount or lower fee.`
+    );
+  }
 
   const psbt = new Psbt({ network: networks.testnet });
   psbt.setLocktime(meta.timelock);
@@ -73,6 +80,14 @@ class TestnetBitcoin extends BitcoinTrain {
   psbt.finalizeAllInputs();
 
   const hex = psbt.extractTransaction().toHex();
+
+  const tipHash = await svc.mempool.blocks.getBlocksTipHash();
+  const tip = await svc.mempool.blocks.getBlock({ hash: tipHash });
+  const mtp = (tip as any).median_time ?? (tip as any).mediantime ?? (tip as any).time;
+  if (typeof mtp !== 'number' || mtp < meta.timelock) {
+    throw new Error(`Timelock not expired yet: MTP=${mtp} < timelock=${meta.timelock}`);
+  }
+
   const txid = (await axios.post(`${svc.baseUrl}/api/tx`, hex)).data;
 
   mkdirSync(join(__dirname, '../metadata'), { recursive: true });
