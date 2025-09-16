@@ -2,11 +2,20 @@ import Bitcoin from './Bitcoin';
 import { networks, opcodes, payments, Psbt, script } from 'bitcoinjs-lib';
 import { Taptree } from 'bitcoinjs-lib/src/types';
 import { ECPairInterface, ECPairFactory } from 'ecpair';
-import * as ecc from 'tiny-secp256k1';
 import { CommitLog } from './Core';
 import { createHash } from 'crypto';
+import * as varuint from 'varuint-bitcoin';
+import { initEccLib } from 'bitcoinjs-lib';
+import * as ecc from 'tiny-secp256k1';
+import { sha256 } from 'bitcoinjs-lib/src/crypto';
+
+initEccLib(ecc);
 
 const ECPair = ECPairFactory(ecc);
+const TAPLEAF_VER_TAPSCRIPT = 0xc0;
+const DUST_P2WPKH = 331;
+const DUST_CHANGE = 311;
+const MIN_DELAY_SEC = 900;
 
 /**
  * TRAIN Protocol operations on the Bitcoin.
@@ -21,73 +30,56 @@ export class BitcoinTrain extends Bitcoin {
     srcReceiverPubKey: Buffer,
     amount: number,
     delaySeconds: number,
-    options?: { fee?: number; data?: Uint8Array | string }
+    options?: { fee?: number; memo?: CommitLog | Buffer | string; data?: Uint8Array | string }
   ): Promise<{
+    commitId: string;
     txid: string;
     contractAddress: string;
     timelock: number;
-    // store this to rebuild P2TR output/witnessUtxo later
     internalPubkeyHex: string;
     p2trScriptPubKeyHex: string;
     contractVout: number;
-
-    // raw leaves (as hex) — keep exact bytes & order
     leaf_multisig_hex: string;
     leaf_refund_hex: string;
-
-    // control blocks (hex) for each leaf, precomputed
     ctrlblock_multisig_hex: string;
     ctrlblock_refund_hex: string;
-
-    // ready-to-use tapLeafScript hex packs for PSBT.addInput
     tapleaf_multisig: { leafVersion: number; scriptHex: string; controlBlockHex: string };
     tapleaf_refund: { leafVersion: number; scriptHex: string; controlBlockHex: string };
   }> {
-    const fee = options?.fee ?? 1800;
+    const fee = options?.fee ?? 311;
 
-    const tipHash = await this.mempool.blocks.getBlocksTipHash();
-    const tip = await this.mempool.blocks.getBlock({ hash: tipHash });
-    const mtp = (tip as any).median_time ?? (tip as any).mediantime ?? (tip as any).time;
+    if (delaySeconds < MIN_DELAY_SEC) throw new Error('Timelock must be ≥ 900 seconds');
+    const csvDelay = this.csvSeconds(delaySeconds);
 
-    if (delaySeconds < 900) throw new Error('Timelock must be ≥ 900 seconds');
-
-    //CLTV timestamp = MTP + delay
-    const timelock = mtp + delaySeconds;
-
-    if (timelock < 500_000_000) throw new Error('Timelock must be a UNIX timestamp');
-
-    // leaves
     const leaf_multisig = script.compile([
       this.toXOnly(sender.publicKey),
-      opcodes.OP_CHECKSIG,
+      opcodes.OP_CHECKSIGVERIFY,
       this.toXOnly(srcReceiverPubKey),
       opcodes.OP_CHECKSIG,
-      opcodes.OP_BOOLAND,
     ]);
 
     const leaf_refund = script.compile([
-      script.number.encode(timelock),
-      opcodes.OP_CHECKLOCKTIMEVERIFY,
+      script.number.encode(csvDelay),
+      opcodes.OP_CHECKSEQUENCEVERIFY,
       opcodes.OP_DROP,
       this.toXOnly(sender.publicKey),
       opcodes.OP_CHECKSIG,
     ]);
 
-    const tapLeaf1 = { output: leaf_multisig, version: 0xc0 as number };
-    const tapLeaf2 = { output: leaf_refund, version: 0xc0 as number };
+    const tapLeaf1 = { output: leaf_multisig, version: TAPLEAF_VER_TAPSCRIPT };
+    const tapLeaf2 = { output: leaf_refund, version: TAPLEAF_VER_TAPSCRIPT };
     const scriptTree: [Taptree, Taptree] = [tapLeaf1, tapLeaf2];
 
-    const internalPubkey = this.getHiddenUnspendableInternalKey(); // 32-byte x-only Buffer/Uint8Array
+    const internalPubkey = this.getHiddenUnspendableInternalKey();
     const p2tr = payments.p2tr({ internalPubkey, scriptTree, network: this.network });
     if (!p2tr.address || !p2tr.output) throw new Error('Failed to derive P2TR');
 
     const contractAddress = p2tr.address;
 
-    // precompute control blocks
     const redeemMultisig = payments.p2tr({
       internalPubkey,
       scriptTree,
-      redeem: { output: leaf_multisig, redeemVersion: 0xc0 },
+      redeem: { output: leaf_multisig, redeemVersion: TAPLEAF_VER_TAPSCRIPT },
       network: this.network,
     });
     const ctrlblock_multisig = redeemMultisig.witness![redeemMultisig.witness!.length - 1];
@@ -95,12 +87,11 @@ export class BitcoinTrain extends Bitcoin {
     const redeemRefund = payments.p2tr({
       internalPubkey,
       scriptTree,
-      redeem: { output: leaf_refund, redeemVersion: 0xc0 },
+      redeem: { output: leaf_refund, redeemVersion: TAPLEAF_VER_TAPSCRIPT },
       network: this.network,
     });
     const ctrlblock_refund = redeemRefund.witness![redeemRefund.witness!.length - 1];
 
-    // UTXO selection & PSBT
     const senderAddress = payments.p2wpkh({ pubkey: sender.publicKey, network: this.network }).address;
     if (!senderAddress) throw new Error('Failed to derive sender P2WPKH address');
 
@@ -127,27 +118,48 @@ export class BitcoinTrain extends Bitcoin {
       });
     }
 
-    const DUST_P2WPKH = 331; // ~dust limit for P2WPKH change (policy)
-
     let change = totalIn - needed;
     if (change < 0) throw new Error(`Insufficient funds: need ${needed}, have ${totalIn}`);
 
-    // contract first for determinism; vout stays 0
     const contractVout = 0;
-
-    // If change would be dust, fold it into the contract amount to avoid creating a dust output
     const contractValue = amount + (change > 0 && change < DUST_P2WPKH ? change : 0);
     psbt.addOutput({ address: contractAddress, value: contractValue });
 
-    // If change is spendable (>= dust), add it as a separate output
     if (change >= DUST_P2WPKH) {
       psbt.addOutput({ address: senderAddress, value: change });
     }
 
-    // OP_RETURN
-    if (options?.data !== undefined) {
-      const raw: string | Buffer = typeof options.data === 'string' ? options.data : Buffer.from(options.data);
-      const { script: opretScript, value } = this.createOpReturnOutput(raw);
+    let commitId: string = '0x00';
+    if (options?.memo !== undefined) {
+      let memoBuf: Buffer;
+
+      if (Buffer.isBuffer(options.memo)) {
+        memoBuf = options.memo;
+      } else if (typeof options.memo === 'string') {
+        const hex = options.memo.replace(/^0x/i, '');
+        memoBuf =
+          /^[0-9a-fA-F]+$/.test(hex) && hex.length % 2 === 0
+            ? Buffer.from(hex, 'hex')
+            : Buffer.from(options.memo, 'utf8');
+      } else {
+        commitId = options.memo.commitId.toString('hex');
+        const memo: CommitLog = { ...options.memo, timelock: csvDelay };
+        memoBuf = this.encodeCommitLog(memo);
+      }
+
+      const { script: opretScript, value } = this.createOpReturnOutput(memoBuf);
+      psbt.addOutput({ script: opretScript, value });
+    } else if (options?.data !== undefined) {
+      const memoBuf =
+        typeof options.data === 'string'
+          ? (() => {
+              const hex = options.data.replace(/^0x/i, '');
+              return /^[0-9a-fA-F]+$/.test(hex) && hex.length % 2 === 0
+                ? Buffer.from(hex, 'hex')
+                : Buffer.from(options.data, 'utf8');
+            })()
+          : Buffer.from(options.data);
+      const { script: opretScript, value } = this.createOpReturnOutput(memoBuf);
       psbt.addOutput({ script: opretScript, value });
     }
 
@@ -158,7 +170,6 @@ export class BitcoinTrain extends Bitcoin {
     const txhex = tx.toHex();
     const txid = await this.postTransaction(txhex);
 
-    // return everything needed for future script-path spends
     const internalPubkeyHex = Buffer.from(internalPubkey).toString('hex');
     const p2trScriptPubKeyHex = p2tr.output.toString('hex');
     const leaf_multisig_hex = leaf_multisig.toString('hex');
@@ -167,26 +178,30 @@ export class BitcoinTrain extends Bitcoin {
     const ctrlblock_refund_hex = Buffer.from(ctrlblock_refund).toString('hex');
 
     return {
+      commitId,
       txid,
       contractAddress,
-      timelock,
-
+      timelock: csvDelay,
       internalPubkeyHex,
       p2trScriptPubKeyHex,
       contractVout,
-
       leaf_multisig_hex,
       leaf_refund_hex,
-
       ctrlblock_multisig_hex,
       ctrlblock_refund_hex,
-
-      tapleaf_multisig: { leafVersion: 0xc0, scriptHex: leaf_multisig_hex, controlBlockHex: ctrlblock_multisig_hex },
-      tapleaf_refund: { leafVersion: 0xc0, scriptHex: leaf_refund_hex, controlBlockHex: ctrlblock_refund_hex },
+      tapleaf_multisig: {
+        leafVersion: TAPLEAF_VER_TAPSCRIPT,
+        scriptHex: leaf_multisig_hex,
+        controlBlockHex: ctrlblock_multisig_hex,
+      },
+      tapleaf_refund: {
+        leafVersion: TAPLEAF_VER_TAPSCRIPT,
+        scriptHex: leaf_refund_hex,
+        controlBlockHex: ctrlblock_refund_hex,
+      },
     };
   }
 
-  // 32 + 6 + 4 + 20 + 4 + 12 = 78 bytes
   public encodeCommitLog(m: CommitLog): Buffer {
     if (!m.commitId || m.commitId.length !== 32) throw new Error('commitId must be 32 bytes');
 
@@ -220,11 +235,8 @@ export class BitcoinTrain extends Bitcoin {
     })();
 
     const srcReceiver = (() => {
-      // Always interpret as UTF-8
       const raw = m.srcReceiver ?? '';
-      const b = Buffer.from(raw, 'utf8'); // UTF-8 bytes
-
-      // Truncate to first 12 bytes, or right-pad with zeros to 12 bytes
+      const b = Buffer.from(raw, 'utf8');
       if (b.length >= 12) return b.subarray(0, 12);
 
       const out = Buffer.alloc(12);
@@ -232,271 +244,513 @@ export class BitcoinTrain extends Bitcoin {
       return out;
     })();
 
-    // total = 78 bytes
     return Buffer.concat([m.commitId, tl6, dstChain, dstAddress, dstAsset, srcReceiver]);
   }
 
-  // /**
-  //  * Upgrade ALL PreHTLC UTXOs to a new HTLC contract.
-  //  *
-  //  * @param preHtlcUtxos   Array of { hash, index, value } for all PreHTLC inputs
-  //  * @param preHtlcScriptHex The PreHTLC redeem script hex
-  //  * @param htlcScriptHex    The new HTLC contract script (hex)
-  //  * @param sender           User keypair
-  //  * @param feeInputUtxos    Array of user UTXOs to cover the upgrade fee
-  //  * @param feeAmount        Satoshi amount of upgrade tx fee
-  //  */
-  // public async addLock(
-  //   preHtlcUtxos: { hash: string; index: number; value: number }[],
-  //   preHtlcScriptHex: string,
-  //   htlcScriptHex: string,
-  //   sender: ECPairInterface,
-  //   feeInputUtxos: { hash: string; index: number; value: number }[],
-  //   feeAmount: number
-  // ) {
-  //   const preHtlcScript = Buffer.from(preHtlcScriptHex, 'hex');
-  //   const htlcScript = Buffer.from(htlcScriptHex, 'hex');
-  //   const htlcP2wsh = payments.p2wsh({ redeem: { output: htlcScript, network: this.network }, network: this.network });
-  //   if (!htlcP2wsh.address) throw new Error('Failed to compute HTLC address');
+  public async addLockInit(
+    prev: {
+      txid: string;
+      contractVout: number;
+      value: number;
+      p2trScriptPubKeyHex: string;
+      tapleaf_multisig: { leafVersion: number; scriptHex: string; controlBlockHex: string };
+    },
+    params: {
+      sender: ECPairInterface;
+      srcReceiverPubKey: Buffer;
+      commitId: Buffer;
+      paymentHashlockHex: string;
+      delaySeconds: number;
+      feeSat: number;
+      feeUtxos: { hash: string; index: number; value: number }[];
+      refundTo?: string;
+    }
+  ): Promise<{
+    psbtBase64: string;
+    memoHex: string;
+    new: {
+      contractAddress: string;
+      value: number;
+      timelock: number;
+      internalPubkeyHex: string;
+      p2trScriptPubKeyHex: string;
+      contractVout: number;
+      leaf_hashlock_hex: string;
+      leaf_refund_hex: string;
+      ctrlblock_hashlock_hex: string;
+      ctrlblock_refund_hex: string;
+      tapleaf_hashlock: { leafVersion: number; scriptHex: string; controlBlockHex: string };
+      tapleaf_refund: { leafVersion: number; scriptHex: string; controlBlockHex: string };
+    };
+  }> {
+    if (params.delaySeconds < MIN_DELAY_SEC) throw new Error('Timelock must be ≥ 900 seconds');
+    const csvDelay = this.csvSeconds(params.delaySeconds);
 
-  //   const psbt = new Psbt({ network: this.network });
+    const xSender = this.toXOnly(params.sender.publicKey);
+    const xRecv = this.toXOnly(params.srcReceiverPubKey);
 
-  //   // Add ALL PreHTLC inputs
-  //   let preHtlcTotalValue = 0;
-  //   for (const utxo of preHtlcUtxos) {
-  //     psbt.addInput({
-  //       hash: utxo.hash,
-  //       index: utxo.index,
-  //       witnessScript: preHtlcScript,
-  //       witnessUtxo: {
-  //         script: payments.p2wsh({ redeem: { output: preHtlcScript, network: this.network }, network: this.network })
-  //           .output!,
-  //         value: utxo.value,
-  //       },
-  //       sequence: 0xfffffffe,
-  //     });
-  //     preHtlcTotalValue += utxo.value;
-  //   }
+    const hashlock = Buffer.from(params.paymentHashlockHex.replace(/^0x/i, ''), 'hex');
+    if (hashlock.length !== 32) throw new Error('hashlock must be 32 bytes hex');
 
-  //   // Add user's extra UTXOs to cover the fee
-  //   let totalFeeInput = 0;
-  //   const senderAddress = payments.p2wpkh({ pubkey: sender.publicKey, network: this.network }).address;
-  //   for (const utxo of feeInputUtxos) {
-  //     psbt.addInput({
-  //       hash: utxo.hash,
-  //       index: utxo.index,
-  //       witnessUtxo: {
-  //         script: payments.p2wpkh({ pubkey: sender.publicKey, network: this.network }).output!,
-  //         value: utxo.value,
-  //       },
-  //     });
-  //     totalFeeInput += utxo.value;
-  //   }
+    const leaf_hashlock = script.compile([
+      opcodes.OP_SHA256,
+      hashlock,
+      opcodes.OP_EQUALVERIFY,
+      xRecv,
+      opcodes.OP_CHECKSIG,
+    ]);
 
-  //   // Output: (1) all PreHTLC value to new HTLC, (2) change for fee if any
-  //   psbt.addOutput({
-  //     address: htlcP2wsh.address,
-  //     value: preHtlcTotalValue,
-  //   });
+    const leaf_refund = script.compile([
+      script.number.encode(csvDelay),
+      opcodes.OP_CHECKSEQUENCEVERIFY,
+      opcodes.OP_DROP,
+      xSender,
+      opcodes.OP_CHECKSIG,
+    ]);
 
-  //   const change = totalFeeInput - feeAmount;
-  //   if (change < 0) throw new Error('Fee UTXOs do not cover the fee amount');
-  //   if (change > 0 && senderAddress) {
-  //     psbt.addOutput({
-  //       address: senderAddress,
-  //       value: change,
-  //     });
-  //   }
+    const tapLeafHash = { output: leaf_hashlock, version: TAPLEAF_VER_TAPSCRIPT };
+    const tapLeafRefund = { output: leaf_refund, version: TAPLEAF_VER_TAPSCRIPT };
+    const scriptTree: [Taptree, Taptree] = [tapLeafHash, tapLeafRefund];
 
-  //   psbt.signAllInputs(sender);
+    const internalPubkey = this.getHiddenUnspendableInternalKey();
+    const p2trNew = payments.p2tr({ internalPubkey, scriptTree, network: this.network });
+    if (!p2trNew.address || !p2trNew.output) throw new Error('Failed to derive new P2TR');
 
-  //   // Finalize all PreHTLC inputs for upgrade
-  //   for (let i = 0; i < preHtlcUtxos.length; ++i) {
-  //     psbt.finalizeInput(i, (inputIndex, input, script) => {
-  //       const sig = input.partialSig.find((sigObj) => sigObj && sigObj.pubkey.equals(sender.publicKey))!.signature;
-  //       const witness = [sig, htlcScript, Buffer.from([1])];
-  //       return {
-  //         finalScriptWitness: this.witnessStackToScriptWitness(witness),
-  //       };
-  //     });
-  //   }
+    const redeemHash = payments.p2tr({
+      internalPubkey,
+      scriptTree,
+      redeem: { output: leaf_hashlock, redeemVersion: TAPLEAF_VER_TAPSCRIPT },
+      network: this.network,
+    });
+    const ctrlblock_hash = redeemHash.witness![redeemHash.witness!.length - 1];
 
-  //   // Finalize all fee inputs (P2WPKH)
-  //   for (let i = preHtlcUtxos.length; i < preHtlcUtxos.length + feeInputUtxos.length; ++i) {
-  //     psbt.finalizeInput(i);
-  //   }
+    const redeemRefund = payments.p2tr({
+      internalPubkey,
+      scriptTree,
+      redeem: { output: leaf_refund, redeemVersion: TAPLEAF_VER_TAPSCRIPT },
+      network: this.network,
+    });
+    const ctrlblock_ref = redeemRefund.witness![redeemRefund.witness!.length - 1];
 
-  //   const tx = psbt.extractTransaction();
-  //   const txid = await this.postTransaction(tx.toHex());
+    if (!params.commitId || params.commitId.length !== 32) throw new Error('commitId must be 32 bytes');
+    const tl6 = Buffer.alloc(6);
+    tl6.writeUIntBE(csvDelay, 0, 6);
+    const memoBuf = Buffer.concat([params.commitId, hashlock, tl6]);
+    const memoHex = memoBuf.toString('hex');
 
-  //   return {
-  //     txid,
-  //     htlcAddress: htlcP2wsh.address,
-  //     htlcScript: htlcScriptHex,
-  //   };
-  // }
+    const feeSat = params.feeSat >>> 0;
+    if (!Number.isFinite(feeSat) || feeSat <= 0) throw new Error('feeSat must be > 0');
 
-  // /**
-  //  * Issue HTLC and obtain the key at the time of issue
-  //  */
-  // public async lock(
-  //   sender: ECPairInterface,
-  //   receiver: ECPairInterface,
-  //   secret: string,
-  //   amount: number,
-  //   options?: LockOptions
-  // ) {
-  //   // set option paramater
-  //   const fee = options?.fee || 1800;
-  //   const lockHeight = options?.lockHeight || 2;
-  //   const blockHeight = await this.getCurrentBlockInfo();
-  //   const timelock = bip65.encode({ blocks: blockHeight.height + lockHeight });
+    const feeUtxos = params.feeUtxos || [];
+    if (!feeUtxos.length) throw new Error('feeUtxos required to fund the fee');
 
-  //   // generate contract
-  //   const witnessScript = this.generateSwapWitnessScript(receiver.publicKey, sender.publicKey, secret, timelock);
-  //   const p2wsh = payments.p2wsh({
-  //     redeem: { output: witnessScript, network: this.network },
-  //     network: this.network,
-  //   });
+    const totalFeeInput = feeUtxos.reduce((s, u) => s + (u.value >>> 0), 0);
+    if (totalFeeInput < feeSat) throw new Error(`Insufficient fee inputs: need ${feeSat}, have ${totalFeeInput}`);
 
-  //   // get addresses
-  //   const senderAddress = payments.p2wpkh({ pubkey: sender.publicKey, network: this.network }).address;
-  //   if (senderAddress == undefined || p2wsh.address == undefined) {
-  //     throw new Error('senderAddress or contractAddress is undefined');
-  //   }
+    const psbt = new Psbt({ network: this.network });
 
-  //   // get balance
-  //   const utxos = await this.getUtxos(senderAddress);
-  //   if (!utxos || utxos.length <= 0) {
-  //     throw new Error(`There was no UTXO currently available at the specified address ${senderAddress}.`);
-  //   }
+    psbt.addInput({
+      hash: prev.txid,
+      index: prev.contractVout,
+      sequence: 0xfffffffd,
+      witnessUtxo: { script: Buffer.from(prev.p2trScriptPubKeyHex, 'hex'), value: prev.value },
+      tapLeafScript: [
+        {
+          leafVersion: prev.tapleaf_multisig.leafVersion,
+          script: Buffer.from(prev.tapleaf_multisig.scriptHex, 'hex'),
+          controlBlock: Buffer.from(prev.tapleaf_multisig.controlBlockHex, 'hex'),
+        },
+      ],
+    });
 
-  //   // create transaction & announce
-  //   const txHex: string = this.buildAndSignTx(sender, senderAddress, p2wsh.address, amount, fee, utxos, options?.data);
-  //   const hash: string = await this.postTransaction(txHex);
+    const senderP2WPKH = payments.p2wpkh({ pubkey: params.sender.publicKey, network: this.network });
+    const senderAddr = senderP2WPKH.address!;
+    const senderOut = senderP2WPKH.output!;
+    feeUtxos.forEach((u) => {
+      psbt.addInput({
+        hash: u.hash,
+        index: u.index,
+        witnessUtxo: { script: senderOut, value: u.value },
+        sequence: 0xfffffffd,
+      });
+    });
 
-  //   return {
-  //     hash,
-  //     contractAddress: p2wsh.address,
-  //     witnessScript: witnessScript.toString('hex'),
-  //   };
-  // }
+    psbt.addOutput({ address: p2trNew.address, value: prev.value });
 
-  // async withdraw(
-  //   hash: string,
-  //   contractAddress: string,
-  //   witnessScript: string,
-  //   receiver: ECPairInterface,
-  //   proof: string,
-  //   option?: { fee?: number }
-  // ): Promise<string> {
-  //   // set option paramater
-  //   const fee = option?.fee || 1800;
-  //   const witnessUtxoValue = await this.getInputData(hash, contractAddress);
-  //   const p2wpkh = payments.p2wpkh({ pubkey: receiver.publicKey, network: this.network });
-  //   if (p2wpkh.address === undefined) throw new Error(`recieverAddress is undefined`);
+    const { script: opretScript, value: opretValue } = this.createOpReturnOutput(memoBuf);
+    psbt.addOutput({ script: opretScript, value: opretValue });
 
-  //   // transaction process
-  //   const transaction = new Psbt({ network: this.network })
-  //     .addInput({
-  //       hash,
-  //       index: witnessUtxoValue.index,
-  //       sequence: 0xfffffffe,
-  //       witnessScript: Buffer.from(witnessScript, 'hex'),
-  //       witnessUtxo: {
-  //         script: Buffer.from('0020' + crypto.sha256(Buffer.from(witnessScript, 'hex')).toString('hex'), 'hex'),
-  //         value: witnessUtxoValue.value,
-  //       },
-  //     })
-  //     .addOutput({
-  //       address: p2wpkh.address,
-  //       value: witnessUtxoValue.value - fee,
-  //     })
-  //     .signInput(0, receiver)
-  //     .finalizeInput(0, (inputIndex: number, input: any, tapLeafHashToFinalize: Buffer | (number | Buffer)[]) => {
-  //       const decompiled = script.decompile(tapLeafHashToFinalize);
-  //       if (!decompiled || decompiled[0] !== opcodes.OP_HASH256) {
-  //         throw new Error(`Can not finalize input #${inputIndex}`);
-  //       }
-  //       const witnessStackClaimBranch = payments.p2wsh({
-  //         redeem: {
-  //           input: script.compile([input.partialSig[0].signature, Buffer.from(proof, 'hex')]),
-  //           output: Buffer.from(witnessScript, 'hex'),
-  //         },
-  //       });
-  //       return {
-  //         finalScriptSig: undefined,
-  //         finalScriptWitness: this.witnessStackToScriptWitness(witnessStackClaimBranch.witness),
-  //       };
-  //     })
-  //     .extractTransaction();
+    const change = totalFeeInput - feeSat;
+    if (change >= DUST_CHANGE) {
+      psbt.addOutput({ address: senderAddr, value: change });
+    }
 
-  //   console.log(`transaction id: ${transaction.getId()}`);
-  //   await new Promise((ok) => {
-  //     setTimeout(() => {
-  //       ok('');
-  //     }, 10000);
-  //   });
-  //   return await this.postTransaction(transaction.toHex());
-  // }
+    psbt.signInput(0, params.sender);
+    for (let i = 0; i < feeUtxos.length; i++) psbt.signInput(1 + i, params.sender);
 
-  /**
-   * Called by the sender if there was no withdraw AND the time lock has
-   * expired. This will refund the contract amount.
-   * @returns transaction hash
-   */
-  // async refund(
-  //   hash: string,
-  //   contractAddress: string,
-  //   witnessScript: string,
-  //   sender: ECPairInterface,
-  //   option?: { fee?: number }
-  // ): Promise<string> {
-  //   // set option paramater
-  //   const fee = option?.fee || 1800;
-  //   const decompiled = script.decompile(Buffer.from(witnessScript, 'hex'));
-  //   const witnessUtxoValue = await this.getInputData(hash, contractAddress);
-  //   const p2wpkh = payments.p2wpkh({ pubkey: sender.publicKey, network: this.network });
-  //   if (decompiled == null || decompiled[6] == null) throw new Error("script hasn't lock time");
-  //   if (p2wpkh.address === undefined) throw new Error(`recieverAddress is undefined`);
-  //   const timelock = bip65.encode({ blocks: script.number.decode(decompiled[6] as Buffer) });
+    {
+      const t = psbt.data.inputs[0].tapScriptSig || [];
+      for (const e of t) {
+        if (e.signature.length === 65 && e.signature[64] === 0x00) {
+          e.signature = e.signature.subarray(0, 64);
+        }
+      }
+      const xSender = this.toXOnly(params.sender.publicKey);
+      const hasSenderSig = t.some((e) => Buffer.from(e.pubkey).equals(xSender) && e.signature.length === 64);
+      if (!hasSenderSig) throw new Error('Taproot: sender did not produce a 64B Schnorr tapScriptSig on input 0');
+    }
 
-  //   // transaction process
-  //   const transaction = new Psbt({ network: this.network })
-  //     .setLocktime(timelock)
-  //     .addInput({
-  //       hash,
-  //       index: witnessUtxoValue.index,
-  //       sequence: 0xfffffffe,
-  //       witnessScript: Buffer.from(witnessScript, 'hex'),
-  //       witnessUtxo: {
-  //         script: Buffer.from('0020' + crypto.sha256(Buffer.from(witnessScript, 'hex')).toString('hex'), 'hex'),
-  //         value: witnessUtxoValue.value,
-  //       },
-  //     })
-  //     .addOutput({
-  //       address: p2wpkh.address,
-  //       value: witnessUtxoValue.value - fee,
-  //     })
-  //     .signInput(0, sender)
-  //     .finalizeInput(0, (inputIndex: number, input: any, tapLeafHashToFinalize: Buffer | (number | Buffer)[]) => {
-  //       const decompiled = script.decompile(tapLeafHashToFinalize);
-  //       if (!decompiled || decompiled[0] !== opcodes.OP_HASH256) {
-  //         throw new Error(`Can not finalize input #${inputIndex}`);
-  //       }
-  //       const witnessStackRefundBranch = payments.p2wsh({
-  //         redeem: {
-  //           input: script.compile([input.partialSig[0].signature, Buffer.from('', 'hex')]),
-  //           output: Buffer.from(witnessScript, 'hex'),
-  //         },
-  //       });
-  //       return {
-  //         finalScriptSig: undefined,
-  //         finalScriptWitness: this.witnessStackToScriptWitness(witnessStackRefundBranch.witness),
-  //       };
-  //     })
-  //     .extractTransaction();
+    return {
+      psbtBase64: psbt.toBase64(),
+      memoHex,
+      new: {
+        contractAddress: p2trNew.address,
+        value: prev.value,
+        timelock: csvDelay,
+        internalPubkeyHex: Buffer.from(internalPubkey).toString('hex'),
+        p2trScriptPubKeyHex: p2trNew.output.toString('hex'),
+        contractVout: 0,
+        leaf_hashlock_hex: leaf_hashlock.toString('hex'),
+        leaf_refund_hex: leaf_refund.toString('hex'),
+        ctrlblock_hashlock_hex: Buffer.from(ctrlblock_hash).toString('hex'),
+        ctrlblock_refund_hex: Buffer.from(ctrlblock_ref).toString('hex'),
+        tapleaf_hashlock: {
+          leafVersion: TAPLEAF_VER_TAPSCRIPT,
+          scriptHex: leaf_hashlock.toString('hex'),
+          controlBlockHex: Buffer.from(ctrlblock_hash).toString('hex'),
+        },
+        tapleaf_refund: {
+          leafVersion: TAPLEAF_VER_TAPSCRIPT,
+          scriptHex: leaf_refund.toString('hex'),
+          controlBlockHex: Buffer.from(ctrlblock_ref).toString('hex'),
+        },
+      },
+    };
+  }
 
-  //   return await this.postTransaction(transaction.toHex());
-  // }
+  public async addLockFinalize(psbtBase64: string, receiver: ECPairInterface): Promise<{ txid: string; hex: string }> {
+    const psbt = Psbt.fromBase64(psbtBase64, { network: this.network });
+
+    const in0 = psbt.data.inputs[0];
+    if (!in0 || !in0.tapLeafScript || in0.tapLeafScript.length === 0) {
+      throw new Error('Input 0 missing tapLeafScript');
+    }
+
+    psbt.signInput(0, receiver);
+
+    {
+      const t = psbt.data.inputs[0].tapScriptSig || [];
+      for (const e of t) {
+        if (e.signature.length === 65 && e.signature[64] === 0x00) {
+          e.signature = e.signature.subarray(0, 64);
+        }
+        if (e.signature.length !== 64) {
+          throw new Error(`Unexpected Schnorr length ${e.signature.length} on tapscript sig`);
+        }
+      }
+    }
+
+    const leafPack = in0.tapLeafScript[0];
+    const leafScript = leafPack.script;
+    const controlBlock = leafPack.controlBlock;
+
+    const d = script.decompile(leafScript) || [];
+    const pk1 = (d[0] as Buffer) || Buffer.alloc(0);
+    const pk2 = (d[2] as Buffer) || Buffer.alloc(0);
+
+    if (pk1.length !== 32 || pk2.length !== 32) {
+      throw new Error('Leaf does not look like [xSender, CHECKSIGVERIFY, xRecv, CHECKSIG]');
+    }
+
+    const tss = psbt.data.inputs[0].tapScriptSig || [];
+    const byPk = new Map<string, Buffer>();
+    for (const e of tss) byPk.set(Buffer.from(e.pubkey).toString('hex'), e.signature);
+
+    const s1 = byPk.get(pk1.toString('hex'));
+    const s2 = byPk.get(pk2.toString('hex'));
+    if (!s1 || !s2) {
+      const have = [...byPk.keys()];
+      throw new Error(
+        `Missing schnorr sigs for leaf pubkeys. Need ${pk1.toString('hex')}, ${pk2.toString('hex')}. Have ${have.join(',')}`
+      );
+    }
+    if (s1.length !== 64 || s2.length !== 64) {
+      throw new Error('Schnorr signatures must be 64 bytes after trimming');
+    }
+
+    for (let i = 1; i < psbt.data.inputs.length; i++) {
+      psbt.finalizeInput(i);
+    }
+
+    const packWitness = (items: Buffer[]) => {
+      const parts: Buffer[] = [varuint.encode(items.length)];
+      for (const w of items) parts.push(varuint.encode(w.length), w);
+      return Buffer.concat(parts);
+    };
+
+    psbt.finalizeInput(0, () => {
+      const witness = packWitness([s2, s1, leafScript, controlBlock]);
+      return { finalScriptWitness: witness };
+    });
+
+    const tx = psbt.extractTransaction();
+    const hex = tx.toHex();
+    const txid = await this.postTransaction(hex);
+    return { txid, hex };
+  }
+
+  public async refund(
+    prev: {
+      txid: string;
+      contractVout: number;
+      value: number;
+      p2trScriptPubKeyHex: string;
+      tapleaf_refund: { leafVersion: number; scriptHex: string; controlBlockHex: string };
+    },
+    params: {
+      sender: ECPairInterface;
+      commitId: Buffer;
+      feeSat: number;
+      feeUtxos: { hash: string; index: number; value: number }[];
+    }
+  ): Promise<{ txid: string; hex: string }> {
+    if (!params.commitId || params.commitId.length !== 32) throw new Error('commitId must be 32 bytes');
+    const feeSat = params.feeSat >>> 0;
+    if (!Number.isFinite(feeSat) || feeSat <= 0) throw new Error('feeSat must be > 0');
+    if (!params.feeUtxos?.length) throw new Error('feeUtxos required');
+
+    const leafScript = Buffer.from(prev.tapleaf_refund.scriptHex, 'hex');
+    const controlBlock = Buffer.from(prev.tapleaf_refund.controlBlockHex, 'hex');
+
+    const d = script.decompile(leafScript) || [];
+    const csvBuf = (d[0] as Buffer) || Buffer.alloc(0);
+    const op1 = d[1],
+      op2 = d[2],
+      xSender = (d[3] as Buffer) || Buffer.alloc(0),
+      op3 = d[4];
+
+    if (
+      !(
+        Buffer.isBuffer(csvBuf) &&
+        xSender.length === 32 &&
+        op1 === opcodes.OP_CHECKSEQUENCEVERIFY &&
+        op2 === opcodes.OP_DROP &&
+        op3 === opcodes.OP_CHECKSIG
+      )
+    ) {
+      throw new Error('refund leaf shape mismatch (expected CSV path)');
+    }
+
+    const requiredSequence = script.number.decode(csvBuf) >>> 0;
+
+    const senderP2WPKH = payments.p2wpkh({ pubkey: params.sender.publicKey, network: this.network });
+    if (!senderP2WPKH.address || !senderP2WPKH.output) throw new Error('Could not derive sender P2WPKH');
+    const refundTo = senderP2WPKH.address;
+    const senderOut = senderP2WPKH.output;
+
+    const psbt = new Psbt({ network: this.network });
+    psbt.setVersion(2);
+
+    psbt.addInput({
+      hash: prev.txid,
+      index: prev.contractVout,
+      sequence: requiredSequence,
+      witnessUtxo: { script: Buffer.from(prev.p2trScriptPubKeyHex, 'hex'), value: prev.value },
+      tapLeafScript: [{ leafVersion: prev.tapleaf_refund.leafVersion, script: leafScript, controlBlock }],
+    });
+
+    let totalFeeInput = 0;
+    for (const u of params.feeUtxos) {
+      psbt.addInput({
+        hash: u.hash,
+        index: u.index,
+        sequence: 0xfffffffd,
+        witnessUtxo: { script: senderOut, value: u.value },
+      });
+      totalFeeInput += u.value >>> 0;
+    }
+    if (totalFeeInput < feeSat) throw new Error(`Insufficient fee inputs: need ${feeSat}, have ${totalFeeInput}`);
+
+    psbt.addOutput({ address: refundTo, value: prev.value });
+
+    {
+      const { script: opretScript, value } = this.createOpReturnOutput(params.commitId);
+      psbt.addOutput({ script: opretScript, value });
+    }
+
+    const feeChange = totalFeeInput - feeSat;
+    if (feeChange >= DUST_CHANGE) {
+      psbt.addOutput({ address: refundTo, value: feeChange });
+    }
+
+    psbt.signInput(0, params.sender);
+    for (let i = 0; i < params.feeUtxos.length; i++) psbt.signInput(1 + i, params.sender);
+
+    {
+      const t = psbt.data.inputs[0].tapScriptSig || [];
+      for (const e of t) {
+        if (e.signature.length === 65 && e.signature[64] === 0x00) e.signature = e.signature.subarray(0, 64);
+        if (e.signature.length !== 64) throw new Error('unexpected Schnorr length');
+      }
+      const xFromKey = this.toXOnly(params.sender.publicKey);
+      if (!t.some((e) => Buffer.from(e.pubkey).equals(xFromKey))) throw new Error('missing refund tapscript sig');
+    }
+
+    for (let i = 1; i < psbt.data.inputs.length; i++) psbt.finalizeInput(i);
+
+    const packWitness = (items: Buffer[]) => {
+      const parts: Buffer[] = [varuint.encode(items.length)];
+      for (const w of items) parts.push(varuint.encode(w.length), w);
+      return Buffer.concat(parts);
+    };
+    psbt.finalizeInput(0, () => {
+      const sig = (psbt.data.inputs[0].tapScriptSig || [])[0]?.signature;
+      if (!sig || sig.length !== 64) throw new Error('missing/invalid refund signature');
+      return { finalScriptWitness: packWitness([sig, leafScript, controlBlock]) };
+    });
+
+    const tx = psbt.extractTransaction();
+    const hex = tx.toHex();
+    const txid = await this.postTransaction(hex);
+    return { txid, hex };
+  }
+
+  public async redeem(
+    prev: {
+      txid: string;
+      contractVout: number;
+      value: number;
+      p2trScriptPubKeyHex: string;
+      tapleaf_hashlock: { leafVersion: number; scriptHex: string; controlBlockHex: string };
+    },
+    params: {
+      receiver: ECPairInterface;
+      secret: Buffer;
+      commitId: Buffer;
+      feeSat: number;
+      feeUtxos: { hash: string; index: number; value: number }[];
+    }
+  ): Promise<{ txid: string; hex: string }> {
+    if (!params.commitId || params.commitId.length !== 32) throw new Error('commitId must be 32 bytes');
+    if (!params.secret || params.secret.length !== 32) throw new Error('secret must be 32 bytes');
+    const feeSat = params.feeSat >>> 0;
+    if (!Number.isFinite(feeSat) || feeSat <= 0) throw new Error('feeSat must be > 0');
+    if (!params.feeUtxos?.length) throw new Error('feeUtxos required (receiver pays fees)');
+
+    const leafScript = Buffer.from(prev.tapleaf_hashlock.scriptHex, 'hex');
+    const controlBlock = Buffer.from(prev.tapleaf_hashlock.controlBlockHex, 'hex');
+
+    const d = script.decompile(leafScript) || [];
+    if (
+      !(
+        d.length === 5 &&
+        d[0] === opcodes.OP_SHA256 &&
+        Buffer.isBuffer(d[1]) &&
+        (d[1] as Buffer).length === 32 &&
+        d[2] === opcodes.OP_EQUALVERIFY &&
+        Buffer.isBuffer(d[3]) &&
+        (d[3] as Buffer).length === 32 &&
+        d[4] === opcodes.OP_CHECKSIG
+      )
+    ) {
+      throw new Error('hashlock leaf shape mismatch');
+    }
+    const hashlockInLeaf = d[1] as Buffer;
+    const xRecvInLeaf = d[3] as Buffer;
+
+    const h = sha256(params.secret);
+    if (!h.equals(hashlockInLeaf)) throw new Error('secret does not match hashlock in leaf');
+
+    const xRecvFromKey = this.toXOnly(params.receiver.publicKey);
+    if (!xRecvFromKey.equals(xRecvInLeaf)) throw new Error('receiver key does not match leaf xRecv');
+
+    const recvP2WPKH = payments.p2wpkh({ pubkey: params.receiver.publicKey, network: this.network });
+    if (!recvP2WPKH.address || !recvP2WPKH.output) throw new Error('Could not derive receiver P2WPKH');
+    const fundsTo = recvP2WPKH.address;
+    const changeTo = recvP2WPKH.address;
+    const recvOutScript = recvP2WPKH.output;
+
+    const psbt = new Psbt({ network: this.network });
+    psbt.setVersion(2);
+
+    psbt.addInput({
+      hash: prev.txid,
+      index: prev.contractVout,
+      sequence: 0xfffffffd,
+      witnessUtxo: { script: Buffer.from(prev.p2trScriptPubKeyHex, 'hex'), value: prev.value },
+      tapLeafScript: [
+        {
+          leafVersion: prev.tapleaf_hashlock.leafVersion,
+          script: leafScript,
+          controlBlock,
+        },
+      ],
+    });
+
+    let totalFeeInput = 0;
+    for (const u of params.feeUtxos) {
+      psbt.addInput({
+        hash: u.hash,
+        index: u.index,
+        sequence: 0xfffffffd,
+        witnessUtxo: { script: recvOutScript, value: u.value },
+      });
+      totalFeeInput += u.value >>> 0;
+    }
+    if (totalFeeInput < feeSat) throw new Error(`Insufficient fee inputs: need ${feeSat}, have ${totalFeeInput}`);
+
+    psbt.addOutput({ address: fundsTo, value: prev.value });
+
+    {
+      const MAX_OPRET = 80;
+      const HASHLOCK_SIZE = 32;
+      const SECRET_SIZE = 32;
+      const commitIdSize = MAX_OPRET - HASHLOCK_SIZE - SECRET_SIZE;
+
+      if (hashlockInLeaf.length !== HASHLOCK_SIZE) throw new Error('hashlock must be 32 bytes');
+      if (params.secret.length !== SECRET_SIZE) throw new Error('secret must be 32 bytes');
+
+      const commitIdTrunc = params.commitId.subarray(0, commitIdSize);
+      const payload = Buffer.concat([commitIdTrunc, hashlockInLeaf, params.secret]);
+      const { script: opretScript, value: opretValue } = this.createOpReturnOutput(payload);
+      psbt.addOutput({ script: opretScript, value: opretValue });
+    }
+
+    const feeChange = totalFeeInput - feeSat;
+    if (feeChange >= DUST_CHANGE) {
+      psbt.addOutput({ address: changeTo, value: feeChange });
+    }
+
+    psbt.signInput(0, params.receiver);
+    for (let i = 0; i < params.feeUtxos.length; i++) psbt.signInput(1 + i, params.receiver);
+
+    {
+      const t = psbt.data.inputs[0].tapScriptSig || [];
+      for (const e of t) {
+        if (e.signature.length === 65 && e.signature[64] === 0x00) e.signature = e.signature.subarray(0, 64);
+        if (e.signature.length !== 64) throw new Error('unexpected Schnorr length on hashlock input');
+      }
+      if (!t.some((e) => Buffer.from(e.pubkey).equals(xRecvFromKey))) {
+        throw new Error('missing receiver tapscript sig on hashlock input');
+      }
+    }
+
+    for (let i = 1; i < psbt.data.inputs.length; i++) psbt.finalizeInput(i);
+
+    const packWitness = (items: Buffer[]) => {
+      const parts: Buffer[] = [varuint.encode(items.length)];
+      for (const w of items) parts.push(varuint.encode(w.length), w);
+      return Buffer.concat(parts);
+    };
+    psbt.finalizeInput(0, () => {
+      const sig = (psbt.data.inputs[0].tapScriptSig || [])[0]?.signature;
+      if (!sig || sig.length !== 64) throw new Error('missing/invalid receiver signature');
+      return { finalScriptWitness: packWitness([sig, params.secret, leafScript, controlBlock]) };
+    });
+
+    const tx = psbt.extractTransaction();
+    const hex = tx.toHex();
+    const txid = await this.postTransaction(hex);
+    return { txid, hex };
+  }
 }

@@ -10,13 +10,16 @@ import * as bip39 from 'bip39';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { BitcoinTrain } from '../src/BitcoinTrain';
 import { CommitLog } from '../src';
-import { randomBytes } from 'crypto';
 
 const ECPair = ECPairFactory(ecc);
 const bip32 = BIP32Factory(ecc);
 
 const SENDER_PATH = "m/84'/1'/0'/0/0";
 const RECEIVER_PATH = "m/84'/1'/0'/0/1";
+
+const CSV_TYPE_FLAG = 0x00400000; 
+const MIN_DELAY_SEC = 900;
+const CSV_UNIT_SEC = 512;
 
 class TestnetBitcoin extends BitcoinTrain {
   constructor() {
@@ -29,6 +32,7 @@ class TestnetBitcoin extends BitcoinTrain {
 
   const MNEMONIC = process.env.TESTNET3_MNEMONIC!;
   if (!MNEMONIC || !bip39.validateMnemonic(MNEMONIC)) {
+    console.error('TESTNET3_MNEMONIC missing/invalid');
     process.exit(1);
   }
 
@@ -47,25 +51,42 @@ class TestnetBitcoin extends BitcoinTrain {
 
   const utxosRaw = await svc.getUtxos(senderAddress);
   if (!utxosRaw.length) {
+    console.error('No UTXOs found for sender');
     process.exit(1);
   }
   console.log('UTXOs:', utxosRaw);
 
   const amount = 1000;
-  const fee = 244; //"min relay fee
+  const fee = 311;
+
+  const requestedDelaySec = Math.max(Number(process.env.COMMIT_DELAY_SEC || '1200'), MIN_DELAY_SEC);
+  const csvUnits = Math.ceil(requestedDelaySec / CSV_UNIT_SEC); 
+  if (csvUnits > 0xffff) {
+    throw new Error(`csvUnits overflow (>65535). requestedDelaySec=${requestedDelaySec}`);
+  }
+  const csvSequence = CSV_TYPE_FLAG | csvUnits;
+
   console.log(`Locking ${amount} sats (fee: ${fee})`);
+  console.log(
+    `CSV (time-based): seconds=${requestedDelaySec}, units=${csvUnits}, sequence=0x${csvSequence.toString(16)}`
+  );
+
+  const approxNotBefore = Math.floor(Date.now() / 1000) + csvUnits * CSV_UNIT_SEC;
+
+  const commitIdHex = (process.env.COMMIT_ID_HEX || '').replace(/^0x/i, '');
+  if (!commitIdHex || commitIdHex.length !== 64) {
+    console.error('COMMIT_ID_HEX must be provided as 32 bytes hex');
+    process.exit(1);
+  }
 
   const log: CommitLog = {
-    commitId: randomBytes(32),
-    timelock: Math.floor(Date.now() / 1000) + 901,
+    commitId: Buffer.from(commitIdHex, 'hex'),
+    timelock: approxNotBefore,
     dstChain: 'ETH',
     dstAddress: 'F6517026847B4c166AAA176fe0C5baD1A245778D',
     dstAsset: 'USDC',
     srcReceiver: 'tb1q7rwthr668lmdgv7v6ty9q47w86ruzesmtq7wkx',
   };
-
-  const memo = svc.encodeCommitLog(log);
-  console.log(`OP_RETURN (${memo.length} bytes): ${memo.toString('hex')}`);
 
   const {
     txid,
@@ -78,15 +99,17 @@ class TestnetBitcoin extends BitcoinTrain {
     contractVout,
     ctrlblock_multisig_hex,
     ctrlblock_refund_hex,
-  } = await svc.commit(sender, srcReceiverPubKey, amount, 901, { fee, data: memo });
+  } = await svc.commit(sender, srcReceiverPubKey, amount, requestedDelaySec, { fee, memo: log });
 
   console.log('commit TXID:', txid);
   console.log('P2TR address:', contractAddress);
   console.log('leaf (2-of-2) ASM:', bscript.toASM(Buffer.from(leaf_multisig_hex, 'hex')));
-  console.log('leaf (refund) ASM:', bscript.toASM(Buffer.from(leaf_refund_hex, 'hex')));
-  console.log('timelock:', timelock, '(unix time)');
+  console.log('leaf (refund CSV) ASM:', bscript.toASM(Buffer.from(leaf_refund_hex, 'hex')));
+  console.log('timelock (approx):', timelock, '(unix)');
+  console.log(`CSV stored: seconds=${requestedDelaySec}, units=${csvUnits}, sequence=0x${csvSequence.toString(16)}`);
 
   const meta = {
+    commitIdHex: '0x' + commitIdHex,
     txid,
     contractVout,
     value: amount,
@@ -102,9 +125,20 @@ class TestnetBitcoin extends BitcoinTrain {
       scriptHex: leaf_multisig_hex,
       controlBlockHex: ctrlblock_multisig_hex,
     },
-    timelock,
-    requiredSequence: 0xfffffffe,
+
+    csv: {
+      mode: 'time',
+      seconds: requestedDelaySec,
+      units: csvUnits,
+      sequence: csvSequence,
+      unitSeconds: CSV_UNIT_SEC,
+      typeFlagHex: '0x' + CSV_TYPE_FLAG.toString(16),
+    },
+
+    timelockApproxUnix: timelock, 
+    requiredSequence: csvSequence, 
     sighashType: 'DEFAULT',
+
     refundSignerPubkeyHex: Buffer.from(sender.publicKey).toString('hex'),
     refundDestination: {
       type: 'p2wpkh',

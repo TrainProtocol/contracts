@@ -95,6 +95,14 @@ export default abstract class Bitcoin {
     return Buffer.from(pubkey.subarray(1, 33));
   }
 
+  protected csvSeconds(seconds: number): number {
+    const units = Math.floor(seconds / 512);
+    if (!Number.isFinite(units) || units <= 0 || units > 0xffff) {
+      throw new Error('CSV seconds out of range (must fit 16-bit units of 512s)');
+    }
+    return (units & 0xffff) | 0x00400000; //SEQUENCE_TYPE_FLAG
+  }
+
   /**
    * Generate a hidden, unspendable Taproot internal key (H + rG)
    */
