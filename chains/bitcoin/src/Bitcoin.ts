@@ -7,17 +7,61 @@ import { randomBytes, createHash } from 'crypto';
 import { HashPair } from './Core';
 import { Point, utils } from '@noble/secp256k1';
 
+type ChainArg = networks.Network | 'testnet4';
+export type { ChainArg };
+
+function makeTestnet4Adapter() {
+  const BASE = 'https://mempool.space/testnet4/api';
+  const get = async <T = any>(p: string): Promise<T> => {
+    const { data } = await axios.get<T>(`${BASE}${p}`);
+    return data;
+  };
+
+  return {
+    blocks: {
+      async getBlocksTipHeight(): Promise<number> {
+        const tip = await get<string | number>('/blocks/tip/height');
+        return typeof tip === 'string' ? Number(tip) : tip;
+      },
+      async getBlocksTipHash(): Promise<string> {
+        return get<string>('/blocks/tip/hash');
+      },
+      async getBlock({ hash }: { hash: string }): Promise<any> {
+        return get<any>(`/block/${hash}`);
+      },
+    },
+    addresses: {
+      async getAddressTxsUtxo({ address }: { address: string }): Promise<any[]> {
+        return get<any[]>(`/address/${address}/utxo`);
+      },
+    },
+    transactions: {
+      async getTx({ txid }: { txid: string }): Promise<any> {
+        return get<any>(`/tx/${txid}`);
+      },
+    },
+  };
+}
+
 /**
  * TRAIN Protocol Bitcoin
  */
 export default abstract class Bitcoin {
-  readonly mempool: MempoolReturn['bitcoin'];
+  readonly mempool: MempoolReturn['bitcoin'] | ReturnType<typeof makeTestnet4Adapter>;
   readonly network: networks.Network;
   readonly baseUrl: string;
 
-  constructor(network: networks.Network) {
-    this.network = network;
-    const networkStr = network === networks.bitcoin ? 'bitcoin' : 'testnet';
+  constructor(networkOrChain: ChainArg) {
+    if (networkOrChain === 'testnet4') {
+      this.network = networks.testnet;
+      this.mempool = makeTestnet4Adapter();
+      // this.baseUrl = 'https://mempool.space/testnet4';
+      this.baseUrl = 'https://bitcoin-testnet-rpc.publicnode.com';
+      return;
+    }
+
+    this.network = networkOrChain;
+    const networkStr = networkOrChain === networks.bitcoin ? 'bitcoin' : 'testnet';
     this.mempool = mempoolJS({
       hostname: 'mempool.space',
       network: networkStr,
@@ -50,17 +94,13 @@ export default abstract class Bitcoin {
     return new Promise((resolve, reject) => {
       axios
         .post(endpoint, txhex)
-        .then((res) => {
-          resolve(res.data);
-        })
-        .catch((error) => {
-          reject(error);
-        });
+        .then((res) => resolve(res.data))
+        .catch((error) => reject(error));
     });
   }
 
   protected async getInputData(txid: string, contractAddress: string): Promise<{ value: number; index: number }> {
-    const txInfo = await this.mempool.transactions.getTx({ txid });
+    const txInfo = await (this.mempool as any).transactions.getTx({ txid });
     let value = 0;
     let index = 0;
     for (let i = 0; i < txInfo.vout.length; i++) {
@@ -73,17 +113,13 @@ export default abstract class Bitcoin {
   }
 
   public async getUtxos(address: string): Promise<{ hash: string; index: number; value: number }[]> {
-    const utxosData = await this.mempool.addresses.getAddressTxsUtxo({ address });
+    const utxosData = await (this.mempool as any).addresses.getAddressTxsUtxo({ address });
     const utxos: { hash: string; index: number; value: number }[] = [];
     for (let i = 0; i < utxosData.length; i++) {
       const hash = utxosData[i].txid;
       const index = utxosData[i].vout;
       const value = utxosData[i].value;
-      utxos.push({
-        hash,
-        index,
-        value,
-      });
+      utxos.push({ hash, index, value });
     }
     return utxos;
   }
@@ -100,17 +136,14 @@ export default abstract class Bitcoin {
     if (!Number.isFinite(units) || units <= 0 || units > 0xffff) {
       throw new Error('CSV seconds out of range (must fit 16-bit units of 512s)');
     }
-    return (units & 0xffff) | 0x00400000; //SEQUENCE_TYPE_FLAG
+    return (units & 0xffff) | 0x00400000; // SEQUENCE_TYPE_FLAG
   }
 
   /**
    * Generate a hidden, unspendable Taproot internal key (H + rG)
    */
   protected getHiddenUnspendableInternalKey() {
-    // BIP341 NUMS x-coordinate
     const H_x = '50929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac0';
-
-    // Lift NUMS x-only point to a full point (try even and odd parity)
     let H: Point | undefined = undefined;
     for (const prefix of ['02', '03']) {
       try {
@@ -119,22 +152,15 @@ export default abstract class Bitcoin {
       } catch {}
     }
     if (!H) throw new Error('Could not lift NUMS x to a secp256k1 point');
-
-    // Must be a valid curve point
     H.assertValidity();
 
-    // Generate random scalar r (randomPrivateKey() is already valid)
     const r = utils.randomPrivateKey();
-
-    // r*G
     const rG = Point.fromPrivateKey(r);
     rG.assertValidity();
 
-    // H + rG
     const internalPoint = H.add(rG);
     internalPoint.assertValidity();
 
-    // x-only pubkey (32 bytes)
     const x = internalPoint.toAffine().x;
     const hex = x.toString(16).padStart(64, '0');
     return Buffer.from(hex, 'hex');
@@ -145,27 +171,21 @@ export default abstract class Bitcoin {
     function writeSlice(slice: any) {
       buffer = Buffer.concat([buffer, Buffer.from(slice)]);
     }
-
     function writeVarInt(i: any) {
       const currentLen = buffer.length;
       const varintLen = varuint.encodingLength(i);
-
       buffer = Buffer.concat([buffer, Buffer.allocUnsafe(varintLen)]);
       varuint.encode(i, buffer, currentLen);
     }
-
     function writeVarSlice(slice: any) {
       writeVarInt(slice.length);
       writeSlice(slice);
     }
-
     function writeVector(vector: any) {
       writeVarInt(vector.length);
       vector.forEach(writeVarSlice);
     }
-
     writeVector(witness);
-
     return buffer;
   }
 
@@ -209,7 +229,7 @@ export default abstract class Bitcoin {
 
     if (buf.length > 80) throw new Error('OP_RETURN data exceeds 80 bytes');
 
-    const script = payments.embed({ data: [buf] }).output!;
-    return { script, value: 0 };
+    const opretScript = payments.embed({ data: [buf] }).output!;
+    return { script: opretScript, value: 0 };
   }
 }

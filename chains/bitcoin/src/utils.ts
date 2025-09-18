@@ -2,6 +2,15 @@ function readU48BE(buf: Buffer, offset = 0): number {
   return Number(BigInt.asUintN(48, BigInt('0x' + buf.subarray(offset, offset + 6).toString('hex'))));
 }
 
+function readU40BE(buf: Buffer, offset = 0): number {
+  return Number(BigInt.asUintN(40, BigInt('0x' + buf.subarray(offset, offset + 5).toString('hex'))));
+}
+
+function isAsciiWord(b: Buffer) {
+  const s = b.toString('utf8').replace(/\x00+$/g, '');
+  return /^[ -~]*$/.test(s);
+}
+
 export type OpReturnDecoded =
   | {
       kind: 'commitLog';
@@ -11,6 +20,15 @@ export type OpReturnDecoded =
       dstAddress: `0x${string}`;
       dstAsset: string;
       srcReceiver: string;
+      _rawHex: string;
+    }
+  | {
+      kind: 'lock';
+      lockId: `0x${string}`;
+      paymentHashlock: `0x${string}`;
+      delayCsvSeconds: number;
+      dstChain: string;
+      dstAsset: string;
       _rawHex: string;
     }
   | {
@@ -62,6 +80,25 @@ export function decodeCommitLogPayload(buf: Buffer): OpReturnDecoded {
   };
 }
 
+export function decodeLockPayload(buf: Buffer): OpReturnDecoded {
+  if (buf.length !== 77) return { kind: 'unknown', _rawHex: '0x' + buf.toString('hex'), note: 'not 77 bytes' };
+  const lockId = buf.subarray(0, 32);
+  const hashlock = buf.subarray(32, 64);
+  const delayCsvSeconds = readU40BE(buf, 64);
+  const dstChainB = buf.subarray(69, 73);
+  const dstAssetB = buf.subarray(73, 77);
+  return {
+    kind: 'lock',
+    lockId: ('0x' + lockId.toString('hex')) as `0x${string}`,
+    paymentHashlock: ('0x' + hashlock.toString('hex')) as `0x${string}`,
+    delayCsvSeconds,
+    dstChain: dstChainB.toString('utf8').replace(/\x00+$/g, ''),
+    dstAsset: dstAssetB.toString('utf8').replace(/\x00+$/g, ''),
+    _rawHex: '0x' + buf.toString('hex'),
+  };
+}
+
+
 export function decodeAddLockPayload(buf: Buffer): OpReturnDecoded {
   if (buf.length !== 70) return { kind: 'unknown', _rawHex: '0x' + buf.toString('hex'), note: 'not 70 bytes' };
   const commitId = buf.subarray(0, 32);
@@ -86,33 +123,35 @@ export function decodeRefundPayload(buf: Buffer): OpReturnDecoded {
 }
 
 export function decodeRedeemPayload(buf: Buffer): OpReturnDecoded {
-  if (buf.length !== 80) {
-    return { kind: 'unknown', _rawHex: '0x' + buf.toString('hex'), note: 'expected 80 bytes (16|32|32)' };
+  if (buf.length !== 79) {
+    return { kind: 'unknown', _rawHex: '0x' + buf.toString('hex'), note: 'expected 79 bytes (15|32|32)' };
   }
-  const commitId16 = buf.subarray(0, 16); // 16 bytes
-  const hashlock = buf.subarray(16, 48); // 32 bytes
-  const secret = buf.subarray(48, 80); // 32 bytes
-
+  const commitId15 = buf.subarray(0, 15);
+  const hashlock = buf.subarray(15, 47);
+  const secret = buf.subarray(47, 79);
   return {
     kind: 'redeem',
-    commitId: ('0x' + commitId16.toString('hex')) as `0x${string}`,
+    commitId: ('0x' + commitId15.toString('hex')) as `0x${string}`,
     paymentHashlock: ('0x' + hashlock.toString('hex')) as `0x${string}`,
     secret: ('0x' + secret.toString('hex')) as `0x${string}`,
-    truncated: { perFieldBytes: 16, originalEachWas32: true },
+    truncated: { perFieldBytes: 15, originalEachWas32: true },
     _rawHex: '0x' + buf.toString('hex'),
   };
 }
 
+
 export function decodeAnyOpReturnPayload(hex: string): OpReturnDecoded {
   const buf = Buffer.from(hex.replace(/^0x/i, ''), 'hex');
 
-  if (buf.length === 78) return decodeCommitLogPayload(buf);
-  if (buf.length === 70) return decodeAddLockPayload(buf);
   if (buf.length === 32) return decodeRefundPayload(buf);
-  if (buf.length === 80) return decodeRedeemPayload(buf); 
+  if (buf.length === 70) return decodeAddLockPayload(buf);
+  if (buf.length === 77) return decodeLockPayload(buf);
+  if (buf.length === 78) return decodeCommitLogPayload(buf);
+  if (buf.length === 79) return decodeRedeemPayload(buf);
 
   return { kind: 'unknown', _rawHex: '0x' + buf.toString('hex') };
 }
+
 
 export function extractAllPushDatasFromOpReturn(scriptHex: string): Buffer[] {
   const b = Buffer.from(scriptHex, 'hex');

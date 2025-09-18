@@ -37,22 +37,35 @@ async function decodeFromTxid(txid: string) {
             console.log(`  dstAsset   : ${d.dstAsset}`);
             console.log(`  srcReceiver: ${d.srcReceiver}`);
             break;
+
+          case 'lock':
+            console.log('  kind       : lock');
+            console.log(`  lockId     : ${d.lockId}`);
+            console.log(`  hashlock   : ${d.paymentHashlock}`);
+            console.log(`  csvDelay   : ${d.delayCsvSeconds} (sec)`);
+            console.log(`  dstChain   : ${d.dstChain}`);
+            console.log(`  dstAsset   : ${d.dstAsset}`);
+            break;
+
           case 'addLock':
             console.log('  kind       : addLock');
             console.log(`  commitId   : ${d.commitId}`);
             console.log(`  hashlock   : ${d.paymentHashlock}`);
             console.log(`  timelock   : ${d.timelock} (unix)`);
             break;
+
           case 'refund':
             console.log('  kind       : refund');
             console.log(`  commitId   : ${d.commitId}`);
             break;
+
           case 'redeem':
             console.log('  kind       : redeem');
             console.log(`  commitId16 : ${d.commitId}`);
-            if ('paymentHashlock' in d) console.log(`  hashlock   : ${d.paymentHashlock}`);
-            if ('secret' in d) console.log(`  secret     : ${d.secret}`);
+            console.log(`  hashlock   : ${d.paymentHashlock}`);
+            console.log(`  secret     : ${d.secret}`);
             break;
+
           default:
             console.log('  kind       : unknown');
             console.log(`  raw(hex)   : ${d._rawHex}`);

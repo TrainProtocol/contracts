@@ -1,4 +1,4 @@
-import Bitcoin from './Bitcoin';
+import Bitcoin, { ChainArg } from './Bitcoin';
 import { networks, opcodes, payments, Psbt, script } from 'bitcoinjs-lib';
 import { Taptree } from 'bitcoinjs-lib/src/types';
 import { ECPairInterface, ECPairFactory } from 'ecpair';
@@ -21,8 +21,8 @@ const MIN_DELAY_SEC = 900;
  * TRAIN Protocol operations on the Bitcoin.
  */
 export class BitcoinTrain extends Bitcoin {
-  constructor(network: networks.Network) {
-    super(network);
+  constructor(chain: ChainArg) {
+    super(chain);
   }
 
   public async commit(
@@ -702,14 +702,12 @@ export class BitcoinTrain extends Bitcoin {
     psbt.addOutput({ address: fundsTo, value: prev.value });
 
     {
-      const MAX_OPRET = 80;
+      const MAX_OPRET = 79;
       const HASHLOCK_SIZE = 32;
       const SECRET_SIZE = 32;
       const commitIdSize = MAX_OPRET - HASHLOCK_SIZE - SECRET_SIZE;
-
       if (hashlockInLeaf.length !== HASHLOCK_SIZE) throw new Error('hashlock must be 32 bytes');
       if (params.secret.length !== SECRET_SIZE) throw new Error('secret must be 32 bytes');
-
       const commitIdTrunc = params.commitId.subarray(0, commitIdSize);
       const payload = Buffer.concat([commitIdTrunc, hashlockInLeaf, params.secret]);
       const { script: opretScript, value: opretValue } = this.createOpReturnOutput(payload);
@@ -752,5 +750,182 @@ export class BitcoinTrain extends Bitcoin {
     const hex = tx.toHex();
     const txid = await this.postTransaction(hex);
     return { txid, hex };
+  }
+
+  public async lock(
+    sender: ECPairInterface,
+    srcReceiverPubKey: Buffer,
+    amount: number,
+    csvDelaySeconds: number,
+    opts?: {
+      fee?: number;
+      lockId: Buffer;
+      paymentHashlockHex: string;
+      dstChain?: string;
+      dstAsset?: string;
+    }
+  ): Promise<{
+    lockIdHex: string;
+    txid: string;
+    contractAddress: string;
+    csvDelaySeconds: number;
+    internalPubkeyHex: string;
+    p2trScriptPubKeyHex: string;
+    contractVout: number;
+    leaf_hashlock_hex: string;
+    leaf_refund_hex: string;
+    ctrlblock_hashlock_hex: string;
+    ctrlblock_refund_hex: string;
+    tapleaf_hashlock: { leafVersion: number; scriptHex: string; controlBlockHex: string };
+    tapleaf_refund: { leafVersion: number; scriptHex: string; controlBlockHex: string };
+  }> {
+    const fee = opts?.fee ?? 311;
+    if (!opts?.lockId || opts.lockId.length !== 32) throw new Error('lockId must be 32 bytes');
+    const hashlock = Buffer.from((opts.paymentHashlockHex || '').replace(/^0x/i, ''), 'hex');
+    if (hashlock.length !== 32) throw new Error('paymentHashlockHex must be 32 bytes hex');
+    if (csvDelaySeconds < MIN_DELAY_SEC) throw new Error('CSV delay must be ≥ 900 seconds');
+
+    const xSender = this.toXOnly(sender.publicKey);
+    const xRecv = this.toXOnly(srcReceiverPubKey);
+
+    const toCsvSequence = (secs: number) => {
+      const units = Math.ceil(secs / 512);
+      return (0x00400000 | (units & 0xffff)) >>> 0;
+    };
+    const csvSeq = toCsvSequence(csvDelaySeconds);
+
+    const leaf_hashlock = script.compile([
+      opcodes.OP_SHA256,
+      hashlock,
+      opcodes.OP_EQUALVERIFY,
+      xRecv,
+      opcodes.OP_CHECKSIG,
+    ]);
+
+    const leaf_refund = script.compile([
+      script.number.encode(csvSeq),
+      opcodes.OP_CHECKSEQUENCEVERIFY,
+      opcodes.OP_DROP,
+      xSender,
+      opcodes.OP_CHECKSIG,
+    ]);
+
+    const tapLeafHash = { output: leaf_hashlock, version: TAPLEAF_VER_TAPSCRIPT };
+    const tapLeafRefund = { output: leaf_refund, version: TAPLEAF_VER_TAPSCRIPT };
+    const scriptTree: [Taptree, Taptree] = [tapLeafHash, tapLeafRefund];
+
+    const internalPubkey = this.getHiddenUnspendableInternalKey();
+    const p2tr = payments.p2tr({ internalPubkey, scriptTree, network: this.network });
+    if (!p2tr.address || !p2tr.output) throw new Error('Failed to derive P2TR');
+    const contractAddress = p2tr.address;
+
+    const redeemHash = payments.p2tr({
+      internalPubkey,
+      scriptTree,
+      redeem: { output: leaf_hashlock, redeemVersion: TAPLEAF_VER_TAPSCRIPT },
+      network: this.network,
+    });
+    const ctrlblock_hash = redeemHash.witness![redeemHash.witness!.length - 1];
+
+    const redeemRefund = payments.p2tr({
+      internalPubkey,
+      scriptTree,
+      redeem: { output: leaf_refund, redeemVersion: TAPLEAF_VER_TAPSCRIPT },
+      network: this.network,
+    });
+    const ctrlblock_ref = redeemRefund.witness![redeemRefund.witness!.length - 1];
+
+    const senderAddress = payments.p2wpkh({ pubkey: sender.publicKey, network: this.network }).address;
+    if (!senderAddress) throw new Error('Failed to derive sender P2WPKH address');
+
+    const utxos = await this.getUtxos(senderAddress);
+    if (!utxos.length) throw new Error(`No UTXOs for ${senderAddress}`);
+
+    const needed = amount + fee;
+    const selected: typeof utxos = [];
+    let totalIn = 0;
+    for (const u of utxos) {
+      selected.push(u);
+      totalIn += u.value;
+      if (totalIn >= needed) break;
+    }
+    if (totalIn < needed) throw new Error(`Insufficient funds: need ${needed}, have ${totalIn}`);
+
+    const psbt = new Psbt({ network: this.network });
+    psbt.setVersion(2);
+    const senderOut = payments.p2wpkh({ pubkey: sender.publicKey, network: this.network }).output!;
+    for (const u of selected) {
+      psbt.addInput({
+        hash: u.hash,
+        index: u.index,
+        witnessUtxo: { script: senderOut, value: u.value },
+        sequence: 0xfffffffd,
+      });
+    }
+
+    let change = totalIn - needed;
+    const contractVout = 0;
+    const contractValue = amount + (change > 0 && change < DUST_P2WPKH ? change : 0);
+    psbt.addOutput({ address: contractAddress, value: contractValue });
+    if (change >= DUST_P2WPKH) psbt.addOutput({ address: senderAddress, value: change });
+
+    const csv5 = Buffer.alloc(5);
+    {
+      const v = BigInt(csvDelaySeconds);
+      if (v < 0n || v > 0xffffffffffn) throw new Error('csv seconds out of uint40 range');
+      const tmp6 = Buffer.alloc(6);
+      tmp6.writeUIntBE(Number(v), 0, 6);
+      tmp6.subarray(1).copy(csv5);
+    }
+    const packFixed = (s: string | undefined, len: number) => {
+      const b = Buffer.from(s ?? '', 'utf8');
+      const out = Buffer.alloc(len);
+      b.copy(out, 0, 0, Math.min(len, b.length));
+      return out;
+    };
+    const dstChain4 = packFixed(opts?.dstChain, 4);
+    const dstAsset4 = packFixed(opts?.dstAsset, 4);
+    const payload77 = Buffer.concat([opts.lockId, hashlock, csv5, dstChain4, dstAsset4]);
+
+    const { script: opret, value: v } = this.createOpReturnOutput(payload77);
+    psbt.addOutput({ script: opret, value: v });
+
+    for (let i = 0; i < selected.length; i++) psbt.signInput(i, sender);
+    psbt.finalizeAllInputs();
+
+    const tx = psbt.extractTransaction();
+    const txhex = tx.toHex();
+    const txid = await this.postTransaction(txhex);
+
+    const internalPubkeyHex = Buffer.from(internalPubkey).toString('hex');
+    const p2trScriptPubKeyHex = p2tr.output.toString('hex');
+    const leaf_hashlock_hex = leaf_hashlock.toString('hex');
+    const leaf_refund_hex = leaf_refund.toString('hex');
+    const ctrlblock_hashlock_hex = Buffer.from(ctrlblock_hash).toString('hex');
+    const ctrlblock_refund_hex = Buffer.from(ctrlblock_ref).toString('hex');
+
+    return {
+      lockIdHex: '0x' + opts.lockId.toString('hex'),
+      txid,
+      contractAddress,
+      csvDelaySeconds,
+      internalPubkeyHex,
+      p2trScriptPubKeyHex,
+      contractVout,
+      leaf_hashlock_hex,
+      leaf_refund_hex,
+      ctrlblock_hashlock_hex,
+      ctrlblock_refund_hex,
+      tapleaf_hashlock: {
+        leafVersion: TAPLEAF_VER_TAPSCRIPT,
+        scriptHex: leaf_hashlock_hex,
+        controlBlockHex: ctrlblock_hashlock_hex,
+      },
+      tapleaf_refund: {
+        leafVersion: TAPLEAF_VER_TAPSCRIPT,
+        scriptHex: leaf_refund_hex,
+        controlBlockHex: ctrlblock_refund_hex,
+      },
+    };
   }
 }
