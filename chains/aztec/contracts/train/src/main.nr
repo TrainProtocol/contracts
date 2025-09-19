@@ -14,24 +14,28 @@ use dep::aztec::macros::aztec;
 
 #[aztec]
 pub contract Train {
-    use crate::lib::{bytes_to_u128_limbs, u128_limbs_to_bytes};
-    use crate::types::events::{
-        TokenCommitted, TokenLockAdded, TokenLockedFirst, TokenLockedSecond, TokenRedeemed,
-        TokenRefunded,
-    };
-    use dep::aztec::messages::logs::note::encode_and_encrypt_note;
-    use dep::aztec::protocol_types::traits::{Deserialize, Packable, Serialize};
-    use dep::aztec::state_vars::{private_immutable::PrivateImmutable, SharedMutable};
-    use dep::sha256;
-    use dep::token::Token;
+    use std::meta::derive;
+
     use aztec::macros::{
         functions::{initializer, internal, private, public, utility, view},
         notes::note,
         storage::storage,
     };
-    use aztec::prelude::{AztecAddress, Map};
-    use std::meta::derive;
 
+    use dep::aztec::{
+        messages::logs::note::encode_and_encrypt_note,
+        protocol_types::{address::AztecAddress, traits::{Deserialize, Packable, Serialize}},
+        state_vars::{DelayedPublicMutable, map::Map, private_immutable::PrivateImmutable},
+    };
+    use dep::sha256;
+    use dep::token::Token;
+
+    use crate::lib::{bytes_to_u128_limbs, u128_limbs_to_bytes};
+    use crate::types::events::{
+        TokenCommitted, TokenLockAdded, TokenLockedFirst, TokenLockedSecond, TokenRedeemed,
+        TokenRefunded,
+    };
+    #[derive(Packable)]
     #[note]
     #[derive(Eq)]
     struct HTLC_Private {
@@ -60,7 +64,7 @@ pub contract Train {
     #[storage]
     struct Storage<Context> {
         contracts_private: Map<Field, PrivateImmutable<HTLC_Private, Context>, Context>,
-        contracts_public: Map<Field, SharedMutable<HTLC_Public, 180, Context>, Context>,
+        contracts_public: Map<Field, DelayedPublicMutable<HTLC_Public, 180, Context>, Context>,
     }
 
     #[private]
@@ -96,7 +100,6 @@ pub contract Train {
         let htlc_note = HTLC_Private { owner: context.msg_sender(), randomness: randomness };
         storage.contracts_private.at(Id).initialize(htlc_note).emit(encode_and_encrypt_note(
             &mut context,
-            context.msg_sender(),
             context.msg_sender(),
         ));
 
@@ -198,7 +201,7 @@ pub contract Train {
         let htlc_public = storage.contracts_public.at(Id).get_current_value();
 
         let partial_note = Token::at(htlc_public.token)
-            .prepare_private_balance_increase(htlc_private.owner, htlc_private.owner)
+            .prepare_private_balance_increase(htlc_private.owner)
             .call(&mut context);
         Token::at(htlc_public.token)
             .finalize_transfer_to_private(htlc_public.amount, partial_note)
@@ -268,7 +271,6 @@ pub contract Train {
         let htlc_note = HTLC_Private { owner: context.msg_sender(), randomness: randomness };
         storage.contracts_private.at(Id).initialize(htlc_note).emit(encode_and_encrypt_note(
             &mut context,
-            context.msg_sender(),
             context.msg_sender(),
         ));
 
@@ -349,10 +351,7 @@ pub contract Train {
         if (htlc_public.ownership_hash_high == 0 as u128) {
             if htlc_public.ownership_hash_low == 0 as u128 {
                 let partial_note = Token::at(htlc_public.token)
-                    .prepare_private_balance_increase(
-                        htlc_public.src_receiver,
-                        htlc_public.src_receiver,
-                    )
+                    .prepare_private_balance_increase(htlc_public.src_receiver)
                     .call(&mut context);
                 Token::at(htlc_public.token)
                     .finalize_transfer_to_private(htlc_public.amount, partial_note)
@@ -360,7 +359,7 @@ pub contract Train {
             }
         } else {
             let partial_note = Token::at(htlc_public.token)
-                .prepare_private_balance_increase(context.msg_sender(), context.msg_sender())
+                .prepare_private_balance_increase(context.msg_sender())
                 .call(&mut context);
             Token::at(htlc_public.token)
                 .finalize_transfer_to_private(htlc_public.amount, partial_note)
@@ -419,13 +418,13 @@ pub contract Train {
     // This utility function should be invoked by the frontend before each function call
     // where the existence or non-existence of an HTLC is a critical security check.
     #[utility]
-    unconstrained fn is_contract_initialized(Id: Field) -> bool {
-        storage.contracts_private.at(Id).is_initialized()
+    unconstrained fn is_contract_initialized(id: Field) -> bool {
+        storage.contracts_private.at(id).is_initialized()
     }
 
     #[view]
-    #[utility]
-    unconstrained fn get_htlc_public(key: Field) -> pub HTLC_Public {
+    #[public]
+    fn get_htlc_public(key: Field) -> pub HTLC_Public {
         storage.contracts_public.at(key).get_current_value()
     }
 }

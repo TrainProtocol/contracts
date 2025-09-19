@@ -2,14 +2,7 @@ import { AztecAddress, Fr, SponsoredFeePaymentMethod } from '@aztec/aztec.js';
 import { TrainContract } from './Train.ts';
 import { TokenContract } from '@aztec/noir-contracts.js/Token';
 import { deriveSigningKey } from '@aztec/stdlib/keys';
-import {
-  stringToUint8Array,
-  readData,
-  publicLogs,
-  getHTLCDetails,
-  simulateBlockPassing,
-  getPXEs,
-} from './utils.ts';
+import { readData, publicLogs, getHTLCDetails, getPXEs } from './utils.ts';
 import { getSponsoredFPCInstance } from './fpc.ts';
 import { getSchnorrAccount } from '@aztec/accounts/schnorr';
 
@@ -19,8 +12,8 @@ async function main(): Promise<void> {
   const paymentMethod = new SponsoredFeePaymentMethod(sponsoredFPC.address);
   const data = readData();
 
-  const solverSecretKey = Fr.fromString(data.solverSecretKey);
-  const solverSalt = Fr.fromString(data.solverSalt);
+  const solverSecretKey = Fr.fromString(data.userSecretKey);
+  const solverSalt = Fr.fromString(data.userSalt);
   const schnorrSolver = await getSchnorrAccount(
     pxe2,
     solverSecretKey,
@@ -61,16 +54,18 @@ async function main(): Promise<void> {
     'private balance of src_receiver:',
     await asset2.methods
       .balance_of_private(solverWallet.getAddress())
-      .simulate(),
+      .simulate({ from: solverWallet.getAddress() }),
   );
   console.log(
     'contract public:',
-    await asset.methods.balance_of_public(train.address).simulate(),
+    await asset.methods
+      .balance_of_public(train.address)
+      .simulate({ from: deployerWallet.getAddress() }),
   );
 
   const is_contract_initialized = await train.methods
     .is_contract_initialized(Id)
-    .simulate();
+    .simulate({ from: solverWallet.getAddress() });
 
   if (!is_contract_initialized) throw new Error('HTLC Does Not Exsist');
   const redeemTx = await train.methods
@@ -81,7 +76,7 @@ async function main(): Promise<void> {
       ownershipKeyHigh,
       ownershipKeyLow,
     )
-    .send({ fee: { paymentMethod } })
+    .send({ from: solverWallet.getAddress(), fee: { paymentMethod } })
     .wait({ timeout: 120000 });
 
   console.log('tx:', redeemTx);
@@ -89,22 +84,20 @@ async function main(): Promise<void> {
     'private balance of src_receiver:',
     await asset2.methods
       .balance_of_private(solverWallet.getAddress())
-      .simulate(),
+      .simulate({ from: solverWallet.getAddress() }),
   );
   console.log(
     'contract public:',
     await asset.methods
       .balance_of_public(AztecAddress.fromString(data.trainContractAddress))
-      .simulate(),
+      .simulate({ from: deployerWallet.getAddress() }),
   );
 
   await publicLogs(pxe2);
-  // await simulateBlockPassing(pxe3, asset, deployerWallet, 2);
-  // await getHTLCDetails(train, Id);
+  await getHTLCDetails(solverWallet.getAddress(), train, Id);
 }
 
 main().catch((err) => {
-  // console.error('Full error:', err);
   console.error('Stack:', err.stack);
   process.exit(1);
 });

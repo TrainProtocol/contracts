@@ -13,22 +13,18 @@ import {
   readData,
   generateId,
   publicLogs,
-  simulateBlockPassing,
-  getHTLCDetails,
   getPXEs,
+  getHTLCDetails,
 } from './utils.ts';
-import { CheatCodes } from '@aztec/aztec.js/testing';
 import { getSponsoredFPCInstance } from './fpc.ts';
 import { getSchnorrAccount } from '@aztec/accounts/schnorr';
 
 const TrainContractArtifact = TrainContract.artifact;
-const ethRpcUrl = 'http://localhost:8545';
 
 async function main(): Promise<void> {
   const [pxe1, pxe2, pxe3] = await getPXEs(['pxe1', 'pxe2', 'pxe3']);
   const sponseredFPC = await getSponsoredFPCInstance();
   const paymentMethod = new SponsoredFeePaymentMethod(sponseredFPC.address);
-  const cc = await CheatCodes.create([ethRpcUrl], pxe1);
   const data = readData();
   let userSecretKey = Fr.fromString(data.userSecretKey);
   let userSalt = Fr.fromString(data.userSalt);
@@ -54,7 +50,6 @@ async function main(): Promise<void> {
   console.log(`Using wallet: ${sender}`);
 
   const Id = generateId();
-  // const now = await cc.eth.timestamp();
   const now = Math.floor(new Date().getTime() / 1000);
   const timelock = now + 1100;
   const token = data.tokenAddress;
@@ -68,7 +63,7 @@ async function main(): Promise<void> {
       90,
       ' ',
     );
-    
+
   const randomness = generateId();
   const TokenContractArtifact = TokenContract.artifact;
   const asset = await Contract.at(
@@ -99,7 +94,7 @@ async function main(): Promise<void> {
     `private balance of sender ${senderWallet.getAddress()}: `,
     await asset.methods
       .balance_of_private(senderWallet.getAddress())
-      .simulate(),
+      .simulate({ from: senderWallet.getAddress() }),
   );
   const contract = await Contract.at(
     AztecAddress.fromString(data.trainContractAddress),
@@ -108,7 +103,7 @@ async function main(): Promise<void> {
   );
   const is_contract_initialized = await contract.methods
     .is_contract_initialized(Id)
-    .simulate();
+    .simulate({ from: senderWallet.getAddress() });
   if (is_contract_initialized) throw new Error('HTLC Exsists');
   const commitTx = await contract.methods
     .commit_private_user(
@@ -123,7 +118,11 @@ async function main(): Promise<void> {
       dst_address,
       randomness,
     )
-    .send({ authWitnesses: [witness], fee: { paymentMethod } })
+    .send({
+      from: senderWallet.getAddress(),
+      authWitnesses: [witness],
+      fee: { paymentMethod },
+    })
     .wait({ timeout: 120000 });
 
   console.log('tx : ', commitTx);
@@ -131,13 +130,12 @@ async function main(): Promise<void> {
     `private balance of sender ${senderWallet.getAddress()}: `,
     await asset.methods
       .balance_of_private(senderWallet.getAddress())
-      .simulate(),
+      .simulate({ from: senderWallet.getAddress() }),
   );
 
   await publicLogs(pxe1);
   updateData({ commitId: Id.toString() });
-  // await simulateBlockPassing(pxe3, assetMinter, deployerWallet, 2);
-  // await getHTLCDetails(contract, Id);
+  await getHTLCDetails(senderWallet.getAddress(), contract, Id);
 }
 
 main().catch((err: any) => {

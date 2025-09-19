@@ -5,7 +5,7 @@
 Run the setup script:
 
 ```bash
-node --no-warnings --loader ts-node/esm setup.ts
+npx tsx setup.ts
 ```
 
 * Deploys PXE1 (user), PXE2 (solver), and PXE3 (deployer)
@@ -19,7 +19,7 @@ node --no-warnings --loader ts-node/esm setup.ts
 Deploy the TRAIN Protocol contract:
 
 ```bash
-node --no-warnings --loader ts-node/esm deploy.ts
+npx tsx deploy.ts
 ```
 
 * Deploys the TRAIN Protocol contract
@@ -32,7 +32,7 @@ node --no-warnings --loader ts-node/esm deploy.ts
 ### User: Commit Funds
 
 ```bash
-node --no-warnings --loader ts-node/esm commit.ts
+npx tsx commit.ts
 ```
 
 * Wallet: Uses PXE1 by default
@@ -48,7 +48,7 @@ node --no-warnings --loader ts-node/esm commit.ts
 ### User: Add Locks
 
 ```bash
-node --no-warnings --loader ts-node/esm addLock.ts
+npx tsx addLock.ts
 ```
 
 * Attaches a **hashlock** and **timelock** to the existing commitment
@@ -59,7 +59,7 @@ node --no-warnings --loader ts-node/esm addLock.ts
 ### Solver: Redeem Funds for User
 
 ```bash
-node --no-warnings --loader ts-node/esm redeem.ts
+npx tsx redeem.ts
 ```
 
 * Calls the TRAIN Protocol’s redeem function on Aztec for the user to receive funds
@@ -74,7 +74,7 @@ node --no-warnings --loader ts-node/esm redeem.ts
 ### Refund: Expired Funds
 
 ```bash
-node --no-warnings --loader ts-node/esm refund.ts
+npx tsx refund.ts
 ```
 
 * At any time (after timelock passes), refund a commitment by supplying the correct commitment ID
@@ -91,7 +91,7 @@ node --no-warnings --loader ts-node/esm refund.ts
 ### Solver: Lock Funds
 
 ```bash
-node --no-warnings --loader ts-node/esm lock.ts
+npx tsx lock.ts
 ```
 
 * In Aztec, solver locks funds after monitoring the source chain and taking data from logs
@@ -111,7 +111,7 @@ node --no-warnings --loader ts-node/esm lock.ts
 ### User: Redeems
 
 ```bash
-node --no-warnings --loader ts-node/esm redeem.ts
+npx tsx redeem.ts
 ```
 
 * User monitors the source chain until the solver’s secret (preimage) is revealed

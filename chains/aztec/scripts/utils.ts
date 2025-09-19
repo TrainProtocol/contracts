@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import http from 'http';
 import https from 'https';
 import {
+  AztecAddress,
   AztecNode,
   createAztecNodeClient,
   createPXEClient,
@@ -47,35 +48,43 @@ const DEFAULT_HOST = 'localhost';
 
 const dataFile = 'data.json';
 
-/**
- * Updates the JSON data file with new data.
- * @param newData - An object containing new data to merge.
- */
+const BIGINT_MARK = '__bigint__';
+
+const stringifyWithBigint = (v: unknown) =>
+  JSON.stringify(
+    v,
+    (_k, val) =>
+      typeof val === 'bigint'
+        ? { [BIGINT_MARK]: '0x' + val.toString(16) }
+        : val,
+    2,
+  );
+
+const parseWithBigint = (s: string) =>
+  JSON.parse(s, (_k, val) =>
+    val && typeof val === 'object' && BIGINT_MARK in val
+      ? BigInt(val[BIGINT_MARK])
+      : val,
+  );
+
 export function updateData(newData: Record<string, any>): void {
   let data: Record<string, any> = {};
   if (existsSync(dataFile)) {
     try {
-      data = JSON.parse(readFileSync(dataFile, 'utf8'));
-    } catch (error) {
-      console.error('Error reading data file, starting fresh.');
-    }
+      data = parseWithBigint(readFileSync(dataFile, 'utf8'));
+    } catch {}
   }
   Object.assign(data, newData);
-  writeFileSync(dataFile, JSON.stringify(data, null, 2));
+  writeFileSync(dataFile, stringifyWithBigint(data));
 }
 
-/**
- * Reads data from the JSON data file.
- * @returns The data object read from the file. Returns an empty object if reading fails.
- */
 export function readData(): Record<string, any> {
   if (!existsSync(dataFile)) {
     console.error(`File ${dataFile} does not exist.`);
     return {};
   }
   try {
-    const data = readFileSync(dataFile, 'utf8');
-    return JSON.parse(data);
+    return parseWithBigint(readFileSync(dataFile, 'utf8'));
   } catch (error) {
     console.error('Error reading data file:', error);
     return {};
@@ -170,10 +179,14 @@ export async function simulateBlockPassing(
  * @param contract - A contract instance with HTLC methods.
  * @param Id - The identifier for the HTLC.
  */
-export async function getHTLCDetails(contract: any, Id: any): Promise<void> {
+export async function getHTLCDetails(
+  addr: AztecAddress,
+  contract: any,
+  Id: any,
+): Promise<void> {
   console.log(
     `HTLC Details for Id ${Id}: `,
-    await contract.methods.get_htlc_public(Id).simulate(),
+    await contract.methods.get_htlc_public(Id).simulate({ from: addr }),
   );
 }
 

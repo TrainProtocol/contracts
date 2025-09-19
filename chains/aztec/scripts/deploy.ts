@@ -29,8 +29,8 @@ async function main(): Promise<void> {
 
   // Train protocol deployment on PXE3
   const trainContract = await TrainContract.deploy(deployerWallet)
-    .send({ fee: { paymentMethod } })
-    .deployed({timeout: 180000});
+    .send({ from: deployerWallet.getAddress(), fee: { paymentMethod } })
+    .deployed({ timeout: 180000 });
   const trainPartialAddress = await trainContract.partialAddress;
 
   //register contract in all PXEs

@@ -5,6 +5,6 @@ authors = [""]
 compiler_version = ">=0.25.0"
 
 [dependencies]
-aztec = { git="https://github.com/AztecProtocol/aztec-packages/", tag="v1.1.2", directory="noir-projects/aztec-nr/aztec" }
-token = { git="https://github.com/AztecProtocol/aztec-packages/", tag="v1.1.2", directory="noir-projects/noir-contracts/contracts/app/token_contract" }
-sha256 = { tag = "v0.1.2", git = "https://github.com/noir-lang/sha256" }
+aztec = { git="https://github.com/AztecProtocol/aztec-packages/", tag="v2.0.2", directory="noir-projects/aztec-nr/aztec" }
+token = { git="https://github.com/AztecProtocol/aztec-packages/", tag="v2.0.2", directory="noir-projects/noir-contracts/contracts/app/token_contract" }
+sha256 = { tag = "v0.2.1", git = "https://github.com/noir-lang/sha256" }

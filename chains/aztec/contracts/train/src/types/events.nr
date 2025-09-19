@@ -1,5 +1,5 @@
 use crate::lib::{bytes_to_u128_limbs, u128_limbs_to_bytes};
-use dep::aztec::prelude::AztecAddress;
+use dep::aztec::protocol_types::address::AztecAddress;
 use dep::aztec::protocol_types::traits::{Packable, Serialize};
 
 #[derive(Serialize)]
@@ -15,8 +15,9 @@ pub struct TokenCommitted {
     pub dst_address: str<90>,
 }
 
-impl Packable<12> for TokenCommitted {
-    fn pack(self) -> [Field; 12] {
+impl Packable for TokenCommitted {
+    let N: u32 = 12;
+    fn pack(self) -> [Field; Self::N] {
         let zero: Field = 0;
         let mut out = [zero; 12];
         out[0] = 0x7A3F2B1C;
@@ -64,7 +65,7 @@ impl Packable<12> for TokenCommitted {
         out
     }
 
-    fn unpack(fields: [Field; 12]) -> Self {
+    fn unpack(fields: [Field; Self::N]) -> Self {
         assert(false, "unpack not implemented");
         TokenCommitted {
             Id: fields[1] as Field,
@@ -87,8 +88,9 @@ pub struct TokenLockAdded {
     pub timelock: u64,
 }
 
-impl Packable<5> for TokenLockAdded {
-    fn pack(self) -> [Field; 5] {
+impl Packable for TokenLockAdded {
+    let N: u32 = 5;
+    fn pack(self) -> [Field; Self::N] {
         let mut out = [0 as Field; 5];
         out[0] = 0xC1D4E792;
         out[1] = self.Id;
@@ -100,7 +102,7 @@ impl Packable<5> for TokenLockAdded {
         out
     }
 
-    fn unpack(fields: [Field; 5]) -> Self {
+    fn unpack(fields: [Field; Self::N]) -> Self {
         let Id = fields[1];
         let hashlock = u128_limbs_to_bytes(fields[2] as u128, fields[3] as u128);
         let timelock = fields[4] as u64;
@@ -113,15 +115,16 @@ pub struct TokenRefunded {
     pub Id: Field,
 }
 
-impl Packable<2> for TokenRefunded {
-    fn pack(self) -> [Field; 2] {
+impl Packable for TokenRefunded {
+    let N: u32 = 2;
+    fn pack(self) -> [Field; Self::N] {
         let mut out = [0 as Field; 2];
         out[0] = 0x2D17C6B8;
         out[1] = self.Id;
         out
     }
 
-    fn unpack(fields: [Field; 2]) -> Self {
+    fn unpack(fields: [Field; Self::N]) -> Self {
         let Id = fields[1];
         TokenRefunded { Id }
     }
@@ -134,8 +137,9 @@ pub struct TokenRedeemed {
     pub secret: [u8; 32],
 }
 
-impl Packable<6> for TokenRedeemed {
-    fn pack(self) -> [Field; 6] {
+impl Packable for TokenRedeemed {
+    let N: u32 = 6;
+    fn pack(self) -> [Field; Self::N] {
         let mut out = [0 as Field; 6];
         out[0] = 0x4F8B9A3E;
         out[1] = self.Id;
@@ -151,7 +155,7 @@ impl Packable<6> for TokenRedeemed {
         out
     }
 
-    fn unpack(fields: [Field; 6]) -> Self {
+    fn unpack(fields: [Field; Self::N]) -> Self {
         let Id = fields[1];
         let hashlock = u128_limbs_to_bytes(fields[2] as u128, fields[3] as u128);
         let secret = u128_limbs_to_bytes(fields[4] as u128, fields[5] as u128);
@@ -173,8 +177,9 @@ pub struct TokenLockedFirst {
     pub dst_address: str<90>,
 }
 
-impl Packable<12> for TokenLockedFirst {
-    fn pack(self) -> [Field; 12] {
+impl Packable for TokenLockedFirst {
+    let N: u32 = 12;
+    fn pack(self) -> [Field; Self::N] {
         let zero: Field = 0;
         let mut out = [zero; 12];
         out[0] = 0x9E5A4F03;
@@ -222,7 +227,7 @@ impl Packable<12> for TokenLockedFirst {
         out
     }
 
-    fn unpack(fields: [Field; 12]) -> Self {
+    fn unpack(fields: [Field; Self::N]) -> Self {
         assert(false, "unpack not implemented");
         TokenLockedFirst {
             Id: fields[1] as Field,
@@ -245,8 +250,9 @@ pub struct TokenLockedSecond {
     pub ownership_hash: [u8; 32],
 }
 
-impl Packable<6> for TokenLockedSecond {
-    fn pack(self) -> [Field; 6] {
+impl Packable for TokenLockedSecond {
+    let N: u32 = 6;
+    fn pack(self) -> [Field; Self::N] {
         let mut out = [0 as Field; 6];
         out[0] = 0x9E5A4F03;
         out[1] = self.Id;
@@ -262,7 +268,7 @@ impl Packable<6> for TokenLockedSecond {
         out
     }
 
-    fn unpack(fields: [Field; 6]) -> Self {
+    fn unpack(fields: [Field; Self::N]) -> Self {
         assert(false, "unpack not implemented");
         TokenLockedSecond {
             Id: fields[1] as Field,

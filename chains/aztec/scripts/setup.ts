@@ -43,7 +43,7 @@ async function main(): Promise<void> {
 
   let tx = await schnorrAccount
     .deploy({ fee: { paymentMethod } })
-    .wait({ timeout: 120000 });
+    .wait({ timeout: 1200000 });
   let userWallet = await schnorrAccount.getWallet();
   let userAddress = userWallet.getAddress();
 
@@ -59,7 +59,7 @@ async function main(): Promise<void> {
 
   let tx2 = await schnorrAccount2
     .deploy({ fee: { paymentMethod } })
-    .wait({ timeout: 120000 });
+    .wait({ timeout: 1200000 });
   let solverWallet = await schnorrAccount2.getWallet();
   let solverAddress = solverWallet.getAddress();
 
@@ -75,7 +75,7 @@ async function main(): Promise<void> {
 
   let tx3 = await schnorrAccount3
     .deploy({ fee: { paymentMethod } })
-    .wait({ timeout: 120000 });
+    .wait({ timeout: 1200000 });
   let deployer = await schnorrAccount3.getWallet();
   let deployerAddress = deployer.getAddress();
 
@@ -86,7 +86,7 @@ async function main(): Promise<void> {
     'TRN',
     18,
   ])
-    .send({ fee: { paymentMethod } })
+    .send({ from: deployer.getAddress(), fee: { paymentMethod } })
     .deployed();
 
   await pxe1.registerContract({
@@ -113,18 +113,18 @@ async function main(): Promise<void> {
   );
   const mintTx = await contract3.methods
     .mint_to_public(deployer.getAddress(), amount)
-    .send({ fee: { paymentMethod } })
-    .wait({ timeout: 120000 });
+    .send({ from: deployer.getAddress(), fee: { paymentMethod } })
+    .wait({ timeout: 1200000 });
   console.log(`Public mint successful in block ${mintTx.blockNumber}`);
 
   await contract3.methods
     .transfer_to_private(userWallet.getAddress(), amount / 2n)
-    .send({ fee: { paymentMethod } })
-    .wait({ timeout: 120000 });
+    .send({ from: deployer.getAddress(), fee: { paymentMethod } })
+    .wait({ timeout: 1200000 });
   await contract3.methods
     .transfer_to_private(solverWallet.getAddress(), amount / 2n)
-    .send({ fee: { paymentMethod } })
-    .wait({ timeout: 120000 });
+    .send({ from: deployer.getAddress(), fee: { paymentMethod } })
+    .wait({ timeout: 1200000 });
 
   const contract1 = await Contract.at(
     AztecAddress.fromString(token.address.toString()),
@@ -141,14 +141,14 @@ async function main(): Promise<void> {
     'User private balance: ',
     await contract1.methods
       .balance_of_private(userWallet.getAddress())
-      .simulate(),
+      .simulate({ from: userWallet.getAddress() }),
   );
 
   console.log(
     'Solver private balance: ',
     await contract2.methods
       .balance_of_private(solverWallet.getAddress())
-      .simulate(),
+      .simulate({ from: solverWallet.getAddress() }),
   );
 
   updateData({

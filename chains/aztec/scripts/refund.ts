@@ -64,26 +64,26 @@ async function main(): Promise<void> {
     'private balance of sender: ',
     await asset.methods
       .balance_of_private(senderWallet.getAddress())
-      .simulate(),
+      .simulate({ from: senderWallet.getAddress() }),
   );
 
   console.log(
     'contract public: ',
     await asset.methods
       .balance_of_public(AztecAddress.fromString(data.trainContractAddress))
-      .simulate(),
+      .simulate({ from: senderWallet.getAddress() }),
   );
 
   const is_contract_initialized = await contract.methods
     .is_contract_initialized(Id)
-    .simulate();
+    .simulate({ from: senderWallet.getAddress() });
 
   if (!is_contract_initialized) {
     throw new Error('HTLC Does Not Exist');
   }
   const refundTx = await contract.methods
     .refund_private(Id)
-    .send({ fee: { paymentMethod } })
+    .send({ from: senderWallet.getAddress(), fee: { paymentMethod } })
     .wait();
 
   console.log('tx : ', refundTx);
@@ -92,13 +92,13 @@ async function main(): Promise<void> {
     'private balance of sender: ',
     await asset.methods
       .balance_of_private(senderWallet.getAddress())
-      .simulate(),
+      .simulate({ from: senderWallet.getAddress() }),
   );
   console.log(
     'contract public: ',
     await asset.methods
       .balance_of_public(AztecAddress.fromString(data.trainContractAddress))
-      .simulate(),
+      .simulate({ from: senderWallet.getAddress() }),
   );
 
   const assetMinter = await TokenContract.at(
@@ -106,8 +106,7 @@ async function main(): Promise<void> {
     deployerWallet,
   );
   await publicLogs(pxe1);
-  // await simulateBlockPassing(pxe3, assetMinter, deployerWallet, 3);
-  await getHTLCDetails(contract, Id);
+  await getHTLCDetails(senderWallet.getAddress(), contract, Id);
 }
 
 main().catch((err: any) => {

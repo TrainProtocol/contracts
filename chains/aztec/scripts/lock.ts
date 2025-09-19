@@ -13,22 +13,18 @@ import {
   generateId,
   publicLogs,
   getHTLCDetails,
-  simulateBlockPassing,
   getPXEs,
 } from './utils.ts';
-import { CheatCodes } from '@aztec/aztec.js/testing';
 import { getSchnorrAccount } from '@aztec/accounts/schnorr';
 import { deriveSigningKey } from '@aztec/stdlib/keys';
 import { getSponsoredFPCInstance } from './fpc.ts';
 
 const TrainContractArtifact = TrainContract.artifact;
-const ethRpcUrl = 'http://localhost:8545';
 
 async function main(): Promise<void> {
   const [pxe1, pxe2, pxe3] = await getPXEs(['pxe1', 'pxe2', 'pxe3']);
   const sponseredFPC = await getSponsoredFPCInstance();
   const paymentMethod = new SponsoredFeePaymentMethod(sponseredFPC.address);
-  const cc = await CheatCodes.create([ethRpcUrl], pxe2);
 
   const data = readData();
   let solverSecretKey = Fr.fromString(data.solverSecretKey);
@@ -64,9 +60,8 @@ async function main(): Promise<void> {
     ownershipHashHigh,
     ownershipHashLow,
   ] = generateSecretAndHashlock();
-  // const now = await cc.eth.timestamp();
   const now = Math.floor(new Date().getTime() / 1000);
-  const timelock = now + 2000;
+  const timelock = now + 1900;
   const token: string = data.tokenAddress;
   const randomness = generateId();
   const src_asset = 'USDC.e'.padStart(30, ' ');
@@ -102,13 +97,13 @@ async function main(): Promise<void> {
 
   const privateBalanceBefore = await asset.methods
     .balance_of_private(solverWallet.getAddress())
-    .simulate();
+    .simulate({ from: solverWallet.getAddress() });
   console.log('private balance of solver: ', privateBalanceBefore);
   console.log(
     'public balance of Train: ',
     await asset.methods
       .balance_of_public(AztecAddress.fromString(data.trainContractAddress))
-      .simulate(),
+      .simulate({ from: solverWallet.getAddress() }),
   );
 
   const contract = await Contract.at(
@@ -118,7 +113,7 @@ async function main(): Promise<void> {
   );
   const is_contract_initialized = await contract.methods
     .is_contract_initialized(Id)
-    .simulate();
+    .simulate({ from: solverWallet.getAddress() });
   if (is_contract_initialized) throw new Error('HTLC Exsists');
   const lockTx = await contract.methods
     .lock_private_solver(
@@ -136,17 +131,23 @@ async function main(): Promise<void> {
       dst_asset,
       dst_address,
     )
-    .send({ authWitnesses: [witness], fee: { paymentMethod } })
+    .send({
+      from: solverWallet.getAddress(),
+      authWitnesses: [witness],
+      fee: { paymentMethod },
+    })
     .wait({ timeout: 120000 });
   console.log('tx : ', lockTx);
 
   const privateBalanceAfter = await asset.methods
     .balance_of_private(solverWallet.getAddress())
-    .simulate();
+    .simulate({ from: solverWallet.getAddress() });
   console.log('private balance of solver: ', privateBalanceAfter);
   console.log(
     'public balance of Train: ',
-    await asset.methods.balance_of_public(data.trainContractAddress).simulate(),
+    await asset.methods
+      .balance_of_public(data.trainContractAddress)
+      .simulate({ from: solverWallet.getAddress() }),
   );
   publicLogs(pxe2);
 
@@ -159,12 +160,8 @@ async function main(): Promise<void> {
     ownershipHashHigh: ownershipHashHigh,
     ownershipHashLow: ownershipHashLow,
   });
-  const assetMinter = await TokenContract.at(
-    AztecAddress.fromString(data.tokenAddress),
-    deployerWallet,
-  );
-  // await simulateBlockPassing(pxe3, assetMinter, deployerWallet, 2);
-  // await getHTLCDetails(contract, Id);
+
+  await getHTLCDetails(solverWallet.getAddress(), contract, Id);
 }
 
 main().catch((err: any) => {
