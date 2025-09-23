@@ -65,7 +65,7 @@ class TestnetBitcoin extends BitcoinTrain {
     },
   };
 
-  const feeSat = Number(process.env.ADDLOCK_FEE_SAT || '341') >>> 0;
+  const feeSat = Number(process.env.ADDLOCK_FEE_SAT || '409') >>> 0;
 
   const all = await svc.getUtxos(senderAddr);
   const feeUtxos: { hash: string; index: number; value: number }[] = [];

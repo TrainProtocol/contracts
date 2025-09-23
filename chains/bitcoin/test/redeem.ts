@@ -32,11 +32,11 @@ type PrevHashlockShape = {
 };
 
 type LockMeta = {
-  lock: { txid: string; csvDelaySeconds: number };
-  contract: {
+  addLock: { txid: string; csvDelaySeconds: number };
+  newContract: {
     address: string;
     value: number;
-    vout: number;
+    contractVout: number;
     p2trScriptPubKeyHex: string;
     internalPubkeyHex: string;
     tapleaf_hashlock: { leafVersion: number; scriptHex: string; controlBlockHex: string };
@@ -73,29 +73,29 @@ function isHex(str: string) {
   if (secretHex.length !== 64) throw new Error('PAYMENT_SECRET_HEX (32 bytes hex) is required');
   const secret = Buffer.from(secretHex, 'hex');
 
-  const lockPath = join(__dirname, '../metadata/lock_meta.json');
-  if (!existsSync(lockPath)) throw new Error('lock_meta.json not found');
+  const lockPath = join(__dirname, '../metadata/addlock_meta.json');
+  if (!existsSync(lockPath)) throw new Error('addlock_meta.json not found');
 
   const j = JSON.parse(readFileSync(lockPath, 'utf8')) as LockMeta;
 
   if (
-    !j?.lock?.txid ||
-    !j?.contract?.p2trScriptPubKeyHex ||
-    !j?.contract?.tapleaf_hashlock?.scriptHex ||
-    !j?.contract?.tapleaf_hashlock?.controlBlockHex
+    !j?.addLock?.txid ||
+    !j?.newContract?.p2trScriptPubKeyHex ||
+    !j?.newContract?.tapleaf_hashlock?.scriptHex ||
+    !j?.newContract?.tapleaf_hashlock?.controlBlockHex
   ) {
-    throw new Error('lock_meta.json missing required fields');
+    throw new Error('addlock_meta.json missing required fields');
   }
 
   const prev: PrevHashlockShape = {
-    txid: String(j.lock.txid),
-    contractVout: Number(j.contract.vout),
-    value: Number(j.contract.value),
-    p2trScriptPubKeyHex: String(j.contract.p2trScriptPubKeyHex),
+    txid: String(j.addLock.txid),
+    contractVout: Number(j.newContract.contractVout),
+    value: Number(j.newContract.value),
+    p2trScriptPubKeyHex: String(j.newContract.p2trScriptPubKeyHex),
     tapleaf_hashlock: {
-      leafVersion: Number(j.contract.tapleaf_hashlock.leafVersion),
-      scriptHex: String(j.contract.tapleaf_hashlock.scriptHex),
-      controlBlockHex: String(j.contract.tapleaf_hashlock.controlBlockHex),
+      leafVersion: Number(j.newContract.tapleaf_hashlock.leafVersion),
+      scriptHex: String(j.newContract.tapleaf_hashlock.scriptHex),
+      controlBlockHex: String(j.newContract.tapleaf_hashlock.controlBlockHex),
     },
   };
 
@@ -118,7 +118,7 @@ function isHex(str: string) {
     : undefined;
   if (wantHash && wantHash.length === 32) {
     const got = createHash('sha256').update(secret).digest();
-    if (!got.equals(wantHash)) throw new Error('sha256(secret) != expected paymentHashlockHex in lock_meta.json');
+    if (!got.equals(wantHash)) throw new Error('sha256(secret) != expected paymentHashlockHex in addlock_meta.json');
   }
 
   const allUtxosRaw = await svc.getUtxos(receiverAddr);
@@ -140,7 +140,7 @@ function isHex(str: string) {
   }
   if (acc < feeSat) throw new Error(`insufficient fee inputs from ${receiverAddr}: have ${acc}, need ${feeSat}`);
 
-  const { txid, hex } = await svc.redeem(
+  const { txid, hex } = await svc.redeemSolver(
     {
       txid: prev.txid,
       contractVout: prev.contractVout,

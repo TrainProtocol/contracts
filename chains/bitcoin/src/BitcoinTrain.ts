@@ -611,7 +611,7 @@ export class BitcoinTrain extends Bitcoin {
     return { txid, hex };
   }
 
-  public async redeem(
+  public async redeemSolver(
     prev: {
       txid: string;
       contractVout: number;
@@ -683,19 +683,9 @@ export class BitcoinTrain extends Bitcoin {
       ],
     });
 
-    let totalFeeInput = 0;
-    for (const u of params.feeUtxos) {
-      psbt.addInput({
-        hash: u.hash,
-        index: u.index,
-        sequence: 0xfffffffd,
-        witnessUtxo: { script: recvOutScript, value: u.value },
-      });
-      totalFeeInput += u.value >>> 0;
-    }
-    if (totalFeeInput < feeSat) throw new Error(`Insufficient fee inputs: need ${feeSat}, have ${totalFeeInput}`);
+    if (prev.value < feeSat) throw new Error(`Insufficient fee inputs: need ${feeSat}, have ${prev.value}`);
 
-    psbt.addOutput({ address: fundsTo, value: prev.value });
+    psbt.addOutput({ address: fundsTo, value: prev.value - feeSat });
 
     {
       const MAX_OPRET = 79;
@@ -711,13 +701,7 @@ export class BitcoinTrain extends Bitcoin {
       psbt.addOutput({ script: opretScript, value: opretValue });
     }
 
-    const feeChange = totalFeeInput - feeSat;
-    if (feeChange >= DUST_CHANGE) {
-      psbt.addOutput({ address: changeTo, value: feeChange });
-    }
-
     psbt.signInput(0, params.receiver);
-    for (let i = 0; i < params.feeUtxos.length; i++) psbt.signInput(1 + i, params.receiver);
 
     {
       const t = psbt.data.inputs[0].tapScriptSig || [];
@@ -729,8 +713,6 @@ export class BitcoinTrain extends Bitcoin {
         throw new Error('missing receiver tapscript sig on hashlock input');
       }
     }
-
-    for (let i = 1; i < psbt.data.inputs.length; i++) psbt.finalizeInput(i);
 
     psbt.finalizeInput(0, () => {
       const sig = (psbt.data.inputs[0].tapScriptSig || [])[0]?.signature;
