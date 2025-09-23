@@ -45,7 +45,7 @@ class TestnetBitcoin extends BitcoinTrain {
   }
   console.log('Available UTXOs:', utxos);
 
-  const amount = Number(process.env.CONVERT_AMOUNT || '500');
+  const amount = Number(process.env.CONVERT_AMOUNT || '1000');
 
   try {
     const result = await svc.convertP2WPKHtoP2TR(sender, amount, { fee: 311 });

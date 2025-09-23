@@ -826,8 +826,11 @@ export class BitcoinTrain extends Bitcoin {
     const senderAddress = payments.p2wpkh({ pubkey: sender.publicKey, network: this.network }).address;
     if (!senderAddress) throw new Error('Failed to derive sender P2WPKH address');
 
-    const utxos = await this.getUtxos(senderAddress);
-    if (!utxos.length) throw new Error(`No UTXOs for ${senderAddress}`);
+    const senderP2tr = payments.p2tr({ internalPubkey: xSender, network: this.network });
+    if (!senderP2tr.address) throw new Error('Failed to derive sender P2TR address');
+
+    const utxos = await this.getUtxos(senderP2tr.address);
+    if (!utxos.length) throw new Error(`No UTXOs for ${senderP2tr.address}`);
 
     const needed = amount + fee;
     const selected: typeof utxos = [];
@@ -841,12 +844,13 @@ export class BitcoinTrain extends Bitcoin {
 
     const psbt = new Psbt({ network: this.network });
     psbt.setVersion(2);
-    const senderOut = payments.p2wpkh({ pubkey: sender.publicKey, network: this.network }).output!;
+
     for (const u of selected) {
       psbt.addInput({
         hash: u.hash,
         index: u.index,
-        witnessUtxo: { script: senderOut, value: u.value },
+        witnessUtxo: { script: senderP2tr.output!, value: u.value },
+        tapInternalKey: xSender,
         sequence: 0xfffffffd,
       });
     }
@@ -876,7 +880,8 @@ export class BitcoinTrain extends Bitcoin {
     const { script: opret, value: v } = this.createOpReturnOutput(payload77);
     psbt.addOutput({ script: opret, value: v });
 
-    for (let i = 0; i < selected.length; i++) psbt.signInput(i, sender);
+    const tweakedSigner = sender.tweak(taggedHash('TapTweak', xSender));
+    for (let i = 0; i < selected.length; i++) psbt.signInput(i, tweakedSigner);
     psbt.finalizeAllInputs();
 
     const tx = psbt.extractTransaction();
@@ -1000,7 +1005,7 @@ export class BitcoinTrain extends Bitcoin {
 
     let utxo = opts?.utxo;
     if (!utxo) {
-      const addrUtxos = await this.getUtxos(p2trKey.address); 
+      const addrUtxos = await this.getUtxos(p2trKey.address);
       if (!addrUtxos.length) throw new Error(`No P2TR UTXOs for ${p2trKey.address}`);
 
       const verified: typeof addrUtxos = [];
