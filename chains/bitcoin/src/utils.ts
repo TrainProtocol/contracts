@@ -6,16 +6,20 @@ function readU40BE(buf: Buffer, offset = 0): number {
   return Number(BigInt.asUintN(40, BigInt('0x' + buf.subarray(offset, offset + 5).toString('hex'))));
 }
 
-function isAsciiWord(b: Buffer) {
-  const s = b.toString('utf8').replace(/\x00+$/g, '');
-  return /^[ -~]*$/.test(s);
+export function isCsvTimeBased(seq: number): boolean {
+  return (seq & 0x00400000) !== 0;
+}
+export function sequenceToSeconds(seq: number): number {
+  if (!isCsvTimeBased(seq)) throw new Error('CSV sequence is not time-based');
+  const units = seq & 0xffff;
+  return units * 512;
 }
 
 export type OpReturnDecoded =
   | {
       kind: 'commitLog';
       commitId: `0x${string}`;
-      timelock: number;
+      timelockSequence: number;
       dstChain: string;
       dstAddress: `0x${string}`;
       dstAsset: string;
@@ -26,7 +30,7 @@ export type OpReturnDecoded =
       kind: 'lock';
       lockId: `0x${string}`;
       paymentHashlock: `0x${string}`;
-      delayCsvSeconds: number;
+      csvSequence: number;
       dstChain: string;
       dstAsset: string;
       _rawHex: string;
@@ -35,7 +39,7 @@ export type OpReturnDecoded =
       kind: 'addLock';
       commitId: `0x${string}`;
       paymentHashlock: `0x${string}`;
-      timelock: number;
+      timelockSequence: number;
       _rawHex: string;
     }
   | {
@@ -61,7 +65,7 @@ export function decodeCommitLogPayload(buf: Buffer): OpReturnDecoded {
   if (buf.length !== 78) return { kind: 'unknown', _rawHex: '0x' + buf.toString('hex'), note: 'not 78 bytes' };
   let o = 0;
   const commitId = buf.subarray(o, (o += 32));
-  const timelock = readU48BE(buf, o);
+  const timelockSequence = readU48BE(buf, o);
   o += 6;
   const trimUtf8 = (b: Buffer) => b.toString('utf8').replace(/\x00+$/g, '');
   const dstChain = trimUtf8(buf.subarray(o, (o += 4)));
@@ -71,7 +75,7 @@ export function decodeCommitLogPayload(buf: Buffer): OpReturnDecoded {
   return {
     kind: 'commitLog',
     commitId: ('0x' + commitId.toString('hex')) as `0x${string}`,
-    timelock,
+    timelockSequence,
     dstChain,
     dstAddress: dstAddress as `0x${string}`,
     dstAsset,
@@ -84,31 +88,30 @@ export function decodeLockPayload(buf: Buffer): OpReturnDecoded {
   if (buf.length !== 77) return { kind: 'unknown', _rawHex: '0x' + buf.toString('hex'), note: 'not 77 bytes' };
   const lockId = buf.subarray(0, 32);
   const hashlock = buf.subarray(32, 64);
-  const delayCsvSeconds = readU40BE(buf, 64);
+  const csvSequence = readU40BE(buf, 64);
   const dstChainB = buf.subarray(69, 73);
   const dstAssetB = buf.subarray(73, 77);
   return {
     kind: 'lock',
     lockId: ('0x' + lockId.toString('hex')) as `0x${string}`,
     paymentHashlock: ('0x' + hashlock.toString('hex')) as `0x${string}`,
-    delayCsvSeconds,
+    csvSequence,
     dstChain: dstChainB.toString('utf8').replace(/\x00+$/g, ''),
     dstAsset: dstAssetB.toString('utf8').replace(/\x00+$/g, ''),
     _rawHex: '0x' + buf.toString('hex'),
   };
 }
 
-
 export function decodeAddLockPayload(buf: Buffer): OpReturnDecoded {
   if (buf.length !== 70) return { kind: 'unknown', _rawHex: '0x' + buf.toString('hex'), note: 'not 70 bytes' };
   const commitId = buf.subarray(0, 32);
   const hashlock = buf.subarray(32, 64);
-  const timelock = readU48BE(buf, 64);
+  const timelockSequence = readU48BE(buf, 64);
   return {
     kind: 'addLock',
     commitId: ('0x' + commitId.toString('hex')) as `0x${string}`,
     paymentHashlock: ('0x' + hashlock.toString('hex')) as `0x${string}`,
-    timelock,
+    timelockSequence,
     _rawHex: '0x' + buf.toString('hex'),
   };
 }
@@ -139,19 +142,15 @@ export function decodeRedeemPayload(buf: Buffer): OpReturnDecoded {
   };
 }
 
-
 export function decodeAnyOpReturnPayload(hex: string): OpReturnDecoded {
   const buf = Buffer.from(hex.replace(/^0x/i, ''), 'hex');
-
   if (buf.length === 32) return decodeRefundPayload(buf);
   if (buf.length === 70) return decodeAddLockPayload(buf);
   if (buf.length === 77) return decodeLockPayload(buf);
   if (buf.length === 78) return decodeCommitLogPayload(buf);
   if (buf.length === 79) return decodeRedeemPayload(buf);
-
   return { kind: 'unknown', _rawHex: '0x' + buf.toString('hex') };
 }
-
 
 export function extractAllPushDatasFromOpReturn(scriptHex: string): Buffer[] {
   const b = Buffer.from(scriptHex, 'hex');
@@ -191,6 +190,6 @@ export function decodeCommitLogHex(hex: string) {
   if (dec.kind !== 'commitLog') {
     throw new Error(`invalid memo: expected commitLog(78B), got ${dec.kind} (${dec._rawHex.length / 2} bytes)`);
   }
-  const { commitId, timelock, dstChain, dstAddress, dstAsset, srcReceiver } = dec;
-  return { commitId, timelock, dstChain, dstAddress, dstAsset, srcReceiver };
+  const { commitId, timelockSequence, dstChain, dstAddress, dstAsset, srcReceiver } = dec;
+  return { commitId, timelockSequence, dstChain, dstAddress, dstAsset, srcReceiver };
 }

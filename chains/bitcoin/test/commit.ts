@@ -17,7 +17,7 @@ const bip32 = BIP32Factory(ecc);
 const SENDER_PATH = "m/84'/1'/0'/0/0";
 const RECEIVER_PATH = "m/84'/1'/0'/0/1";
 
-const CSV_TYPE_FLAG = 0x00400000; 
+const CSV_TYPE_FLAG = 0x00400000;
 const MIN_DELAY_SEC = 900;
 const CSV_UNIT_SEC = 512;
 
@@ -60,7 +60,7 @@ class TestnetBitcoin extends BitcoinTrain {
   const fee = 311;
 
   const requestedDelaySec = Math.max(Number(process.env.COMMIT_DELAY_SEC || '1200'), MIN_DELAY_SEC);
-  const csvUnits = Math.ceil(requestedDelaySec / CSV_UNIT_SEC); 
+  const csvUnits = Math.ceil(requestedDelaySec / CSV_UNIT_SEC);
   if (csvUnits > 0xffff) {
     throw new Error(`csvUnits overflow (>65535). requestedDelaySec=${requestedDelaySec}`);
   }
@@ -135,8 +135,8 @@ class TestnetBitcoin extends BitcoinTrain {
       typeFlagHex: '0x' + CSV_TYPE_FLAG.toString(16),
     },
 
-    timelockApproxUnix: timelock, 
-    requiredSequence: csvSequence, 
+    timelockApproxUnix: timelock,
+    requiredSequence: csvSequence,
     sighashType: 'DEFAULT',
 
     refundSignerPubkeyHex: Buffer.from(sender.publicKey).toString('hex'),

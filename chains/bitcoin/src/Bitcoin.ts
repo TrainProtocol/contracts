@@ -89,7 +89,7 @@ export default abstract class Bitcoin {
     };
   }
 
-  protected async postTransaction(txhex: string): Promise<any> {
+   async postTransaction(txhex: string): Promise<any> {
     const endpoint = `${this.baseUrl}/api/tx`;
     return new Promise((resolve, reject) => {
       axios
@@ -187,35 +187,6 @@ export default abstract class Bitcoin {
     }
     writeVector(witness);
     return buffer;
-  }
-
-  /**
-   * Generate HTLC Contract Script for Bitcoin
-   */
-  protected generateSwapWitnessScript(
-    receiverPublicKey: Buffer,
-    userRefundPublicKey: Buffer,
-    paymentHash: string,
-    timelock: number
-  ): Buffer {
-    return script.fromASM(
-      `
-      OP_SHA256
-      ${paymentHash}
-      OP_EQUAL
-      OP_IF
-        ${receiverPublicKey.toString('hex')}
-      OP_ELSE
-        ${script.number.encode(timelock).toString('hex')}
-        OP_CHECKLOCKTIMEVERIFY
-        OP_DROP
-        ${userRefundPublicKey.toString('hex')}
-      OP_ENDIF
-      OP_CHECKSIG
-    `
-        .trim()
-        .replace(/\s+/g, ' ')
-    );
   }
 
   protected createOpReturnOutput(data: string | Buffer) {

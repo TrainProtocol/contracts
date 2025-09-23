@@ -1,5 +1,11 @@
 import mempoolJS from '@mempool/mempool.js';
-import { decodeAnyOpReturnPayload, extractAllPushDatasFromOpReturn, type OpReturnDecoded } from '../src/utils';
+import {
+  decodeAnyOpReturnPayload,
+  extractAllPushDatasFromOpReturn,
+  type OpReturnDecoded,
+  isCsvTimeBased,
+  sequenceToSeconds,
+} from '../src/utils';
 
 const mempool = mempoolJS({ hostname: 'mempool.space', network: 'testnet' }).bitcoin;
 
@@ -31,7 +37,10 @@ async function decodeFromTxid(txid: string) {
           case 'commitLog':
             console.log('  kind       : commitLog');
             console.log(`  commitId   : ${d.commitId}`);
-            console.log(`  timelock   : ${d.timelock} (unix)`);
+            console.log(`  timelockSeq: ${d.timelockSequence}`);
+            if (isCsvTimeBased(d.timelockSequence)) {
+              console.log(`  timelockSec: ${sequenceToSeconds(d.timelockSequence)}`);
+            }
             console.log(`  dstChain   : ${d.dstChain}`);
             console.log(`  dstAddress : ${d.dstAddress}`);
             console.log(`  dstAsset   : ${d.dstAsset}`);
@@ -42,7 +51,10 @@ async function decodeFromTxid(txid: string) {
             console.log('  kind       : lock');
             console.log(`  lockId     : ${d.lockId}`);
             console.log(`  hashlock   : ${d.paymentHashlock}`);
-            console.log(`  csvDelay   : ${d.delayCsvSeconds} (sec)`);
+            console.log(`  csvSeq     : ${d.csvSequence}`);
+            if (isCsvTimeBased(d.csvSequence)) {
+              console.log(`  csvSec     : ${sequenceToSeconds(d.csvSequence)}`);
+            }
             console.log(`  dstChain   : ${d.dstChain}`);
             console.log(`  dstAsset   : ${d.dstAsset}`);
             break;
@@ -51,7 +63,10 @@ async function decodeFromTxid(txid: string) {
             console.log('  kind       : addLock');
             console.log(`  commitId   : ${d.commitId}`);
             console.log(`  hashlock   : ${d.paymentHashlock}`);
-            console.log(`  timelock   : ${d.timelock} (unix)`);
+            console.log(`  timelockSeq: ${d.timelockSequence}`);
+            if (isCsvTimeBased(d.timelockSequence)) {
+              console.log(`  timelockSec: ${sequenceToSeconds(d.timelockSequence)}`);
+            }
             break;
 
           case 'refund':
@@ -61,7 +76,7 @@ async function decodeFromTxid(txid: string) {
 
           case 'redeem':
             console.log('  kind       : redeem');
-            console.log(`  commitId16 : ${d.commitId}`);
+            console.log(`  commitId15 : ${d.commitId}`);
             console.log(`  hashlock   : ${d.paymentHashlock}`);
             console.log(`  secret     : ${d.secret}`);
             break;

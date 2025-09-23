@@ -1,13 +1,12 @@
 import Bitcoin, { ChainArg } from './Bitcoin';
-import { networks, opcodes, payments, Psbt, script } from 'bitcoinjs-lib';
-import { Taptree } from 'bitcoinjs-lib/src/types';
+import { opcodes, payments, Psbt, script } from 'bitcoinjs-lib';
 import { ECPairInterface, ECPairFactory } from 'ecpair';
 import { CommitLog } from './Core';
 import { createHash } from 'crypto';
 import * as varuint from 'varuint-bitcoin';
 import { initEccLib } from 'bitcoinjs-lib';
 import * as ecc from 'tiny-secp256k1';
-import { sha256 } from 'bitcoinjs-lib/src/crypto';
+import { taggedHash } from 'bitcoinjs-lib/src/crypto';
 
 initEccLib(ecc);
 
@@ -17,12 +16,20 @@ const DUST_P2WPKH = 331;
 const DUST_CHANGE = 311;
 const MIN_DELAY_SEC = 900;
 
+type Taptree = { output: Buffer; version: number } | [Taptree, Taptree];
+
 /**
- * TRAIN Protocol operations on the Bitcoin.
+ * TRAIN Protocol operations on the Bitcoin
  */
 export class BitcoinTrain extends Bitcoin {
   constructor(chain: ChainArg) {
     super(chain);
+  }
+
+  private packWitness(items: Buffer[]): Buffer {
+    const parts: Buffer[] = [varuint.encode(items.length)];
+    for (const w of items) parts.push(varuint.encode(w.length), w);
+    return Buffer.concat(parts);
   }
 
   public async commit(
@@ -109,6 +116,7 @@ export class BitcoinTrain extends Bitcoin {
     if (totalIn < needed) throw new Error(`Insufficient funds: need ${needed}, have ${totalIn}`);
 
     const psbt = new Psbt({ network: this.network });
+    psbt.setVersion(2);
     const senderOut = payments.p2wpkh({ pubkey: sender.publicKey, network: this.network }).output!;
     for (const u of selected) {
       psbt.addInput({
@@ -118,8 +126,7 @@ export class BitcoinTrain extends Bitcoin {
       });
     }
 
-    let change = totalIn - needed;
-    if (change < 0) throw new Error(`Insufficient funds: need ${needed}, have ${totalIn}`);
+    const change = totalIn - needed;
 
     const contractVout = 0;
     const contractValue = amount + (change > 0 && change < DUST_P2WPKH ? change : 0);
@@ -206,9 +213,9 @@ export class BitcoinTrain extends Bitcoin {
     if (!m.commitId || m.commitId.length !== 32) throw new Error('commitId must be 32 bytes');
 
     const tl6 = Buffer.alloc(6);
-    const t = BigInt(m.timelock);
-    if (t < 0n || t > 0xffffffffffffn) throw new Error('timelock out of uint48 range');
-    tl6.writeUIntBE(Number(t), 0, 6);
+    const seq = BigInt(m.timelock);
+    if (seq < 0n || seq > 0xffffffffffffn) throw new Error('timelock (sequence) out of uint48 range');
+    tl6.writeUIntBE(Number(seq), 0, 6);
 
     const dstChain = (() => {
       const b = Buffer.from(m.dstChain ?? '', 'utf8');
@@ -238,7 +245,6 @@ export class BitcoinTrain extends Bitcoin {
       const raw = m.srcReceiver ?? '';
       const b = Buffer.from(raw, 'utf8');
       if (b.length >= 12) return b.subarray(0, 12);
-
       const out = Buffer.alloc(12);
       b.copy(out, 0);
       return out;
@@ -285,7 +291,6 @@ export class BitcoinTrain extends Bitcoin {
   }> {
     if (params.delaySeconds < MIN_DELAY_SEC) throw new Error('Timelock must be ≥ 900 seconds');
     const csvDelay = this.csvSeconds(params.delaySeconds);
-
     const xSender = this.toXOnly(params.sender.publicKey);
     const xRecv = this.toXOnly(params.srcReceiverPubKey);
 
@@ -333,8 +338,9 @@ export class BitcoinTrain extends Bitcoin {
     const ctrlblock_ref = redeemRefund.witness![redeemRefund.witness!.length - 1];
 
     if (!params.commitId || params.commitId.length !== 32) throw new Error('commitId must be 32 bytes');
+
     const tl6 = Buffer.alloc(6);
-    tl6.writeUIntBE(csvDelay, 0, 6);
+    tl6.writeUIntBE(csvDelay >>> 0, 0, 6);
     const memoBuf = Buffer.concat([params.commitId, hashlock, tl6]);
     const memoHex = memoBuf.toString('hex');
 
@@ -348,6 +354,7 @@ export class BitcoinTrain extends Bitcoin {
     if (totalFeeInput < feeSat) throw new Error(`Insufficient fee inputs: need ${feeSat}, have ${totalFeeInput}`);
 
     const psbt = new Psbt({ network: this.network });
+    psbt.setVersion(2);
 
     psbt.addInput({
       hash: prev.txid,
@@ -395,8 +402,8 @@ export class BitcoinTrain extends Bitcoin {
           e.signature = e.signature.subarray(0, 64);
         }
       }
-      const xSender = this.toXOnly(params.sender.publicKey);
-      const hasSenderSig = t.some((e) => Buffer.from(e.pubkey).equals(xSender) && e.signature.length === 64);
+      const xSenderPk = this.toXOnly(params.sender.publicKey);
+      const hasSenderSig = t.some((e) => Buffer.from(e.pubkey).equals(xSenderPk) && e.signature.length === 64);
       if (!hasSenderSig) throw new Error('Taproot: sender did not produce a 64B Schnorr tapScriptSig on input 0');
     }
 
@@ -482,14 +489,8 @@ export class BitcoinTrain extends Bitcoin {
       psbt.finalizeInput(i);
     }
 
-    const packWitness = (items: Buffer[]) => {
-      const parts: Buffer[] = [varuint.encode(items.length)];
-      for (const w of items) parts.push(varuint.encode(w.length), w);
-      return Buffer.concat(parts);
-    };
-
     psbt.finalizeInput(0, () => {
-      const witness = packWitness([s2, s1, leafScript, controlBlock]);
+      const witness = this.packWitness([s2, s1, leafScript, controlBlock]);
       return { finalScriptWitness: witness };
     });
 
@@ -598,15 +599,10 @@ export class BitcoinTrain extends Bitcoin {
 
     for (let i = 1; i < psbt.data.inputs.length; i++) psbt.finalizeInput(i);
 
-    const packWitness = (items: Buffer[]) => {
-      const parts: Buffer[] = [varuint.encode(items.length)];
-      for (const w of items) parts.push(varuint.encode(w.length), w);
-      return Buffer.concat(parts);
-    };
     psbt.finalizeInput(0, () => {
       const sig = (psbt.data.inputs[0].tapScriptSig || [])[0]?.signature;
       if (!sig || sig.length !== 64) throw new Error('missing/invalid refund signature');
-      return { finalScriptWitness: packWitness([sig, leafScript, controlBlock]) };
+      return { finalScriptWitness: this.packWitness([sig, leafScript, controlBlock]) };
     });
 
     const tx = psbt.extractTransaction();
@@ -658,7 +654,7 @@ export class BitcoinTrain extends Bitcoin {
     const hashlockInLeaf = d[1] as Buffer;
     const xRecvInLeaf = d[3] as Buffer;
 
-    const h = sha256(params.secret);
+    const h = createHash('sha256').update(params.secret).digest();
     if (!h.equals(hashlockInLeaf)) throw new Error('secret does not match hashlock in leaf');
 
     const xRecvFromKey = this.toXOnly(params.receiver.publicKey);
@@ -710,6 +706,7 @@ export class BitcoinTrain extends Bitcoin {
       if (params.secret.length !== SECRET_SIZE) throw new Error('secret must be 32 bytes');
       const commitIdTrunc = params.commitId.subarray(0, commitIdSize);
       const payload = Buffer.concat([commitIdTrunc, hashlockInLeaf, params.secret]);
+      if (payload.length > 80) throw new Error('OP_RETURN payload too large');
       const { script: opretScript, value: opretValue } = this.createOpReturnOutput(payload);
       psbt.addOutput({ script: opretScript, value: opretValue });
     }
@@ -735,15 +732,10 @@ export class BitcoinTrain extends Bitcoin {
 
     for (let i = 1; i < psbt.data.inputs.length; i++) psbt.finalizeInput(i);
 
-    const packWitness = (items: Buffer[]) => {
-      const parts: Buffer[] = [varuint.encode(items.length)];
-      for (const w of items) parts.push(varuint.encode(w.length), w);
-      return Buffer.concat(parts);
-    };
     psbt.finalizeInput(0, () => {
       const sig = (psbt.data.inputs[0].tapScriptSig || [])[0]?.signature;
       if (!sig || sig.length !== 64) throw new Error('missing/invalid receiver signature');
-      return { finalScriptWitness: packWitness([sig, params.secret, leafScript, controlBlock]) };
+      return { finalScriptWitness: this.packWitness([sig, params.secret, leafScript, controlBlock]) };
     });
 
     const tx = psbt.extractTransaction();
@@ -788,11 +780,7 @@ export class BitcoinTrain extends Bitcoin {
     const xSender = this.toXOnly(sender.publicKey);
     const xRecv = this.toXOnly(srcReceiverPubKey);
 
-    const toCsvSequence = (secs: number) => {
-      const units = Math.ceil(secs / 512);
-      return (0x00400000 | (units & 0xffff)) >>> 0;
-    };
-    const csvSeq = toCsvSequence(csvDelaySeconds);
+    const csvSeq = this.csvSeconds(csvDelaySeconds);
 
     const leaf_hashlock = script.compile([
       opcodes.OP_SHA256,
@@ -863,19 +851,17 @@ export class BitcoinTrain extends Bitcoin {
       });
     }
 
-    let change = totalIn - needed;
+    const change = totalIn - needed;
     const contractVout = 0;
     const contractValue = amount + (change > 0 && change < DUST_P2WPKH ? change : 0);
     psbt.addOutput({ address: contractAddress, value: contractValue });
     if (change >= DUST_P2WPKH) psbt.addOutput({ address: senderAddress, value: change });
 
-    const csv5 = Buffer.alloc(5);
+    const seq5 = Buffer.alloc(5);
     {
-      const v = BigInt(csvDelaySeconds);
-      if (v < 0n || v > 0xffffffffffn) throw new Error('csv seconds out of uint40 range');
       const tmp6 = Buffer.alloc(6);
-      tmp6.writeUIntBE(Number(v), 0, 6);
-      tmp6.subarray(1).copy(csv5);
+      tmp6.writeUIntBE(csvSeq >>> 0, 0, 6);
+      tmp6.subarray(1).copy(seq5);
     }
     const packFixed = (s: string | undefined, len: number) => {
       const b = Buffer.from(s ?? '', 'utf8');
@@ -885,7 +871,7 @@ export class BitcoinTrain extends Bitcoin {
     };
     const dstChain4 = packFixed(opts?.dstChain, 4);
     const dstAsset4 = packFixed(opts?.dstAsset, 4);
-    const payload77 = Buffer.concat([opts.lockId, hashlock, csv5, dstChain4, dstAsset4]);
+    const payload77 = Buffer.concat([opts.lockId, hashlock, seq5, dstChain4, dstAsset4]);
 
     const { script: opret, value: v } = this.createOpReturnOutput(payload77);
     psbt.addOutput({ script: opret, value: v });
@@ -927,5 +913,135 @@ export class BitcoinTrain extends Bitcoin {
         controlBlockHex: ctrlblock_refund_hex,
       },
     };
+  }
+
+  public async convertP2WPKHtoP2TR(
+    sender: ECPairInterface,
+    amount: number,
+    opts?: { fee?: number }
+  ): Promise<{
+    txid: string;
+    contractAddress: string;
+    value: number;
+    contractVout: number;
+    internalPubkeyHex: string;
+    p2trScriptPubKeyHex: string;
+  }> {
+    const fee = opts?.fee ?? 311;
+    const senderAddress = payments.p2wpkh({ pubkey: sender.publicKey, network: this.network }).address!;
+    const utxos = await this.getUtxos(senderAddress);
+    if (!utxos.length) throw new Error(`No UTXOs for ${senderAddress}`);
+
+    const xOnly = this.toXOnly(sender.publicKey);
+    const p2tr = payments.p2tr({ internalPubkey: xOnly, network: this.network });
+    if (!p2tr.address || !p2tr.output) throw new Error('Failed to derive P2TR');
+    const target = amount >>> 0;
+
+    const selected: typeof utxos = [];
+    let totalIn = 0;
+    for (const u of utxos) {
+      selected.push(u);
+      totalIn += u.value >>> 0;
+      if (target > 0 && totalIn >= target + fee) break;
+    }
+    if (target > 0 && totalIn < target + fee)
+      throw new Error(`Insufficient funds: need ${target + fee}, have ${totalIn}`);
+
+    const psbt = new Psbt({ network: this.network });
+    psbt.setVersion(2);
+    const senderOut = payments.p2wpkh({ pubkey: sender.publicKey, network: this.network }).output!;
+    for (const u of selected) {
+      psbt.addInput({
+        hash: u.hash,
+        index: u.index,
+        witnessUtxo: { script: senderOut, value: u.value },
+        sequence: 0xfffffffd,
+      });
+    }
+
+    let sendValue = target > 0 ? target : Math.max(0, totalIn - fee);
+    let change = totalIn - sendValue - fee;
+    if (change > 0 && change < DUST_P2WPKH) {
+      sendValue += change;
+      change = 0;
+    }
+
+    const contractVout = 0;
+    psbt.addOutput({ address: p2tr.address, value: sendValue });
+    if (change >= DUST_P2WPKH) psbt.addOutput({ address: senderAddress, value: change });
+
+    for (let i = 0; i < selected.length; i++) psbt.signInput(i, sender);
+    psbt.finalizeAllInputs();
+
+    const tx = psbt.extractTransaction();
+    const txhex = tx.toHex();
+    const txid = await this.postTransaction(txhex);
+
+    return {
+      txid,
+      contractAddress: p2tr.address,
+      value: sendValue,
+      contractVout,
+      internalPubkeyHex: Buffer.from(xOnly).toString('hex'),
+      p2trScriptPubKeyHex: p2tr.output.toString('hex'),
+    };
+  }
+
+  public async convertP2TRtoP2WPKH(
+    sender: ECPairInterface,
+    opts?: { fee?: number; utxo?: { hash: string; index: number; value: number } }
+  ): Promise<{ txid: string; toAddress: string; value: number; vout: number }> {
+    const fee = opts?.fee ?? 311;
+
+    const xOnly = this.toXOnly(sender.publicKey);
+    const p2trKey = payments.p2tr({ internalPubkey: xOnly, network: this.network });
+    if (!p2trKey.address || !p2trKey.output) throw new Error('Failed to derive key-path P2TR');
+    const expectScriptHex = p2trKey.output.toString('hex');
+
+    let utxo = opts?.utxo;
+    if (!utxo) {
+      const addrUtxos = await this.getUtxos(p2trKey.address); 
+      if (!addrUtxos.length) throw new Error(`No P2TR UTXOs for ${p2trKey.address}`);
+
+      const verified: typeof addrUtxos = [];
+      for (const u of addrUtxos) {
+        const tx = await (this.mempool as any).transactions.getTx({ txid: u.hash });
+        const vout = tx.vout[u.index];
+        const spkHex: string = vout.scriptpubkey;
+        if (spkHex?.toLowerCase() === expectScriptHex) verified.push(u);
+      }
+      if (!verified.length) throw new Error('Found P2TR UTXOs for address, but none match our key-path scriptPubKey.');
+      utxo = verified.sort((a, b) => b.value - a.value)[0];
+    }
+
+    if (utxo.value <= fee) throw new Error(`UTXO too small: value=${utxo.value}, fee=${fee}`);
+
+    const to = payments.p2wpkh({ pubkey: sender.publicKey, network: this.network });
+    if (!to.address) throw new Error('Failed to derive destination P2WPKH');
+
+    const psbt = new Psbt({ network: this.network });
+    psbt.setVersion(2);
+
+    psbt.addInput({
+      hash: utxo.hash,
+      index: utxo.index,
+      witnessUtxo: { script: p2trKey.output, value: utxo.value },
+      tapInternalKey: xOnly,
+      sequence: 0xfffffffd,
+    });
+
+    const sendValue = utxo.value - fee;
+    const vout = 0;
+    psbt.addOutput({ address: to.address, value: sendValue });
+    const tweaked = sender.tweak(taggedHash('TapTweak', xOnly));
+
+    psbt.signInput(0, tweaked);
+    psbt.finalizeAllInputs();
+
+    const tx = psbt.extractTransaction();
+    const txhex = tx.toHex();
+    const txid = await this.postTransaction(txhex);
+
+    return { txid, toAddress: to.address, value: sendValue, vout };
   }
 }
