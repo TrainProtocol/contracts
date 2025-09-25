@@ -140,7 +140,7 @@ function isHex(str: string) {
   }
   if (acc < feeSat) throw new Error(`insufficient fee inputs from ${receiverAddr}: have ${acc}, need ${feeSat}`);
 
-  const { txid, hex } = await svc.redeemSolver(
+  const { txid, hex } = await svc.solverRedeem(
     {
       txid: prev.txid,
       contractVout: prev.contractVout,
@@ -160,12 +160,12 @@ function isHex(str: string) {
       receiverAddr,
       commitIdHex: '0x' + commitIdEnv.toString('hex'),
       secretHex: '0x' + secret.toString('hex'),
-      source: 'lock',
+      source: 'addLock',
     },
     createdAt: new Date().toISOString(),
     network: 'testnet',
   };
-  writeFileSync(join(outDir, 'redeem_meta.json'), JSON.stringify(out, null, 2));
+  writeFileSync(join(outDir, 'redeemSolver_meta.json'), JSON.stringify(out, null, 2));
   process.stdout.write(`redeem TXID: ${txid}\n`);
   process.exit(0);
 })().catch((e) => {

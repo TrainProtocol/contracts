@@ -10,7 +10,7 @@ initEccLib(ecc);
 
 const ECPair = ECPairFactory(ecc);
 const bip32 = BIP32Factory(ecc);
-const SENDER_PATH = "m/84'/1'/0'/0/0";
+const SENDER_PATH = "m/84'/1'/0'/0/1";
 
 class TestnetBitcoin extends BitcoinTrain {
   constructor() {

@@ -14,8 +14,8 @@ import { BitcoinTrain } from '../src/BitcoinTrain';
 const ECPair = ECPairFactory(ecc);
 const bip32 = BIP32Factory(ecc);
 
-const SENDER_PATH = process.env.SENDER_PATH || "m/84'/1'/0'/0/0";
-const RECEIVER_PATH = process.env.RECEIVER_PATH || "m/84'/1'/0'/0/1";
+const SENDER_PATH = process.env.SENDER_PATH || "m/84'/1'/0'/0/1";
+const RECEIVER_PATH = process.env.RECEIVER_PATH || "m/84'/1'/0'/0/0";
 
 class TestnetBitcoin extends BitcoinTrain {
   constructor() {
@@ -60,8 +60,8 @@ function parseHex32(env?: string | null): Buffer | undefined {
   const utxos = await svc.getUtxos(senderAddr);
   if (!utxos.length) throw new Error(`No UTXOs for ${senderAddr}`);
 
-  const amount = Number(process.env.LOCK_AMOUNT_SAT || '1000') >>> 0;
-  const fee = Number(process.env.LOCK_FEE_SAT || '313') >>> 0;
+  const amount = Number(process.env.LOCK_AMOUNT_SAT || '817') >>> 0;
+  const fee = Number(process.env.LOCK_FEE_SAT || '350') >>> 0;
   const csvDelaySeconds = Number(process.env.LOCK_DELAY_SEC || '1800') >>> 0;
 
   let lockId = parseHex32(process.env.LOCK_ID_HEX);
@@ -103,48 +103,7 @@ function parseHex32(env?: string | null): Buffer | undefined {
     dstAsset,
   });
 
-  const newContract = {
-    txid: res.txid,
-    contractVout: res.contractVout,
-    value: amount,
-    p2trScriptPubKeyHex: res.p2trScriptPubKeyHex,
-    tapleaf_hashlock: {
-      leafVersion: 0xc0,
-      scriptHex: res.leaf_hashlock_hex,
-      controlBlockHex: res.ctrlblock_hashlock_hex,
-    },
-    tapleaf_refund: {
-      leafVersion: 0xc0,
-      scriptHex: res.leaf_refund_hex,
-      controlBlockHex: res.ctrlblock_refund_hex,
-    },
-  };
-
-  const meta = {
-    lock: {
-      txid: res.txid,
-      csvDelaySeconds: res.csvDelaySeconds,
-    },
-    contract: newContract,
-    newContract,
-    params: {
-      lockIdHex: res.lockIdHex,
-      commitIdHex: res.lockIdHex,
-      paymentHashlockHex,
-      csvDelaySeconds,
-      amount,
-      fee,
-      senderAddr,
-      receiverAddr,
-      dstChain,
-      dstAsset,
-      ...(secretHexForRecord ? { paymentSecretHex: '0x' + secretHexForRecord } : {}),
-    },
-    createdAt: new Date().toISOString(),
-    network: 'testnet',
-  };
-
-  writeFileSync(join(outDir, 'lock_meta.json'), JSON.stringify(meta, null, 2));
+  writeFileSync(join(outDir, 'lock_meta.json'), JSON.stringify(res, null, 2));
   process.stdout.write(`lock TXID: ${res.txid}\n`);
   process.exit(0);
 })().catch((e) => {

@@ -1,5 +1,5 @@
 import Bitcoin, { ChainArg } from './Bitcoin';
-import { opcodes, payments, Psbt, script } from 'bitcoinjs-lib';
+import { opcodes, payments, Psbt, script, Signer, Transaction } from 'bitcoinjs-lib';
 import { ECPairInterface, ECPairFactory } from 'ecpair';
 import { CommitLog } from './Core';
 import { createHash } from 'crypto';
@@ -9,8 +9,8 @@ import * as ecc from 'tiny-secp256k1';
 import { taggedHash } from 'bitcoinjs-lib/src/crypto';
 
 initEccLib(ecc);
-
 const ECPair = ECPairFactory(ecc);
+
 const TAPLEAF_VER_TAPSCRIPT = 0xc0;
 const DUST_P2WPKH = 331;
 const DUST_CHANGE = 311;
@@ -611,7 +611,7 @@ export class BitcoinTrain extends Bitcoin {
     return { txid, hex };
   }
 
-  public async redeemSolver(
+  public async solverRedeem(
     prev: {
       txid: string;
       contractVout: number;
@@ -663,8 +663,6 @@ export class BitcoinTrain extends Bitcoin {
     const recvP2WPKH = payments.p2wpkh({ pubkey: params.receiver.publicKey, network: this.network });
     if (!recvP2WPKH.address || !recvP2WPKH.output) throw new Error('Could not derive receiver P2WPKH');
     const fundsTo = recvP2WPKH.address;
-    const changeTo = recvP2WPKH.address;
-    const recvOutScript = recvP2WPKH.output;
 
     const psbt = new Psbt({ network: this.network });
     psbt.setVersion(2);
@@ -752,6 +750,7 @@ export class BitcoinTrain extends Bitcoin {
     ctrlblock_refund_hex: string;
     tapleaf_hashlock: { leafVersion: number; scriptHex: string; controlBlockHex: string };
     tapleaf_refund: { leafVersion: number; scriptHex: string; controlBlockHex: string };
+    contractValue: number;
   }> {
     const fee = opts?.fee ?? 311;
     if (!opts?.lockId || opts.lockId.length !== 32) throw new Error('lockId must be 32 bytes');
@@ -876,7 +875,6 @@ export class BitcoinTrain extends Bitcoin {
     const leaf_refund_hex = leaf_refund.toString('hex');
     const ctrlblock_hashlock_hex = Buffer.from(ctrlblock_hash).toString('hex');
     const ctrlblock_refund_hex = Buffer.from(ctrlblock_ref).toString('hex');
-
     return {
       lockIdHex: '0x' + opts.lockId.toString('hex'),
       txid,
@@ -899,6 +897,7 @@ export class BitcoinTrain extends Bitcoin {
         scriptHex: leaf_refund_hex,
         controlBlockHex: ctrlblock_refund_hex,
       },
+      contractValue,
     };
   }
 
@@ -1030,5 +1029,162 @@ export class BitcoinTrain extends Bitcoin {
     const txid = await this.postTransaction(txhex);
 
     return { txid, toAddress: to.address, value: sendValue, vout };
+  }
+
+  public async userRedeemPrepare(
+    prev: {
+      txid: string;
+      contractVout: number;
+      value: number;
+      p2trScriptPubKeyHex: string;
+      tapleaf_hashlock: { leafVersion: number; scriptHex: string; controlBlockHex: string };
+    },
+    params: {
+      receiver: ECPairInterface;
+      secret: Buffer;
+      commitId: Buffer;
+    }
+  ): Promise<string> {
+    if (!params.commitId || params.commitId.length !== 32) throw new Error('commitId must be 32 bytes');
+    if (!params.secret || params.secret.length !== 32) throw new Error('secret must be 32 bytes');
+
+    const leafScript = Buffer.from(prev.tapleaf_hashlock.scriptHex, 'hex');
+    const controlBlock = Buffer.from(prev.tapleaf_hashlock.controlBlockHex, 'hex');
+    const d = script.decompile(leafScript) || [];
+
+    if (
+      !(
+        d.length === 5 &&
+        d[0] === opcodes.OP_SHA256 &&
+        Buffer.isBuffer(d[1]) &&
+        (d[1] as Buffer).length === 32 &&
+        d[2] === opcodes.OP_EQUALVERIFY &&
+        Buffer.isBuffer(d[3]) &&
+        (d[3] as Buffer).length === 32 &&
+        d[4] === opcodes.OP_CHECKSIG
+      )
+    )
+      throw new Error('hashlock leaf shape mismatch');
+
+    const hashlockConst = d[1] as Buffer;
+    const xRecvConst = d[3] as Buffer;
+
+    const secretHash = createHash('sha256').update(params.secret).digest();
+    if (!secretHash.equals(hashlockConst)) throw new Error('secret mismatch in leaf');
+
+    const xRecvFromKey = this.toXOnly(params.receiver.publicKey);
+    if (!xRecvFromKey.equals(xRecvConst)) throw new Error('receiver mismatch in leaf');
+
+    const recvP2WPKH = payments.p2wpkh({ pubkey: params.receiver.publicKey, network: this.network });
+    if (!recvP2WPKH.address) throw new Error('Could not derive receiver address');
+
+    const psbt = new Psbt({ network: this.network });
+    psbt.setVersion(2);
+
+    const USER_SIGHASH = Transaction.SIGHASH_SINGLE | Transaction.SIGHASH_ANYONECANPAY;
+
+    psbt.addInput({
+      hash: prev.txid,
+      index: prev.contractVout,
+      sequence: 0xfffffffd,
+      witnessUtxo: { script: Buffer.from(prev.p2trScriptPubKeyHex, 'hex'), value: prev.value >>> 0 },
+      tapLeafScript: [{ leafVersion: prev.tapleaf_hashlock.leafVersion, script: leafScript, controlBlock }],
+      sighashType: USER_SIGHASH,
+    });
+
+    psbt.addOutput({ address: recvP2WPKH.address, value: prev.value >>> 0 });
+
+    const MAX_OPRET_BYTES = 79;
+    const commitIdTrunc = params.commitId.subarray(0, MAX_OPRET_BYTES - 64);
+    const opretPayload = Buffer.concat([commitIdTrunc, hashlockConst, params.secret]);
+    if (opretPayload.length > 80) throw new Error('OP_RETURN payload too large');
+    {
+      const { script: opretScript, value: opretValue } = this.createOpReturnOutput(opretPayload);
+      psbt.addOutput({ script: opretScript, value: opretValue });
+    }
+
+    const tapLeafHash = taggedHash(
+      'TapLeaf',
+      Buffer.concat([Buffer.from([prev.tapleaf_hashlock.leafVersion]), varuint.encode(leafScript.length), leafScript])
+    );
+    psbt.signTaprootInput(0, params.receiver, tapLeafHash, [USER_SIGHASH]);
+
+    const t = psbt.data.inputs[0].tapScriptSig || [];
+    const hasRecvSig = t.some(
+      (e) => Buffer.from(e.pubkey).equals(xRecvFromKey) && (e.signature.length === 64 || e.signature.length === 65)
+    );
+    if (!hasRecvSig) throw new Error('missing/invalid user tapscript signature on input 0');
+
+    return psbt.toBase64();
+  }
+
+  public async userRedeemComplete(
+    psbtBase64: string,
+    solver: ECPairInterface,
+    feeSat: number,
+    secret: Buffer
+  ): Promise<{ txid: string; hex: string }> {
+    const fee = feeSat >>> 0;
+    if (!Number.isFinite(fee) || fee <= 0) throw new Error('feeSat must be > 0');
+    if (!secret || secret.length !== 32) throw new Error('secret must be 32 bytes');
+
+    const psbt = Psbt.fromBase64(psbtBase64, { network: this.network });
+    if (psbt.data.inputs.length === 0) throw new Error('PSBT has no inputs');
+
+    const out0 = psbt.txOutputs[0];
+    const out0Snap = { value: out0.value, script: Buffer.from(out0.script) };
+
+    const xSol = this.toXOnly(solver.publicKey);
+    const p2trSol = payments.p2tr({ internalPubkey: xSol, network: this.network });
+    if (!p2trSol.address || !p2trSol.output) throw new Error('Could not derive solver P2TR address');
+
+    const utxos = await this.getUtxos(p2trSol.address);
+    if (!utxos.length) throw new Error(`solver has no P2TR utxos to cover fee at ${p2trSol.address}`);
+
+    let totalFeeInput = 0;
+    const startIdx = psbt.data.inputs.length;
+    for (const u of utxos.sort((a, b) => b.value - a.value)) {
+      psbt.addInput({
+        hash: u.hash,
+        index: u.index,
+        witnessUtxo: { script: p2trSol.output, value: u.value >>> 0 },
+        tapInternalKey: xSol,
+        sequence: 0xfffffffd,
+      });
+      totalFeeInput += u.value >>> 0;
+      if (totalFeeInput >= fee) break;
+    }
+    if (totalFeeInput < fee) throw new Error(`insufficient solver fee inputs: need ${fee}, have ${totalFeeInput}`);
+
+    const DUST_CHANGE = 546;
+    const change = totalFeeInput - fee;
+    if (change >= DUST_CHANGE) psbt.addOutput({ address: p2trSol.address, value: change });
+
+    const out0Now = psbt.txOutputs[0];
+    if (out0Now.value !== out0Snap.value || !out0Now.script.equals(out0Snap.script)) {
+      throw new Error('Output 0 mutated; breaks SIGHASH_SINGLE');
+    }
+
+    const tweakedSolver = solver.tweak(taggedHash('TapTweak', xSol));
+    for (let i = startIdx; i < psbt.data.inputs.length; i++) psbt.signInput(i, tweakedSolver);
+    for (let i = startIdx; i < psbt.data.inputs.length; i++) psbt.finalizeInput(i);
+
+    psbt.finalizeInput(0, () => {
+      const in0 = psbt.data.inputs[0];
+      const leafScript = in0.tapLeafScript?.[0]?.script;
+      const controlBlock = in0.tapLeafScript?.[0]?.controlBlock;
+      if (!leafScript || !controlBlock) throw new Error('missing leafScript/controlBlock on input 0');
+
+      const tss = in0.tapScriptSig || [];
+      const sig = tss[0]?.signature;
+      if (!sig || (sig.length !== 64 && sig.length !== 65)) throw new Error('missing/invalid user tapscript signature');
+
+      return { finalScriptWitness: this.packWitness([sig, secret, leafScript, controlBlock]) };
+    });
+
+    const tx = psbt.extractTransaction();
+    const hex = tx.toHex();
+    const txid = await this.postTransaction(hex);
+    return { txid, hex };
   }
 }

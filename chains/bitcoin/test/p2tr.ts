@@ -11,7 +11,7 @@ initEccLib(ecc);
 const ECPair = ECPairFactory(ecc);
 const bip32 = BIP32Factory(ecc);
 
-const SENDER_PATH = "m/84'/1'/0'/0/0";
+const SENDER_PATH = "m/84'/1'/0'/0/1";
 
 class TestnetBitcoin extends BitcoinTrain {
   constructor() {
@@ -45,10 +45,10 @@ class TestnetBitcoin extends BitcoinTrain {
   }
   console.log('Available UTXOs:', utxos);
 
-  const amount = Number(process.env.CONVERT_AMOUNT || '1000');
+  const amount = Number(process.env.CONVERT_AMOUNT || '1500');
 
   try {
-    const result = await svc.convertP2WPKHtoP2TR(sender, amount, { fee: 311 });
+    const result = await svc.convertP2WPKHtoP2TR(sender, amount, { fee: 440 });
     console.log('Conversion successful!');
     console.log('TXID:', result.txid);
     console.log('P2TR address:', result.contractAddress);

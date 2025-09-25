@@ -56,17 +56,19 @@ export default abstract class Bitcoin {
       this.network = networks.testnet;
       this.mempool = makeTestnet4Adapter();
       // this.baseUrl = 'https://mempool.space/testnet4';
-      this.baseUrl = 'https://bitcoin-testnet-rpc.publicnode.com';
+      this.baseUrl = 'https://blockstream.info/testnet4';
       return;
     }
 
     this.network = networkOrChain;
     const networkStr = networkOrChain === networks.bitcoin ? 'bitcoin' : 'testnet';
     this.mempool = mempoolJS({
-      hostname: 'mempool.space',
+      // hostname: 'mempool.space',
+      hostname: 'blockstream.info',
       network: networkStr,
     }).bitcoin;
-    this.baseUrl = `https://mempool.space/${networkStr}`;
+    // this.baseUrl = `https://mempool.space/${networkStr}`;
+    this.baseUrl = `https://blockstream.info${networkStr === 'bitcoin' ? '' : '/testnet'}`;
   }
 
   public createHashPair(): HashPair {
@@ -89,7 +91,7 @@ export default abstract class Bitcoin {
     };
   }
 
-   async postTransaction(txhex: string): Promise<any> {
+  async postTransaction(txhex: string): Promise<any> {
     const endpoint = `${this.baseUrl}/api/tx`;
     return new Promise((resolve, reject) => {
       axios
