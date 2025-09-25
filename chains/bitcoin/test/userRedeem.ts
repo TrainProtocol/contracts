@@ -78,7 +78,6 @@ function parseHex32(s?: string | null) {
       controlBlockHex: String(j.tapleaf_hashlock.controlBlockHex),
     },
   };
-console.log("yoooooooooooooooo: ",prev.txid)
   if (!/^[0-9a-fA-F]{64}$/.test(prev.txid)) throw new Error('prev.txid must be 32B hex');
   if (!Number.isInteger(prev.contractVout) || prev.contractVout < 0) throw new Error('prev.contractVout invalid');
   if (!Number.isInteger(prev.value) || prev.value <= 0) throw new Error('prev.value invalid');
@@ -140,7 +139,7 @@ console.log("yoooooooooooooooo: ",prev.txid)
   const { txid, hex } = await svc.userRedeemComplete(psbt, solver, feeSat, secret);
 
   writeFileSync(
-    join(outDir, 'redeem_user_two_part_meta.json'),
+    join(outDir, 'redeem_user_complete_meta.json'),
     JSON.stringify(
       {
         redeem: { txid, hex },

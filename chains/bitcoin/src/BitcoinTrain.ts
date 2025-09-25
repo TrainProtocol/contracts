@@ -1,5 +1,5 @@
 import Bitcoin, { ChainArg } from './Bitcoin';
-import { opcodes, payments, Psbt, script, Signer, Transaction } from 'bitcoinjs-lib';
+import { address, opcodes, payments, Psbt, script, Signer, Transaction } from 'bitcoinjs-lib';
 import { ECPairInterface, ECPairFactory } from 'ecpair';
 import { CommitLog } from './Core';
 import { createHash } from 'crypto';
@@ -513,6 +513,8 @@ export class BitcoinTrain extends Bitcoin {
       commitId: Buffer;
       feeSat: number;
       feeUtxos: { hash: string; index: number; value: number }[];
+      refundAddress?: string;
+      refundScriptHex?: string;
     }
   ): Promise<{ txid: string; hex: string }> {
     if (!params.commitId || params.commitId.length !== 32) throw new Error('commitId must be 32 bytes');
@@ -546,9 +548,12 @@ export class BitcoinTrain extends Bitcoin {
 
     const senderP2WPKH = payments.p2wpkh({ pubkey: params.sender.publicKey, network: this.network });
     if (!senderP2WPKH.address || !senderP2WPKH.output) throw new Error('Could not derive sender P2WPKH');
-    const refundTo = senderP2WPKH.address;
     const senderOut = senderP2WPKH.output;
-
+    const refundScript = params.refundScriptHex
+      ? Buffer.from(params.refundScriptHex, 'hex')
+      : params.refundAddress
+        ? address.toOutputScript(params.refundAddress, this.network)
+        : senderOut;
     const psbt = new Psbt({ network: this.network });
     psbt.setVersion(2);
 
@@ -572,7 +577,7 @@ export class BitcoinTrain extends Bitcoin {
     }
     if (totalFeeInput < feeSat) throw new Error(`Insufficient fee inputs: need ${feeSat}, have ${totalFeeInput}`);
 
-    psbt.addOutput({ address: refundTo, value: prev.value });
+    psbt.addOutput({ script: refundScript, value: prev.value });
 
     {
       const { script: opretScript, value } = this.createOpReturnOutput(params.commitId);
@@ -581,7 +586,7 @@ export class BitcoinTrain extends Bitcoin {
 
     const feeChange = totalFeeInput - feeSat;
     if (feeChange >= DUST_CHANGE) {
-      psbt.addOutput({ address: refundTo, value: feeChange });
+      psbt.addOutput({ script: refundScript, value: feeChange });
     }
 
     psbt.signInput(0, params.sender);

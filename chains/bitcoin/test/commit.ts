@@ -59,7 +59,7 @@ class TestnetBitcoin extends BitcoinTrain {
   const amount = 1000;
   const fee = 311;
 
-  const requestedDelaySec = Math.max(Number(process.env.COMMIT_DELAY_SEC || '1200'), MIN_DELAY_SEC);
+  const requestedDelaySec = Math.max(Number(process.env.COMMIT_DELAY_SEC || '901'), MIN_DELAY_SEC);
   const csvUnits = Math.ceil(requestedDelaySec / CSV_UNIT_SEC);
   if (csvUnits > 0xffff) {
     throw new Error(`csvUnits overflow (>65535). requestedDelaySec=${requestedDelaySec}`);
