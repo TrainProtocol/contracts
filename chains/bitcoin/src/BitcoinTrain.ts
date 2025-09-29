@@ -368,6 +368,7 @@ export class BitcoinTrain extends Bitcoin {
           controlBlock: Buffer.from(prev.tapleaf_multisig.controlBlockHex, 'hex'),
         },
       ],
+      sighashType: Transaction.SIGHASH_SINGLE | Transaction.SIGHASH_ANYONECANPAY,
     });
 
     const senderP2WPKH = payments.p2wpkh({ pubkey: params.sender.publicKey, network: this.network });
@@ -392,7 +393,7 @@ export class BitcoinTrain extends Bitcoin {
       psbt.addOutput({ address: senderAddr, value: change });
     }
 
-    psbt.signInput(0, params.sender);
+    psbt.signInput(0, params.sender, [Transaction.SIGHASH_SINGLE | Transaction.SIGHASH_ANYONECANPAY]);
     for (let i = 0; i < feeUtxos.length; i++) psbt.signInput(1 + i, params.sender);
 
     {
@@ -403,8 +404,10 @@ export class BitcoinTrain extends Bitcoin {
         }
       }
       const xSenderPk = this.toXOnly(params.sender.publicKey);
-      const hasSenderSig = t.some((e) => Buffer.from(e.pubkey).equals(xSenderPk) && e.signature.length === 64);
-      if (!hasSenderSig) throw new Error('Taproot: sender did not produce a 64B Schnorr tapScriptSig on input 0');
+      const hasSenderSig = t.some(
+        (e) => Buffer.from(e.pubkey).equals(xSenderPk) && (e.signature.length === 64 || e.signature.length === 65)
+      );
+      if (!hasSenderSig) throw new Error('Taproot: sender did not produce a 64/65B Schnorr tapScriptSig on input 0');
     }
 
     return {
@@ -443,7 +446,7 @@ export class BitcoinTrain extends Bitcoin {
       throw new Error('Input 0 missing tapLeafScript');
     }
 
-    psbt.signInput(0, receiver);
+    psbt.signInput(0, receiver, [Transaction.SIGHASH_SINGLE | Transaction.SIGHASH_ANYONECANPAY]);
 
     {
       const t = psbt.data.inputs[0].tapScriptSig || [];
@@ -451,7 +454,7 @@ export class BitcoinTrain extends Bitcoin {
         if (e.signature.length === 65 && e.signature[64] === 0x00) {
           e.signature = e.signature.subarray(0, 64);
         }
-        if (e.signature.length !== 64) {
+        if (e.signature.length !== 64 && e.signature.length !== 65) {
           throw new Error(`Unexpected Schnorr length ${e.signature.length} on tapscript sig`);
         }
       }
@@ -481,8 +484,10 @@ export class BitcoinTrain extends Bitcoin {
         `Missing schnorr sigs for leaf pubkeys. Need ${pk1.toString('hex')}, ${pk2.toString('hex')}. Have ${have.join(',')}`
       );
     }
-    if (s1.length !== 64 || s2.length !== 64) {
-      throw new Error('Schnorr signatures must be 64 bytes after trimming');
+
+    const okLen = (sig: Buffer) => sig.length === 64 || sig.length === 65;
+    if (!okLen(s1) || !okLen(s2)) {
+      throw new Error('Taproot schnorr must be 64B (DEFAULT) or 65B (hashtype)');
     }
 
     for (let i = 1; i < psbt.data.inputs.length; i++) {
