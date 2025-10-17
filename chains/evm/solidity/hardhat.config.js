@@ -132,6 +132,11 @@ module.exports = {
       accounts: process.env.PRIV_KEY ? [process.env.PRIV_KEY] : [],
       chainId: 1946,
     },
+    moonbaseAlphaTestnet: {
+      url: 'https://moonbase.public.curie.radiumblock.co/http',
+      accounts: process.env.PRIV_KEY_MOONBASE ? [process.env.PRIV_KEY_MOONBASE] : [],
+      chainId: 1287,
+    },
     hardhat: {
       zksync: true,
     },
@@ -158,8 +163,17 @@ module.exports = {
       zkSyncEraSepolia: process.env.zk_sync || '',
       zkSyncEraMainnet: process.env.zk_sync || '',
       linea_mainnet: process.env.linea_mainnet || '',
+      moonbaseAlphaTestnet: process.env.moonbase || '',
     },
     customChains: [
+      {
+        network: 'moonbaseAlphaTestnet',
+        chainId: 1287,
+        urls: {
+          apiURL: 'https://api.etherscan.io/v2/api?chainid=1287',
+          browserURL: 'https://moonbase.moonscan.io/',
+        },
+      },
       {
         network: 'binanceMainnet',
         chainId: 56,
