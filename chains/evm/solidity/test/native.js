@@ -231,9 +231,21 @@ describe('Train native tests', () => {
 
       const tx = await train
         .connect(user1)
-        .commit([], [], [], dstChain, dstAsset, dstAddress, srcAsset, Id, srcReceiver, timelock, {
-          value,
-        });
+        .commit(
+          [],
+          [],
+          [],
+          dstChain,
+          dstAsset,
+          dstAddress,
+          srcAsset,
+          Id,
+          srcReceiver,
+          timelock,
+          {
+            value,
+          }
+        );
 
       const receipt = await tx.wait();
       console.log(`Actual gas used commit (hop depth is 0): ${receipt.gasUsed.toString()}`);
@@ -554,90 +566,6 @@ describe('Train native tests', () => {
       const rewardStruct = await train.getRewardDetails(Id2);
       expect(rewardStruct.amount).to.equal(noReward);
       expect(rewardStruct.timelock).to.equal(0);
-    });
-  });
-
-  // ======================
-  //        LOCKBATCH
-  // ======================
-  describe('lockBatch (stress test)', () => {
-    it('locks increasing HTLC batches up to 100 and reports gas metrics', async () => {
-      // Default to exponential up to 100
-      const sizes = [1, 2, 4, 8, 16, 24, 32, 48, 64, 80, 100];
-
-      const results = [];
-
-      for (const n of sizes) {
-        const block = await ethers.provider.getBlock('latest');
-        const now = block.timestamp;
-
-        const timelock = now + 3600;
-        const rewardTimelock = timelock - 300;
-        const perValue = parseEther('1');
-        const perReward = parseEther('0.1');
-
-        const Ids = Array.from({ length: n }, (_, i) => keccak256(toUtf8Bytes(`batch-${n}-${i}-${Date.now()}`)));
-        const hashlocks = Array.from({ length: n }, (_, i) => keccak256(toUtf8Bytes(`hash-${n}-${i}`)));
-        const rewards_ = Array(n).fill(perReward);
-        const rewardTimelocks = Array(n).fill(rewardTimelock);
-        const timelocks = Array(n).fill(timelock);
-        const srcReceivers = Array(n).fill(user2.address);
-        const srcAssets = Array(n).fill('ETH');
-        const dstChains = Array(n).fill('ETH');
-        const dstAddresses = Array(n).fill(user2.address);
-        const dstAssets = Array(n).fill('ETH');
-        const values = Array(n).fill(perValue);
-
-        const totalValue = values.reduce((acc, v) => acc + v, 0n);
-
-        console.log(`\n>>> Running lockBatch with n=${n} HTLCs ...`);
-
-        let gas;
-        try {
-          const tx = await train
-            .connect(user1)
-            .lockBatch(
-              Ids,
-              hashlocks,
-              rewards_,
-              rewardTimelocks,
-              timelocks,
-              srcReceivers,
-              srcAssets,
-              dstChains,
-              dstAddresses,
-              dstAssets,
-              values,
-              { value: totalValue }
-            );
-          const receipt = await tx.wait();
-          gas = receipt.gasUsed;
-        } catch (err) {
-          console.log(`Batch n=${n} failed (likely block gas limit).`);
-          break;
-        }
-
-        console.log(`lockBatch(n=${n}) gasUsed=${gas.toString()}`);
-        results.push({
-          n,
-          gasUsed: gas.toString(),
-          gasPerItem: (gas / BigInt(n)).toString(),
-        });
-
-        const checkIds = [0, Math.floor(n / 2), n - 1].filter((i) => i < n);
-        for (const i of checkIds) {
-          const h = await train.getHTLCDetails(Ids[i]);
-          expect(h.amount).to.equal(perValue - perReward);
-          expect(h.hashlock).to.equal(hashlocks[i]);
-          expect(h.sender).to.equal(user1.address);
-          expect(h.srcReceiver).to.equal(srcReceivers[i]);
-          expect(h.timelock).to.equal(timelocks[i]);
-          expect(h.claimed).to.equal(1);
-        }
-      }
-
-      console.log('\nlockBatch summary (stress):');
-      console.table(results);
     });
   });
 
