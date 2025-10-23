@@ -231,21 +231,9 @@ describe('Train native tests', () => {
 
       const tx = await train
         .connect(user1)
-        .commit(
-          [],
-          [],
-          [],
-          dstChain,
-          dstAsset,
-          dstAddress,
-          srcAsset,
-          Id,
-          srcReceiver,
-          timelock,
-          {
-            value,
-          }
-        );
+        .commit([], [], [], dstChain, dstAsset, dstAddress, srcAsset, Id, srcReceiver, timelock, {
+          value,
+        });
 
       const receipt = await tx.wait();
       console.log(`Actual gas used commit (hop depth is 0): ${receipt.gasUsed.toString()}`);
@@ -958,6 +946,91 @@ describe('Train native tests', () => {
 
       expect(balReceiverAfter - balReceiverBefore).to.equal(value - feesPaid);
       expect(balSenderAfter - balSenderBefore).to.equal(0n);
+    });
+  });
+  describe('rollover', () => {
+    it('rolls a refundable HTLC into a new one and reports gas', async () => {
+      const block = await ethers.provider.getBlock('latest');
+      const now = block.timestamp;
+      const oldId = keccak256(toUtf8Bytes('rollover-old'));
+      const newId = keccak256(toUtf8Bytes('rollover-new'));
+      const value = parseEther('1.2');
+      const oldTimelock = now + 1200;
+
+      await train
+        .connect(user1)
+        .commit(
+          hopChains,
+          hopAssets,
+          hopAddresses,
+          dstChain,
+          dstAsset,
+          dstAddress,
+          srcAsset,
+          oldId,
+          srcReceiver,
+          oldTimelock,
+          { value }
+        );
+
+      await ethers.provider.send('evm_setNextBlockTimestamp', [oldTimelock + 1]);
+      await ethers.provider.send('evm_mine');
+
+      const afterBlock = await ethers.provider.getBlock('latest');
+      const t = afterBlock.timestamp;
+      const newHashlock = keccak256(toUtf8Bytes('rollover-hash'));
+      const newAmount = parseEther('1.0');
+      const newReward = parseEther('0.1');
+      const newTimelock = t + 2000;
+      const newRewardTimelock = t + 1500;
+
+      const tx = await train
+        .connect(user1)
+        .rollover(
+          oldId,
+          newId,
+          newHashlock,
+          newAmount,
+          newReward,
+          newRewardTimelock,
+          newTimelock,
+          user2.address,
+          srcAsset,
+          dstChain,
+          dstAddress,
+          dstAsset,
+          { value: 0 }
+        );
+      const receipt = await tx.wait();
+      console.log(`Actual gas used rollover: ${receipt.gasUsed.toString()}`);
+
+      await expect(tx).to.emit(train, 'TokenRefunded').withArgs(oldId);
+      await expect(tx)
+        .to.emit(train, 'TokenLocked')
+        .withArgs(
+          newId,
+          newHashlock,
+          dstChain,
+          dstAddress,
+          dstAsset,
+          user1.address,
+          user2.address,
+          srcAsset,
+          newAmount,
+          newReward,
+          newRewardTimelock,
+          newTimelock
+        );
+
+      const oldH = await train.getHTLCDetails(oldId);
+      const newH = await train.getHTLCDetails(newId);
+      expect(oldH.claimed).to.equal(2);
+      expect(newH.amount).to.equal(newAmount);
+      expect(newH.hashlock).to.equal(newHashlock);
+      expect(newH.sender).to.equal(user1.address);
+      expect(newH.srcReceiver).to.equal(user2.address);
+      expect(newH.timelock).to.equal(newTimelock);
+      expect(newH.claimed).to.equal(1);
     });
   });
 });
