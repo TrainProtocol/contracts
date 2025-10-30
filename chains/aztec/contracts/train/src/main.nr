@@ -17,13 +17,13 @@ pub contract Train {
     use std::meta::derive;
 
     use aztec::macros::{
-        functions::{initializer, internal, private, public, utility, view},
+        functions::{external, initializer, internal, view},
         notes::note,
         storage::storage,
     };
 
     use dep::aztec::{
-        messages::logs::note::encode_and_encrypt_note,
+        messages::message_delivery::MessageDelivery,
         protocol_types::{address::AztecAddress, traits::{Deserialize, Packable, Serialize}},
         state_vars::{DelayedPublicMutable, map::Map, private_immutable::PrivateImmutable},
     };
@@ -57,7 +57,7 @@ pub contract Train {
         claimed: u8,
     }
 
-    #[public]
+    #[external("public")]
     #[initializer]
     fn constructor() {}
 
@@ -67,7 +67,7 @@ pub contract Train {
         contracts_public: Map<Field, DelayedPublicMutable<HTLC_Public, 180, Context>, Context>,
     }
 
-    #[private]
+    #[external("private")]
     fn commit_private_user(
         Id: Field,
         src_receiver: AztecAddress,
@@ -82,7 +82,7 @@ pub contract Train {
     ) {
         assert(amount > 0, "FundsNotSent");
 
-        // Safety: The contract intentionally exposes these parameters as public.
+        // Safety: The contract intentionally exposes these parameters as external("public").
         Train::at(context.this_address())
             .commit_public_user(
                 src_asset,
@@ -97,19 +97,27 @@ pub contract Train {
             )
             .enqueue(&mut context);
 
-        let htlc_note = HTLC_Private { owner: context.msg_sender(), randomness: randomness };
-        storage.contracts_private.at(Id).initialize(htlc_note).emit(encode_and_encrypt_note(
-            &mut context,
-            context.msg_sender(),
-        ));
+        let htlc_note = HTLC_Private {
+            owner: context.msg_sender().expect(f"Sender must not be none!"),
+            randomness: randomness,
+        };
+        storage.contracts_private.at(Id).initialize(htlc_note).emit(
+            context.msg_sender().expect(f"Sender must not be none!"),
+            MessageDelivery.CONSTRAINED_ONCHAIN,
+        );
 
         Token::at(token)
-            .transfer_to_public(context.msg_sender(), context.this_address(), amount, randomness)
+            .transfer_to_public(
+                context.msg_sender().expect(f"Sender must not be none!"),
+                context.this_address(),
+                amount,
+                randomness,
+            )
             .call(&mut context);
     }
 
     #[internal]
-    #[public]
+    #[external("public")]
     fn commit_public_user(
         src_asset: str<30>,
         dst_chain: str<30>,
@@ -152,20 +160,23 @@ pub contract Train {
         context.emit_public_log(log_msg.pack());
     }
 
-    #[private]
+    #[external("private")]
     fn add_lock_private_user(Id: Field, hashlock_high: u128, hashlock_low: u128, timelock: u64) {
         let hashlock = u128_limbs_to_bytes(hashlock_high, hashlock_low);
         let htlc_private = storage.contracts_private.at(Id).get_note();
-        assert(htlc_private.owner == context.msg_sender(), "NoAllowance");
+        assert(
+            htlc_private.owner == context.msg_sender().expect(f"Sender must not be none!"),
+            "NoAllowance",
+        );
 
-        // Safety: The contract intentionally exposes these parameters as public.
+        // Safety: The contract intentionally exposes these parameters as external("public").
         Train::at(context.this_address()).add_lock_public_user(Id, hashlock, timelock).enqueue(
             &mut context,
         );
     }
 
     #[internal]
-    #[public]
+    #[external("public")]
     fn add_lock_public_user(Id: Field, hashlock: [u8; 32], timelock: u64) {
         assert(context.timestamp() + 900 < timelock, "InvalidTimelock");
         let htlc_public = storage.contracts_public.at(Id).get_current_value();
@@ -192,9 +203,9 @@ pub contract Train {
         context.emit_public_log(log_msg.pack());
     }
 
-    #[private]
+    #[external("private")]
     fn refund_private(Id: Field) {
-        // Safety: The contract intentionally exposes these parameters as public.
+        // Safety: The contract intentionally exposes these parameters as external("public").
         Train::at(context.this_address()).refund_public(Id).enqueue(&mut context);
 
         let htlc_private = storage.contracts_private.at(Id).get_note();
@@ -208,7 +219,7 @@ pub contract Train {
             .enqueue(&mut context);
     }
 
-    #[public]
+    #[external("public")]
     #[internal]
     fn refund_public(Id: Field) {
         let htlc_public = storage.contracts_public.at(Id).get_current_value();
@@ -233,7 +244,7 @@ pub contract Train {
         context.emit_public_log(log_msg.pack());
     }
 
-    #[private]
+    #[external("private")]
     fn lock_private_solver(
         Id: Field,
         hashlock_high: u128,
@@ -252,7 +263,7 @@ pub contract Train {
         assert(amount > 0, "FundsNotSent");
         let hashlock = u128_limbs_to_bytes(hashlock_high, hashlock_low);
         let ownership_hash = u128_limbs_to_bytes(ownership_hash_high, ownership_hash_low);
-        // Safety: The contract intentionally exposes these parameters as public.
+        // Safety: The contract intentionally exposes these parameters as external("public").
         Train::at(context.this_address())
             .lock_public_solver(
                 Id,
@@ -268,19 +279,27 @@ pub contract Train {
             )
             .enqueue(&mut context);
 
-        let htlc_note = HTLC_Private { owner: context.msg_sender(), randomness: randomness };
-        storage.contracts_private.at(Id).initialize(htlc_note).emit(encode_and_encrypt_note(
-            &mut context,
-            context.msg_sender(),
-        ));
+        let htlc_note = HTLC_Private {
+            owner: context.msg_sender().expect(f"Sender must not be none!"),
+            randomness: randomness,
+        };
+        storage.contracts_private.at(Id).initialize(htlc_note).emit(
+            context.msg_sender().expect(f"Sender must not be none!"),
+            MessageDelivery.CONSTRAINED_ONCHAIN,
+        );
 
         Token::at(token)
-            .transfer_to_public(context.msg_sender(), context.this_address(), amount, randomness)
+            .transfer_to_public(
+                context.msg_sender().expect(f"Sender must not be none!"),
+                context.this_address(),
+                amount,
+                randomness,
+            )
             .call(&mut context);
     }
 
     #[internal]
-    #[public]
+    #[external("public")]
     fn lock_public_solver(
         Id: Field,
         hashlock: [u8; 32],
@@ -332,7 +351,7 @@ pub contract Train {
         context.emit_public_log(log_msg_2.pack());
     }
 
-    #[private]
+    #[external("private")]
     fn redeem_private(
         Id: Field,
         secret_high: u128,
@@ -343,7 +362,7 @@ pub contract Train {
         let secret = u128_limbs_to_bytes(secret_high, secret_low);
         let ownership_key = u128_limbs_to_bytes(ownership_key_high, ownership_key_low);
 
-        // Safety: The contract intentionally exposes these parameters as public.
+        // Safety: The contract intentionally exposes these parameters as external("public").
         Train::at(context.this_address()).redeem_public(Id, secret, ownership_key).enqueue(
             &mut context,
         );
@@ -359,7 +378,9 @@ pub contract Train {
             }
         } else {
             let partial_note = Token::at(htlc_public.token)
-                .prepare_private_balance_increase(context.msg_sender())
+                .prepare_private_balance_increase(context.msg_sender().expect(
+                    f"Sender must not be none!",
+                ))
                 .call(&mut context);
             Token::at(htlc_public.token)
                 .finalize_transfer_to_private(htlc_public.amount, partial_note)
@@ -367,7 +388,7 @@ pub contract Train {
         }
     }
 
-    #[public]
+    #[external("public")]
     #[internal]
     fn redeem_public(Id: Field, secret: [u8; 32], ownership_key: [u8; 32]) {
         let mut htlc_public = storage.contracts_public.at(Id).get_current_value();
@@ -415,15 +436,15 @@ pub contract Train {
         context.emit_public_log(log_msg.pack());
     }
 
-    // This utility function should be invoked by the frontend before each function call
+    // This external("utility") function should be invoked by the frontend before each function call
     // where the existence or non-existence of an HTLC is a critical security check.
-    #[utility]
+    #[external("utility")]
     unconstrained fn is_contract_initialized(id: Field) -> bool {
         storage.contracts_private.at(id).is_initialized()
     }
 
     #[view]
-    #[public]
+    #[external("public")]
     fn get_htlc_public(key: Field) -> pub HTLC_Public {
         storage.contracts_public.at(key).get_current_value()
     }
