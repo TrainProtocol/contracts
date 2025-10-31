@@ -1,60 +1,53 @@
-import {
-  AztecAddress,
-  Contract,
-  Fr,
-  SponsoredFeePaymentMethod,
-  Wallet,
-} from '@aztec/aztec.js';
-import { TrainContract } from './Train.ts';
-import { TokenContract } from '@aztec/noir-contracts.js/Token';
-import { deriveSigningKey } from '@aztec/stdlib/keys';
-import {
-  updateData,
-  readData,
-  generateId,
-  publicLogs,
-  getPXEs,
-  getHTLCDetails,
-} from './utils.ts';
-import { getSponsoredFPCInstance } from './fpc.ts';
-import { getSchnorrAccount } from '@aztec/accounts/schnorr';
+import dotenv from 'dotenv';
+dotenv.config();
 
-const TrainContractArtifact = TrainContract.artifact;
+import { Fr, GrumpkinScalar } from '@aztec/foundation/fields';
+import { TestWallet } from '@aztec/test-wallet/server';
+import { AztecNode, createAztecNodeClient } from '@aztec/aztec.js/node';
+import { getPXEConfig } from '@aztec/pxe/config';
+import { createStore } from '@aztec/kv-store/lmdb';
+import { AztecAddress } from '@aztec/aztec.js/addresses';
+import { TokenContract } from '@aztec/noir-contracts.js/Token';
+import { TrainContract } from './Train.ts';
+import { getSponsoredPaymentMethod, updateData, readData } from './utils.ts';
+import { ContractFunctionInteractionCallIntent } from '@aztec/aztec.js/authorization';
 
 async function main(): Promise<void> {
-  const [pxe1, pxe2, pxe3] = await getPXEs(['pxe1', 'pxe2', 'pxe3']);
-  const sponseredFPC = await getSponsoredFPCInstance();
-  const paymentMethod = new SponsoredFeePaymentMethod(sponseredFPC.address);
   const data = readData();
-  let userSecretKey = Fr.fromString(data.userSecretKey);
-  let userSalt = Fr.fromString(data.userSalt);
-  const schnorWallet = await getSchnorrAccount(
-    pxe1,
-    userSecretKey,
-    deriveSigningKey(userSecretKey),
-    userSalt,
+  const trainAddress = AztecAddress.fromString(data.trainContractAddress);
+  const tokenAddress = AztecAddress.fromString(data.tokenAddress);
+  const solverAddress = AztecAddress.fromString(data.solverAddress);
+
+  const url = process.env.PXE_URL ?? 'http://localhost:8080';
+  const node: AztecNode = createAztecNodeClient(url);
+  const l1Contracts = await node.getL1ContractAddresses();
+  const fullConfig = { ...getPXEConfig(), l1Contracts, proverEnabled: true };
+
+  const store = await createStore('userEnv', {
+    dataDirectory: 'store',
+    dataStoreMapSizeKb: 1e6,
+  });
+  const wallet = await TestWallet.create(node, fullConfig, { store });
+
+  const secretKey = Fr.fromString(data.userSecretKey);
+  const salt = Fr.fromString(data.userSalt);
+  const signingPrivateKey =
+    (GrumpkinScalar as any).fromString?.(data.userSigningKey) ??
+    GrumpkinScalar.random();
+  const account = await wallet.createSchnorrAccount(
+    secretKey,
+    salt,
+    signingPrivateKey,
   );
-  const senderWallet = await schnorWallet.getWallet();
+  const paymentMethod = await getSponsoredPaymentMethod(wallet);
 
-  const deployerSecretKey = Fr.fromString(data.deployerSecretKey);
-  const deployerSalt = Fr.fromString(data.deployerSalt);
-  const schnorWallet1 = await getSchnorrAccount(
-    pxe3,
-    deployerSecretKey,
-    deriveSigningKey(deployerSecretKey),
-    deployerSalt,
-  );
-  const deployerWallet = await schnorWallet1.getWallet();
+  const token = await TokenContract.at(tokenAddress, wallet);
+  const train = await TrainContract.at(trainAddress, wallet);
 
-  const sender: string = senderWallet.getAddress().toString();
-  console.log(`Using wallet: ${sender}`);
-
-  const Id = generateId();
-  const now = Math.floor(new Date().getTime() / 1000);
+  const id = Fr.random();
+  const now = Math.floor(Date.now() / 1000);
   const timelock = now + 1100;
-  const token = data.tokenAddress;
   const amount = 23n;
-  let solverAddress = AztecAddress.fromString(data.solverAddress);
   const src_asset = 'USDC.e'.padStart(30, ' ');
   const dst_chain = 'USDC.e'.padStart(30, ' ');
   const dst_asset = 'PROOFOFPLAYAPEX_MAINNET'.padStart(30, ' ');
@@ -63,54 +56,31 @@ async function main(): Promise<void> {
       90,
       ' ',
     );
+  const randomness = Fr.random();
 
-  const randomness = generateId();
-  const TokenContractArtifact = TokenContract.artifact;
-  const asset = await Contract.at(
-    AztecAddress.fromString(token),
-    TokenContractArtifact,
-    senderWallet as Wallet,
+  const transfer = token.methods.transfer_to_public(
+    account.address,
+    trainAddress,
+    amount,
+    randomness,
   );
-  const assetMinter = await TokenContract.at(
-    AztecAddress.fromString(data.tokenAddress),
-    deployerWallet as Wallet,
-  );
-
-  const transfer = asset
-    .withWallet(senderWallet)
-    .methods.transfer_to_public(
-      senderWallet.getAddress(),
-      AztecAddress.fromString(data.trainContractAddress),
-      amount,
-      randomness,
-    );
-
-  const witness = await senderWallet.createAuthWit({
-    caller: AztecAddress.fromString(data.trainContractAddress),
+  const intent: ContractFunctionInteractionCallIntent = {
+    caller: trainAddress,
     action: transfer,
-  });
+  };
+  const witness = await wallet.createAuthWit(account.address, intent);
 
-  console.log(
-    `private balance of sender ${senderWallet.getAddress()}: `,
-    await asset.methods
-      .balance_of_private(senderWallet.getAddress())
-      .simulate({ from: senderWallet.getAddress() }),
-  );
-  const contract = await Contract.at(
-    AztecAddress.fromString(data.trainContractAddress),
-    TrainContractArtifact,
-    senderWallet,
-  );
-  const is_contract_initialized = await contract.methods
-    .is_contract_initialized(Id)
-    .simulate({ from: senderWallet.getAddress() });
-  if (is_contract_initialized) throw new Error('HTLC Exsists');
-  const commitTx = await contract.methods
+  const exists = await train.methods
+    .is_contract_initialized(id)
+    .simulate({ from: account.address });
+  if (exists) throw new Error('HTLC Exists');
+
+  const tx = await train.methods
     .commit_private_user(
-      Id,
+      id,
       solverAddress,
       timelock,
-      AztecAddress.fromString(token),
+      tokenAddress,
       amount,
       src_asset,
       dst_chain,
@@ -119,26 +89,19 @@ async function main(): Promise<void> {
       randomness,
     )
     .send({
-      from: senderWallet.getAddress(),
+      from: account.address,
       authWitnesses: [witness],
       fee: { paymentMethod },
     })
     .wait({ timeout: 120000 });
 
-  console.log('tx : ', commitTx);
-  console.log(
-    `private balance of sender ${senderWallet.getAddress()}: `,
-    await asset.methods
-      .balance_of_private(senderWallet.getAddress())
-      .simulate({ from: senderWallet.getAddress() }),
-  );
-
-  await publicLogs(pxe1);
-  updateData({ commitId: Id.toString() });
-  await getHTLCDetails(senderWallet.getAddress(), contract, Id);
+  updateData({
+    commitId: id.toString(),
+    commitTxHash: tx.txHash?.toString?.() ?? String(tx),
+  });
 }
 
-main().catch((err: any) => {
-  console.error(`Error: ${err}`);
+main().catch((err) => {
+  console.error(`❌ Error: ${err}`);
   process.exit(1);
 });

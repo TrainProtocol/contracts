@@ -92,20 +92,20 @@ export function updateData(newData: Record<string, any>): void {
   writeFileSync(dataFile, stringifyWithBigint(data));
 }
 
-// const DEFAULT_HOST = 'localhost';
+export function readData(): Record<string, any> {
+  if (!existsSync(dataFile)) {
+    console.error(`File ${dataFile} does not exist.`);
+    return {};
+  }
+  try {
+    return parseWithBigint(readFileSync(dataFile, 'utf8'));
+  } catch (error) {
+    console.error('Error reading data file:', error);
+    return {};
+  }
+}
 
-// export function readData(): Record<string, any> {
-//   if (!existsSync(dataFile)) {
-//     console.error(`File ${dataFile} does not exist.`);
-//     return {};
-//   }
-//   try {
-//     return parseWithBigint(readFileSync(dataFile, 'utf8'));
-//   } catch (error) {
-//     console.error('Error reading data file:', error);
-//     return {};
-//   }
-// }
+// const DEFAULT_HOST = 'localhost';
 
 // function uint8ArrayToBigInt(uint8Array: Uint8Array): bigint {
 //   let result = 0n;
