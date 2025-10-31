@@ -1,173 +1,165 @@
-import { getSchnorrAccount } from '@aztec/accounts/schnorr';
-import { deriveSigningKey } from '@aztec/stdlib/keys';
-import {
-  AztecAddress,
-  Contract,
-  Fr,
-  SponsoredFeePaymentMethod,
-} from '@aztec/aztec.js';
-import { getPXEs, logPXERegistrations, updateData } from './utils.ts';
-import { getSponsoredFPCInstance } from './fpc.ts';
-import { SponsoredFPCContract } from '@aztec/noir-contracts.js/SponsoredFPC';
-import { TokenContractArtifact } from '@aztec/noir-contracts.js/Token';
+import dotenv from 'dotenv';
+dotenv.config();
+
+import { Fr, GrumpkinScalar } from '@aztec/foundation/fields';
+import { TestWallet } from '@aztec/test-wallet/server';
+import { AztecNode, createAztecNodeClient } from '@aztec/aztec.js/node';
+import { getPXEConfig } from '@aztec/pxe/config';
+import { createStore } from '@aztec/kv-store/lmdb';
+import { AztecAddress } from '@aztec/aztec.js/addresses';
+import { TokenContract } from '@aztec/noir-contracts.js/Token';
+import { getSponsoredPaymentMethod, updateData } from './utils.ts';
 
 async function main(): Promise<void> {
-  const [pxe1, pxe2, pxe3] = await getPXEs(['pxe1', 'pxe2', 'pxe3']);
-  const sponsoredFPC = await getSponsoredFPCInstance();
+  const url = process.env.PXE_URL ?? 'http://localhost:8080';
+  const node: AztecNode = createAztecNodeClient(url);
+  const l1Contracts = await node.getL1ContractAddresses();
+  const fullConfig = { ...getPXEConfig(), l1Contracts, proverEnabled: false };
 
-  await pxe1.registerContract({
-    instance: sponsoredFPC,
-    artifact: SponsoredFPCContract.artifact,
+  const storeUser = await createStore('userEnv', {
+    dataDirectory: 'store',
+    dataStoreMapSizeKb: 1e6,
+  });
+  const storeSolver = await createStore('solverEnv', {
+    dataDirectory: 'store',
+    dataStoreMapSizeKb: 1e6,
+  });
+  const storeDeployer = await createStore('deployerEnv', {
+    dataDirectory: 'store',
+    dataStoreMapSizeKb: 1e6,
   });
 
-  await pxe2.registerContract({
-    instance: sponsoredFPC,
-    artifact: SponsoredFPCContract.artifact,
+  const walletUser = await TestWallet.create(node, fullConfig, {
+    store: storeUser,
+  });
+  const walletSolver = await TestWallet.create(node, fullConfig, {
+    store: storeSolver,
+  });
+  const walletDeployer = await TestWallet.create(node, fullConfig, {
+    store: storeDeployer,
   });
 
-  await pxe3.registerContract({
-    instance: sponsoredFPC,
-    artifact: SponsoredFPCContract.artifact,
-  });
-  const paymentMethod = new SponsoredFeePaymentMethod(sponsoredFPC.address);
+  const payUser = await getSponsoredPaymentMethod(walletUser);
+  const paySolver = await getSponsoredPaymentMethod(walletSolver);
+  const payDeployer = await getSponsoredPaymentMethod(walletDeployer);
 
-  //   user wallet in PXE 1
-  let secretKey = Fr.random();
-  let salt = Fr.random();
-  let schnorrAccount = await getSchnorrAccount(
-    pxe1,
-    secretKey,
-    deriveSigningKey(secretKey),
-    salt,
+  const userSecretKey = Fr.random();
+  const userSalt = Fr.random();
+  const userSigningKey = GrumpkinScalar.random();
+  const userAccount = await walletUser.createSchnorrAccount(
+    userSecretKey,
+    userSalt,
+    userSigningKey,
   );
 
-  let tx = await schnorrAccount
-    .deploy({ fee: { paymentMethod } })
-    .wait({ timeout: 1200000 });
-  let userWallet = await schnorrAccount.getWallet();
-  let userAddress = userWallet.getAddress();
-
-  //   solver wallet in PXE 2
-  let secretKey2 = Fr.random();
-  let salt2 = Fr.random();
-  let schnorrAccount2 = await getSchnorrAccount(
-    pxe2,
-    secretKey2,
-    deriveSigningKey(secretKey2),
-    salt2,
+  const solverSecretKey = Fr.random();
+  const solverSalt = Fr.random();
+  const solverSigningKey = GrumpkinScalar.random();
+  const solverAccount = await walletSolver.createSchnorrAccount(
+    solverSecretKey,
+    solverSalt,
+    solverSigningKey,
   );
 
-  let tx2 = await schnorrAccount2
-    .deploy({ fee: { paymentMethod } })
-    .wait({ timeout: 1200000 });
-  let solverWallet = await schnorrAccount2.getWallet();
-  let solverAddress = solverWallet.getAddress();
-
-  // wallet 3 for deployment
-  let secretKey3 = Fr.random();
-  let salt3 = Fr.random();
-  let schnorrAccount3 = await getSchnorrAccount(
-    pxe3,
-    secretKey3,
-    deriveSigningKey(secretKey3),
-    salt3,
+  const deployerSecretKey = Fr.random();
+  const deployerSalt = Fr.random();
+  const deployerSigningKey = GrumpkinScalar.random();
+  const deployerAccount = await walletDeployer.createSchnorrAccount(
+    deployerSecretKey,
+    deployerSalt,
+    deployerSigningKey,
   );
 
-  let tx3 = await schnorrAccount3
-    .deploy({ fee: { paymentMethod } })
-    .wait({ timeout: 1200000 });
-  let deployer = await schnorrAccount3.getWallet();
-  let deployerAddress = deployer.getAddress();
+  await (await userAccount.getDeployMethod())
+    .send({ from: AztecAddress.ZERO, fee: { paymentMethod: payUser } })
+    .wait();
+  await (await solverAccount.getDeployMethod())
+    .send({ from: AztecAddress.ZERO, fee: { paymentMethod: paySolver } })
+    .wait();
+  await (await deployerAccount.getDeployMethod())
+    .send({ from: AztecAddress.ZERO, fee: { paymentMethod: payDeployer } })
+    .wait();
 
-  // mint token and trasnfer to user and solver
-  const token = await Contract.deploy(deployer, TokenContractArtifact, [
-    deployer.getAddress(),
+  const token = await TokenContract.deploy(
+    walletDeployer,
+    deployerAccount.address,
     'TRAIN',
     'TRN',
     18,
-  ])
-    .send({ from: deployer.getAddress(), fee: { paymentMethod } })
+  )
+    .send({
+      from: deployerAccount.address,
+      fee: { paymentMethod: payDeployer },
+    })
     .deployed();
 
-  await pxe1.registerContract({
-    instance: token.instance,
-    artifact: TokenContractArtifact,
-  });
-
-  await pxe2.registerContract({
-    instance: token.instance,
-    artifact: TokenContractArtifact,
-  });
-
-  await userWallet.registerSender(deployerAddress);
-  await solverWallet.registerSender(deployerAddress);
-
-  console.log(`Token deployed at ${token.address.toString()}`);
+  await walletDeployer.registerContract(token.instance, TokenContract.artifact);
+  await walletUser.registerContract(token.instance, TokenContract.artifact);
+  await walletSolver.registerContract(token.instance, TokenContract.artifact);
 
   const amount = 2000n;
-  console.log(`Minting ${amount} tokens...`);
-  const contract3 = await Contract.at(
-    AztecAddress.fromString(token.address.toString()),
-    TokenContractArtifact,
-    deployer,
-  );
-  const mintTx = await contract3.methods
-    .mint_to_public(deployer.getAddress(), amount)
-    .send({ from: deployer.getAddress(), fee: { paymentMethod } })
-    .wait({ timeout: 1200000 });
-  console.log(`Public mint successful in block ${mintTx.blockNumber}`);
-
-  await contract3.methods
-    .transfer_to_private(userWallet.getAddress(), amount / 2n)
-    .send({ from: deployer.getAddress(), fee: { paymentMethod } })
-    .wait({ timeout: 1200000 });
-  await contract3.methods
-    .transfer_to_private(solverWallet.getAddress(), amount / 2n)
-    .send({ from: deployer.getAddress(), fee: { paymentMethod } })
-    .wait({ timeout: 1200000 });
-
-  const contract1 = await Contract.at(
-    AztecAddress.fromString(token.address.toString()),
-    TokenContractArtifact,
-    userWallet,
-  );
-  const contract2 = await Contract.at(
-    AztecAddress.fromString(token.address.toString()),
-    TokenContractArtifact,
-    solverWallet,
+  const tokenForUser = await TokenContract.at(token.address, walletUser);
+  const tokenForSolver = await TokenContract.at(token.address, walletSolver);
+  const tokenForDeployer = await TokenContract.at(
+    token.address,
+    walletDeployer,
   );
 
-  console.log(
-    'User private balance: ',
-    await contract1.methods
-      .balance_of_private(userWallet.getAddress())
-      .simulate({ from: userWallet.getAddress() }),
-  );
+  const mintTx = await tokenForDeployer.methods
+    .mint_to_public(deployerAccount.address, amount)
+    .send({
+      from: deployerAccount.address,
+      fee: { paymentMethod: payDeployer },
+    })
+    .wait({ timeout: 1_200_000 });
 
-  console.log(
-    'Solver private balance: ',
-    await contract2.methods
-      .balance_of_private(solverWallet.getAddress())
-      .simulate({ from: solverWallet.getAddress() }),
-  );
+  await tokenForDeployer.methods
+    .transfer_to_private(userAccount.address, amount / 2n)
+    .send({
+      from: deployerAccount.address,
+      fee: { paymentMethod: payDeployer },
+    })
+    .wait({ timeout: 1_200_000 });
+
+  await tokenForDeployer.methods
+    .transfer_to_private(solverAccount.address, amount / 2n)
+    .send({
+      from: deployerAccount.address,
+      fee: { paymentMethod: payDeployer },
+    })
+    .wait({ timeout: 1_200_000 });
+
+  const userPrivBal = await tokenForUser.methods
+    .balance_of_private(userAccount.address)
+    .simulate({ from: userAccount.address });
+
+  const solverPrivBal = await tokenForSolver.methods
+    .balance_of_private(solverAccount.address)
+    .simulate({ from: solverAccount.address });
+
+  console.log(`Token deployed at ${token.address.toString()}`);
+  console.log(`Public mint tx block: ${mintTx.blockNumber}`);
+  console.log(`User private balance: ${userPrivBal}`);
+  console.log(`Solver private balance: ${solverPrivBal}`);
 
   updateData({
-    userSecretKey: secretKey,
-    userSalt: salt,
-    userAddress: userAddress,
-    userPartialAddress: userWallet.getCompleteAddress().partialAddress,
-    solverSecretKey: secretKey2,
-    solverSalt: salt2,
-    solverAddress: solverAddress,
-    solverPartialAddress: solverWallet.getCompleteAddress().partialAddress,
-    deployerSecretKey: secretKey3,
-    deployerSalt: salt3,
-    deployerAddress: deployerAddress,
-    deployerPartailAddress: deployer.getCompleteAddress().partialAddress,
+    userSecretKey: userSecretKey.toString(),
+    userSalt: userSalt.toString(),
+    userSigningKey: userSigningKey.toString(),
+    userAddress: userAccount.address.toString(),
+
+    solverSecretKey: solverSecretKey.toString(),
+    solverSalt: solverSalt.toString(),
+    solverSigningKey: solverSigningKey.toString(),
+    solverAddress: solverAccount.address.toString(),
+
+    deployerSecretKey: deployerSecretKey.toString(),
+    deployerSalt: deployerSalt.toString(),
+    deployerSigningKey: deployerSigningKey.toString(),
+    deployerAddress: deployerAccount.address.toString(),
+
     tokenAddress: token.address.toString(),
   });
-
-  await logPXERegistrations([pxe1, pxe2, pxe3]);
 }
 
 main().catch((err) => {

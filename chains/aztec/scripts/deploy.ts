@@ -50,12 +50,14 @@ async function main(): Promise<void> {
     })
     .deployed();
 
-  console.log('yeaaa', contract.instance);
-
+  const inst = contract.instance;
   updateData({
-    instance: JSON.parse(
-      JSON.stringify(contract.instance, (_, v) => v?.toString?.() ?? v),
-    ),
+    salt: inst.salt.toString(),
+    deployer: inst.deployer.toString(),
+    currentContractClassId: inst.currentContractClassId.toString(),
+    originalContractClassId: inst.originalContractClassId.toString(),
+    initializationHash: inst.initializationHash.toString(),
+    address: inst.address.toString(),
   });
 }
 
