@@ -11,11 +11,12 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@aztec/accounts": "^2.0.2",
-    "@aztec/aztec.js": "^2.0.2",
-    "@aztec/bb-prover": "^2.0.2",
-    "@aztec/noir-contracts.js": "^2.0.2",
-    "@aztec/pxe": "^2.0.2",
+    "@aztec/accounts": "3.0.0-devnet.2",
+    "@aztec/aztec.js": "3.0.0-devnet.2",
+    "@aztec/bb-prover": "3.0.0-devnet.2",
+    "@aztec/noir-contracts.js": "3.0.0-devnet.2",
+    "@aztec/pxe": "3.0.0-devnet.2",
+    "@aztec/test-wallet": "^3.0.0-devnet.2",
     "dotenv": "^16.5.0"
   },
   "devDependencies": {

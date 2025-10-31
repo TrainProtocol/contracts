@@ -1,61 +1,62 @@
-import { getSchnorrAccount } from '@aztec/accounts/schnorr';
-import { deriveSigningKey } from '@aztec/stdlib/keys';
-import {
-  Fr,
-  ContractInstanceWithAddress,
-  ContractArtifact,
-  SponsoredFeePaymentMethod,
-} from '@aztec/aztec.js';
+import dotenv from 'dotenv';
+dotenv.config();
+import { Fr, GrumpkinScalar } from '@aztec/foundation/fields';
+import { TestWallet } from '@aztec/test-wallet/server';
+import { AztecNode, createAztecNodeClient } from '@aztec/aztec.js/node';
+import { getPXEConfig } from '@aztec/pxe/config';
+import { createStore } from '@aztec/kv-store/lmdb';
+import { AztecAddress } from '@aztec/aztec.js/addresses';
+import { getSponsoredPaymentMethod, updateData } from './utils.ts';
 import { TrainContract } from './Train.ts';
-import { getPXEs, logPXERegistrations, readData, updateData } from './utils.ts';
-import { getSponsoredFPCInstance } from './fpc.ts';
 
 async function main(): Promise<void> {
-  const [pxe1, pxe2, pxe3] = await getPXEs(['pxe1', 'pxe2', 'pxe3']);
+  const url = process.env.PXE_URL ?? 'http://localhost:8080';
+  const node: AztecNode = createAztecNodeClient(url);
 
-  const sponseredFPC = await getSponsoredFPCInstance();
-  const paymentMethod = new SponsoredFeePaymentMethod(sponseredFPC.address);
+  const l1Contracts = await node.getL1ContractAddresses();
+  const fullConfig = { ...getPXEConfig(), l1Contracts, proverEnabled: true };
 
-  const data = readData();
-  let secretKey = Fr.fromString(data.deployerSecretKey);
-  let salt = Fr.fromString(data.deployerSalt);
-  let schnorrAccount = await getSchnorrAccount(
-    pxe3,
+  const options = {
+    dataDirectory: 'store',
+    dataStoreMapSizeKb: 1e6,
+  };
+  const store = await createStore('deploymentEnv', options);
+
+  const wallet = await TestWallet.create(node, fullConfig, { store: store });
+  const sponsoredPaymentMethod = await getSponsoredPaymentMethod(wallet);
+
+  const secretKey = Fr.random();
+  const salt = new Fr(0);
+  const signingPrivateKey = GrumpkinScalar.random();
+
+  const deployerAccount = await wallet.createSchnorrAccount(
     secretKey,
-    deriveSigningKey(secretKey),
     salt,
+    signingPrivateKey,
   );
-  let deployerWallet = await schnorrAccount.getWallet();
 
-  // Train protocol deployment on PXE3
-  const trainContract = await TrainContract.deploy(deployerWallet)
-    .send({ from: deployerWallet.getAddress(), fee: { paymentMethod } })
-    .deployed({ timeout: 180000 });
-  const trainPartialAddress = await trainContract.partialAddress;
+  const deployMethod = await deployerAccount.getDeployMethod();
+  const deployerDeployment = await deployMethod
+    .send({
+      from: AztecAddress.ZERO,
+      fee: { paymentMethod: sponsoredPaymentMethod },
+    })
+    .wait();
 
-  //register contract in all PXEs
-  await pxe1.registerContract({
-    instance: trainContract.instance as ContractInstanceWithAddress,
-    artifact: TrainContract.artifact as ContractArtifact,
-  });
+  const contract = await TrainContract.deploy(wallet)
+    .send({
+      from: deployerAccount.address,
+      fee: { paymentMethod: sponsoredPaymentMethod },
+    })
+    .deployed();
 
-  await pxe2.registerContract({
-    instance: trainContract.instance as ContractInstanceWithAddress,
-    artifact: TrainContract.artifact as ContractArtifact,
-  });
-
-  await pxe3.registerContract({
-    instance: trainContract.instance as ContractInstanceWithAddress,
-    artifact: TrainContract.artifact as ContractArtifact,
-  });
+  console.log('yeaaa', contract.instance);
 
   updateData({
-    trainPartialAddress: trainPartialAddress,
-    trainContractAddress: trainContract.address,
-    trainInitHash: trainContract.instance.initializationHash,
+    instance: JSON.parse(
+      JSON.stringify(contract.instance, (_, v) => v?.toString?.() ?? v),
+    ),
   });
-
-  await logPXERegistrations([pxe1, pxe2, pxe3]);
 }
 
 main().catch((err) => {
