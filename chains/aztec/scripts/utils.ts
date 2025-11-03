@@ -19,7 +19,7 @@ export async function getPXEs(names: string[]): Promise<PXE[]> {
   const node: AztecNode = createAztecNodeClient(url);
 
   const l1Contracts = await node.getL1ContractAddresses();
-  const fullConfig = { ...getPXEConfig(), l1Contracts, proverEnabled: false };
+  const fullConfig = { ...getPXEConfig(), l1Contracts, proverEnabled: true };
 
   const svcs: PXE[] = [];
   for (const name of names) {

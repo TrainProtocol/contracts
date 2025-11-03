@@ -20,7 +20,6 @@ async function main(): Promise<void> {
   const trainAddress = AztecAddress.fromString(data.address);
   const tokenAddress = AztecAddress.fromString(data.tokenAddress);
   const solverAddress = AztecAddress.fromString(data.solverAddress);
-
   const url = process.env.PXE_URL ?? 'http://localhost:8080';
   const node: AztecNode = createAztecNodeClient(url);
   const l1Contracts = await node.getL1ContractAddresses();
@@ -32,9 +31,9 @@ async function main(): Promise<void> {
   });
   const wallet = await TestWallet.create(node, fullConfig, { store });
   const trainInstance = await node.getContract(trainAddress);
-  await wallet.registerContract(trainInstance);
+  await wallet.registerContract(trainInstance, TrainContract.artifact);
   const tokenInstance = await node.getContract(tokenAddress);
-  await wallet.registerContract(tokenInstance);
+  await wallet.registerContract(tokenInstance, TokenContract.artifact);
 
   const secretKey = Fr.fromString(data.userSecretKey);
   const salt = Fr.fromString(data.userSalt);
@@ -101,12 +100,33 @@ async function main(): Promise<void> {
       dst_address,
       randomness,
     )
-    .send({
+    .simulate({
       from: account.address,
       authWitnesses: [witness],
       fee: { paymentMethod },
-    })
-    .wait({ timeout: 120000 });
+    });
+
+  console.log(tx);
+
+  // const tx = await train.methods
+  //   .commit_private_user(
+  //     id,
+  //     solverAddress,
+  //     timelock,
+  //     tokenAddress,
+  //     amount,
+  //     src_asset,
+  //     dst_chain,
+  //     dst_asset,
+  //     dst_address,
+  //     randomness,
+  //   )
+  //   .send({
+  //     from: account.address,
+  //     authWitnesses: [witness],
+  //     fee: { paymentMethod },
+  //   })
+  //   .wait({ timeout: 120000 });
 
   updateData({
     commitId: id.toString(),

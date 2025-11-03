@@ -35,6 +35,7 @@ pub contract Train {
         TokenCommitted, TokenLockAdded, TokenLockedFirst, TokenLockedSecond, TokenRedeemed,
         TokenRefunded,
     };
+
     #[derive(Packable)]
     #[note]
     #[derive(Eq)]
@@ -157,6 +158,7 @@ pub contract Train {
             dst_asset: dst_asset,
             dst_address: dst_address,
         };
+
         context.emit_public_log(log_msg.pack());
     }
 
