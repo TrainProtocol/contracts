@@ -14,7 +14,7 @@ async function main(): Promise<void> {
   const url = process.env.PXE_URL ?? 'http://localhost:8080';
   const node: AztecNode = createAztecNodeClient(url);
   const l1Contracts = await node.getL1ContractAddresses();
-  const fullConfig = { ...getPXEConfig(), l1Contracts, proverEnabled: false };
+  const fullConfig = { ...getPXEConfig(), l1Contracts, proverEnabled: true };
 
   const storeUser = await createStore('userEnv', {
     dataDirectory: 'store',
@@ -96,6 +96,8 @@ async function main(): Promise<void> {
   await walletDeployer.registerContract(token.instance, TokenContract.artifact);
   await walletUser.registerContract(token.instance, TokenContract.artifact);
   await walletSolver.registerContract(token.instance, TokenContract.artifact);
+  await walletUser.registerSender(deployerAccount.address);
+  await walletSolver.registerSender(deployerAccount.address);
 
   const amount = 2000n;
   const tokenForUser = await TokenContract.at(token.address, walletUser);

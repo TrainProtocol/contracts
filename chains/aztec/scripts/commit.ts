@@ -10,11 +10,14 @@ import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { TokenContract } from '@aztec/noir-contracts.js/Token';
 import { TrainContract } from './Train.ts';
 import { getSponsoredPaymentMethod, updateData, readData } from './utils.ts';
-import { ContractFunctionInteractionCallIntent } from '@aztec/aztec.js/authorization';
+import {
+  ContractFunctionInteractionCallIntent,
+  lookupValidity,
+} from '@aztec/aztec.js/authorization';
 
 async function main(): Promise<void> {
   const data = readData();
-  const trainAddress = AztecAddress.fromString(data.trainContractAddress);
+  const trainAddress = AztecAddress.fromString(data.address);
   const tokenAddress = AztecAddress.fromString(data.tokenAddress);
   const solverAddress = AztecAddress.fromString(data.solverAddress);
 
@@ -28,6 +31,10 @@ async function main(): Promise<void> {
     dataStoreMapSizeKb: 1e6,
   });
   const wallet = await TestWallet.create(node, fullConfig, { store });
+  const trainInstance = await node.getContract(trainAddress);
+  await wallet.registerContract(trainInstance);
+  const tokenInstance = await node.getContract(tokenAddress);
+  await wallet.registerContract(tokenInstance);
 
   const secretKey = Fr.fromString(data.userSecretKey);
   const salt = Fr.fromString(data.userSalt);
@@ -68,7 +75,13 @@ async function main(): Promise<void> {
     caller: trainAddress,
     action: transfer,
   };
+
   const witness = await wallet.createAuthWit(account.address, intent);
+
+  console.log(
+    'check validity of witness: ',
+    await lookupValidity(wallet, account.address, intent, witness),
+  );
 
   const exists = await train.methods
     .is_contract_initialized(id)
