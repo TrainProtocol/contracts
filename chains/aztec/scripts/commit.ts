@@ -9,7 +9,13 @@ import { createStore } from '@aztec/kv-store/lmdb';
 import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { TokenContract } from '@aztec/noir-contracts.js/Token';
 import { TrainContract } from './Train.ts';
-import { getSponsoredPaymentMethod, updateData, readData } from './utils.ts';
+import {
+  getSponsoredPaymentMethod,
+  updateData,
+  readData,
+  getHTLCDetails,
+  publicLogs,
+} from './utils.ts';
 import {
   ContractFunctionInteractionCallIntent,
   lookupValidity,
@@ -100,33 +106,15 @@ async function main(): Promise<void> {
       dst_address,
       randomness,
     )
-    .simulate({
+    .send({
       from: account.address,
       authWitnesses: [witness],
       fee: { paymentMethod },
-    });
+    })
+    .wait({ timeout: 120000 });
 
-  console.log(tx);
-
-  // const tx = await train.methods
-  //   .commit_private_user(
-  //     id,
-  //     solverAddress,
-  //     timelock,
-  //     tokenAddress,
-  //     amount,
-  //     src_asset,
-  //     dst_chain,
-  //     dst_asset,
-  //     dst_address,
-  //     randomness,
-  //   )
-  //   .send({
-  //     from: account.address,
-  //     authWitnesses: [witness],
-  //     fee: { paymentMethod },
-  //   })
-  //   .wait({ timeout: 120000 });
+  await getHTLCDetails(account.address, train, id);
+  console.log('Public logs: ', await publicLogs(node, { txHash: tx.txHash }));
 
   updateData({
     commitId: id.toString(),

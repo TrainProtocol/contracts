@@ -59,7 +59,7 @@ npx tsx addLock.ts
 ### Solver: Redeem Funds for User
 
 ```bash
-npx tsx redeem.ts
+npx tsx redeem.ts solver
 ```
 
 * Calls the TRAIN Protocol’s redeem function on Aztec for the user to receive funds
@@ -74,7 +74,7 @@ npx tsx redeem.ts
 ### Refund: Expired Funds
 
 ```bash
-npx tsx refund.ts
+npx tsx refund.ts user
 ```
 
 * At any time (after timelock passes), refund a commitment by supplying the correct commitment ID
@@ -111,7 +111,7 @@ npx tsx lock.ts
 ### User: Redeems
 
 ```bash
-npx tsx redeem.ts
+npx tsx redeem.ts user
 ```
 
 * User monitors the source chain until the solver’s secret (preimage) is revealed
@@ -124,6 +124,9 @@ npx tsx redeem.ts
 
 Refunds follow the same procedure previously described for swaps executed in the opposite direction.
 
+```bash
+npx tsx refund.ts solver
+```
 ---
 
 ## 5. Helper Functions

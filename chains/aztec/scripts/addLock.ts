@@ -1,96 +1,100 @@
-import {
-  AztecAddress,
-  Contract,
-  Fr,
-  SponsoredFeePaymentMethod,
-} from '@aztec/aztec.js';
-import { TrainContract } from './Train.ts';
+import dotenv from 'dotenv';
+dotenv.config();
+
+import { Fr, GrumpkinScalar } from '@aztec/foundation/fields';
+import { TestWallet } from '@aztec/test-wallet/server';
+import { AztecNode, createAztecNodeClient } from '@aztec/aztec.js/node';
+import { getPXEConfig } from '@aztec/pxe/config';
+import { createStore } from '@aztec/kv-store/lmdb';
+import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { TokenContract } from '@aztec/noir-contracts.js/Token';
+import { TrainContract } from './Train.ts';
 import {
   readData,
   publicLogs,
   generateSecretAndHashlock,
   updateData,
-  getPXEs,
   getHTLCDetails,
+  getSponsoredPaymentMethod,
 } from './utils.ts';
-import { getSchnorrAccount } from '@aztec/accounts/schnorr';
-import { deriveSigningKey } from '@aztec/stdlib/keys';
-import { getSponsoredFPCInstance } from './fpc.ts';
-
-const TrainContractArtifact = TrainContract.artifact;
 
 async function main(): Promise<void> {
-  const [pxe1, pxe2, pxe3] = await getPXEs(['pxe1', 'pxe2', 'pxe3']);
-  const sponseredFPC = await getSponsoredFPCInstance();
-  const paymentMethod = new SponsoredFeePaymentMethod(sponseredFPC.address);
   const data = readData();
-  let userSecretKey = Fr.fromString(data.userSecretKey);
-  let userSalt = Fr.fromString(data.userSalt);
-  const schnorWallet = await getSchnorrAccount(
-    pxe1,
-    userSecretKey,
-    deriveSigningKey(userSecretKey),
-    userSalt,
+
+  const url = process.env.PXE_URL ?? 'http://localhost:8080';
+  const node: AztecNode = createAztecNodeClient(url);
+  const l1Contracts = await node.getL1ContractAddresses();
+  const fullConfig = { ...getPXEConfig(), l1Contracts, proverEnabled: true };
+
+  const store = await createStore('userEnv', {
+    dataDirectory: 'store',
+    dataStoreMapSizeKb: 1e6,
+  });
+  const wallet = await TestWallet.create(node, fullConfig, { store });
+
+  const trainAddress = AztecAddress.fromString(
+    data.address ?? data.trainContractAddress,
   );
-  const senderWallet = await schnorWallet.getWallet();
-  const deployerSecretKey = Fr.fromString(data.deployerSecretKey);
-  const deployerSalt = Fr.fromString(data.deployerSalt);
-  const schnorWallet1 = await getSchnorrAccount(
-    pxe3,
-    deployerSecretKey,
-    deriveSigningKey(deployerSecretKey),
-    deployerSalt,
+  const tokenAddress = AztecAddress.fromString(data.tokenAddress);
+
+  const trainInstance = await node.getContract(trainAddress);
+  await wallet.registerContract(trainInstance, TrainContract.artifact);
+  const tokenInstance = await node.getContract(tokenAddress);
+  await wallet.registerContract(tokenInstance, TokenContract.artifact);
+
+  const secretKey = Fr.fromString(data.userSecretKey);
+  const salt = Fr.fromString(data.userSalt);
+  const signingPrivateKey =
+    (GrumpkinScalar as any).fromString?.(data.userSigningKey) ??
+    GrumpkinScalar.random();
+  const account = await wallet.createSchnorrAccount(
+    secretKey,
+    salt,
+    signingPrivateKey,
   );
-  const deployer = await schnorWallet1.getWallet();
-  console.log(`Using wallet: ${senderWallet.getAddress()}`);
+
+  const paymentMethod = await getSponsoredPaymentMethod(wallet);
+
+  const train = await TrainContract.at(trainAddress, wallet);
+  const token = await TokenContract.at(tokenAddress, wallet);
 
   const [secretHigh, secretLow, hashlockHigh, hashlockLow] =
     generateSecretAndHashlock();
-  const Id = BigInt(data.commitId);
-  const now = Math.floor(new Date().getTime() / 1000);
+  const Id = Fr.fromString(data.commitId ?? data.Id ?? '0');
+  const now = Math.floor(Date.now() / 1000);
   const timelock = now + 1000;
 
-  const contract = await Contract.at(
-    AztecAddress.fromString(data.trainContractAddress),
-    TrainContractArtifact,
-    senderWallet,
-  );
-  const is_contract_initialized = await contract.methods
+  const exists = await train.methods
     .is_contract_initialized(Id)
-    .simulate({ from: senderWallet.getAddress() });
-  if (!is_contract_initialized) throw new Error('HTLC Does Not Exsist');
-  const addLockTx = await contract.methods
+    .simulate({ from: account.address });
+  if (!exists) throw new Error('HTLC Does Not Exsist');
+
+  const tx = await train.methods
     .add_lock_private_user(Id, hashlockHigh, hashlockLow, timelock)
-    .send({ from: senderWallet.getAddress(), fee: { paymentMethod } })
+    .send({ from: account.address, fee: { paymentMethod } })
     .wait({ timeout: 120000 });
 
-  console.log('tx : ', addLockTx);
-  await publicLogs(pxe1);
+  console.log('Public logs: ', await publicLogs(node, { txHash: tx.txHash }));
 
-  const TokenContractArtifact = TokenContract.artifact;
-  const asset = await Contract.at(
-    AztecAddress.fromString(data.tokenAddress),
-    TokenContractArtifact,
-    senderWallet,
-  );
   console.log(
-    'Public balance of Train: ',
-    await asset.methods
-      .balance_of_public(data.trainContractAddress)
-      .simulate({ from: senderWallet.getAddress() }),
+    'Public balance of Train:',
+    await token.methods
+      .balance_of_public(trainAddress)
+      .simulate({ from: account.address }),
   );
 
   updateData({
-    secretHigh: secretHigh,
-    secretLow: secretLow,
-    hashlockHigh: hashlockHigh,
-    hashlockLow: hashlockLow,
+    secretHigh,
+    secretLow,
+    hashlockHigh,
+    hashlockLow,
+    addLockTxHash: tx.txHash?.toString?.() ?? String(tx),
   });
-  await getHTLCDetails(senderWallet.getAddress(), contract, Id);
+
+  await getHTLCDetails(account.address, train, Id);
 }
 
-main().catch((err: any) => {
+main().catch((err) => {
   console.error(`Error: ${err}`);
   process.exit(1);
 });

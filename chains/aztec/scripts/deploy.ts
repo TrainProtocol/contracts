@@ -20,7 +20,7 @@ async function main(): Promise<void> {
     dataDirectory: 'store',
     dataStoreMapSizeKb: 1e6,
   };
-  const store = await createStore('deploymentEnv', options);
+  const store = await createStore('deployerEnv', options);
 
   const wallet = await TestWallet.create(node, fullConfig, { store: store });
   const sponsoredPaymentMethod = await getSponsoredPaymentMethod(wallet);
@@ -41,14 +41,14 @@ async function main(): Promise<void> {
       from: AztecAddress.ZERO,
       fee: { paymentMethod: sponsoredPaymentMethod },
     })
-    .wait();
+    .wait({ timeout: 1200000 });
 
   const contract = await TrainContract.deploy(wallet)
     .send({
       from: deployerAccount.address,
       fee: { paymentMethod: sponsoredPaymentMethod },
     })
-    .deployed();
+    .deployed({ timeout: 1200000 });
 
   const inst = contract.instance;
   updateData({
