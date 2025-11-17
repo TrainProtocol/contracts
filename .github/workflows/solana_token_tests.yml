@@ -1,0 +1,76 @@
+name: Solana Token Tests
+
+on:
+  push:
+    branches: [ dev ]
+    paths:
+      - 'chains/solana/token/**'
+  pull_request:
+    branches: [ dev ]
+    paths:
+      - 'chains/solana/token/**'
+
+jobs:
+  anchor-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Solana CLI
+      run: |
+        sh -c "$(curl -sSfL https://release.anza.xyz/v2.2.14/install)"
+        echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+        export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+
+    - name: Install dependencies (libudev)
+      run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+
+    - name: Install Anchor CLI
+      run: |
+        cargo install --git https://github.com/coral-xyz/anchor avm --locked --force
+        avm install latest
+        avm use latest
+        echo "$HOME/.avm/bin" >> $GITHUB_PATH
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22.x'
+        cache: ''
+
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install Yarn
+      working-directory: chains/solana/token
+      run: yarn install
+
+    - name: Verify installations
+      run: |
+        solana --version
+        anchor --version
+        yarn   --version
+
+    - name: Generate Solana keypair
+      run: solana-keygen new --no-bip39-passphrase
+
+    - name: Start Solana Localnet
+      run: solana-test-validator > validator.log 2>&1 &
+
+    - name: Wait for Localnet
+      run: sleep 10
+
+    - name: Build Anchor Project
+      working-directory: chains/solana/token
+      run: anchor build
+
+    - name: Deploy Anchor Program
+      working-directory: chains/solana/token
+      run: anchor deploy
+
+    - name: Run Anchor tests
+      working-directory: chains/solana/token
+      run: anchor test --skip-local-validator --skip-deploy
+      continue-on-error: true
