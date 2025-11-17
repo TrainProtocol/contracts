@@ -78,6 +78,11 @@ module.exports = {
       url: process.env.baseRPC || '',
       accounts: process.env.mainnet ? [process.env.mainnet] : [],
     },
+    baseSepolia: {
+      url: process.env.baseSepoliaRPC || '',
+      accounts: process.env.PRIV_KEY ? [process.env.PRIV_KEY] : [],
+      chainId: 84532,
+    },
     mantleSepolia: {
       url: 'https://endpoints.omniatech.io/v1/mantle/sepolia/public',
       accounts: process.env.PRIV_KEY ? [process.env.PRIV_KEY] : [],
@@ -160,6 +165,7 @@ module.exports = {
       optimisticEthereum: process.env.optimismSepolia || '',
       arbitrumOne: process.env.arbitrumSepolia || '',
       base: process.env.baseAPIKey || '',
+      baseSepolia: process.env.sepolia || '',
       zkSyncEraSepolia: process.env.zk_sync || '',
       zkSyncEraMainnet: process.env.zk_sync || '',
       linea_mainnet: process.env.linea_mainnet || '',
@@ -229,6 +235,14 @@ module.exports = {
         urls: {
           apiURL: 'https://sepolia.uniscan.xyz/api',
           browserURL: 'https://sepolia.uniscan.xyz/',
+        },
+      },
+      {
+        network: 'baseSepolia',
+        chainId: 84532,
+        urls: {
+          apiURL: 'https://api-sepolia.basescan.org/api',
+          browserURL: 'https://sepolia.basescan.org',
         },
       },
       {
