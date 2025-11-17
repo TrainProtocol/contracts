@@ -1,6 +1,6 @@
 # Train: Permissionless, Trustless Cross-Chain Bridging Protocol
 
-Read the protocol description and sepc [draft] - [Train Documentation](https://docs.train.tech/)
+Read the protocol description and spec [draft] - [Train Documentation](https://docs.train.tech/)
 
 ## TL;DR
 
@@ -24,7 +24,6 @@ Train is a revolutionary bridging protocol designed to address the challenges of
 
 <img width="2312" alt="Diagram 1" src="https://github.com/user-attachments/assets/d004b399-bbe8-4138-ab01-56b8ee5a06c9" />
 
-
 ## How It Works
 
 Train introduces, an improved version of HTLC that addresses key limitations:
@@ -36,7 +35,6 @@ Train introduces, an improved version of HTLC that addresses key limitations:
 
 This approach resolves issues with secret management, claim transactions on the destination chain, and liveness requirements.
 
-
 ## Disclaimer: Development in Progress
 
 Please note that this project is actively under development. It is not ready for deployment on any mainnet environments.
@@ -44,13 +42,12 @@ As we continue to experiment and test new ideas, expect significant changes to t
 
 ## Supported Networks
 
-- [Bitcoin](./chains/bitcoin/README.md)
-- [EVM](./chains/evm/README.md)
-- [Starknet](./chains/starknet/README.md)
-- [TON](./chains/ton/README.md)
+- [EVM (Solidity)](./chains/evm/solidity/README.md)
 - [Solana](./chains/solana/README.md)
-- Aptos/Sui (in progress)
-- Stacks (in progress)
+- [Starknet](./chains/starknet/README.md)
+- [Fuel](./chains/fuel/)
+
+>  Audits: Audited chains are included in this repository — networks still undergoing audits or active development live in their respective branches.
 
 ---
 
