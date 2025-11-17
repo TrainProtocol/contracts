@@ -1,0 +1,40 @@
+name: Ton Jetton Tests
+
+on:
+  push:
+    branches: [main-add-ton]
+    paths:
+      - 'chains/ton/contracts/jetton_train.tact'
+      - 'chains/ton/tests/trainjetton.spec.ts'
+  pull_request:
+    branches: [main-add-ton]
+    paths:
+      - 'chains/ton/contracts/jetton_train.tact'
+      - 'chains/ton/tests/trainjetton.spec.ts'
+
+jobs:
+  blueprint-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        working-directory: chains/ton
+        run: npm install
+
+      - name: Build train jetton contract
+        working-directory: chains/ton/contracts
+        run: npx blueprint build jetton_train
+
+      - name: Run jetton tests
+        working-directory: chains/ton
+        run: |
+          npx jest tests/trainjetton.spec.ts --ci --testFailureExitCode=1 --verbose
