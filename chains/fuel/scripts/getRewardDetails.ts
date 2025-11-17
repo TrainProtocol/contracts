@@ -1,4 +1,4 @@
-import { Contract, Wallet, Provider, Address,  WalletUnlocked } from 'fuels';
+import { Contract, Wallet, Provider, Address, WalletUnlocked } from 'fuels';
 import * as fs from 'fs';
 import * as path from 'path';
 require('dotenv').config();
@@ -20,20 +20,9 @@ async function getRewardDetails() {
 
   const contractAddress = Address.fromB256(contractAddressString);
   const contractInstance = new Contract(contractAddress, contractAbi, wallet);
-  const id = 2n;
+  const id = process.env.ID2!;
 
-  try {
-    const { transactionId, waitForResult } = await contractInstance.functions
-      .get_reward_details(id)
-      .call();
-
-    const { value } = await waitForResult();
-
-    console.log('tx id: ', transactionId);
-    console.log('get_reward_details function result:', value);
-  } catch (error) {
-    console.error('Error calling commit function:', error);
-  }
+  console.log((await contractInstance.functions.get_reward_details(id).get()).value);
 }
 
 getRewardDetails().catch(console.error);

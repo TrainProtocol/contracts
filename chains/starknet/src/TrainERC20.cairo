@@ -1,19 +1,22 @@
-//   _____ ____      _    ___ _   _      ____  ____   ___ _____ ___   ____ ___  _
-//  |_   _|  _ \    / \  |_ _| \ | |    |  _ \|  _ \ / _ \_   _/ _ \ / ___/ _ \| |
-//    | | | |_) |  / _ \  | ||  \| |    | |_) | |_) | | | || || | | | |  | | | | |
-//    | | |  _ <  / ___ \ | || |\  |    |  __/|  _ <| |_| || || |_| | |__| |_| | |___
-//    |_| |_| \_\/_/   \_\___|_| \_|    |_|   |_| \_\\___/ |_| \___/ \____\___/|_____|
+//     @@                                    @@@
+//    @@@
+//    @@@        @@   @@@@      @@@@@         @     @    @@@@@
+//  @@@@@@@@@   @@@@@@      @@@@    @@@@@    @@@   @@@@@@    @@@@
+//    @@@       @@@       @@@           @@@  @@@   @@@          @@@
+//    @@@       @@@       @@@           @@@  @@@   @@@          @@@
+//    @@@       @@@       @@@           @@@  @@@   @@@          @@@
+//     @@@      @@@        @@@@       @@@@@  @@@   @@@          @@@
+//       @@@@@  @@@           @@@@@@@@@ @@@  @@@   @@@          @@@
 
-use starknet::ContractAddress;
 use core::hash::{HashStateExTrait, HashStateTrait};
 use core::poseidon::PoseidonTrait;
-use openzeppelin_utils::snip12::{SNIP12Metadata, StructHash, OffchainMessageHash};
+use openzeppelin::utils::snip12::{OffchainMessageHash, SNIP12Metadata, StructHash};
+use starknet::ContractAddress;
 
 /// @dev the selctor of the AddLockMsg type.
-const MESSAGE_TYPE_HASH: felt252 =
-    selector!(
-        "\"AddLockMsg\"(\"Id\":\"u256\",\"hashlock\":\"u256\",\"timelock\":\"u256\")\"u256\"(\"low\":\"u128\",\"high\":\"u128\")"
-    );
+const MESSAGE_TYPE_HASH: felt252 = selector!(
+    "\"AddLockMsg\"(\"Id\":\"u256\",\"hashlock\":\"u256\",\"timelock\":\"u256\")\"u256\"(\"low\":\"u128\",\"high\":\"u128\")",
+);
 /// @dev the selector of the u256 type.
 const U256_TYPE_HASH: felt252 = selector!("\"u256\"(\"low\":\"u128\",\"high\":\"u128\")");
 
@@ -26,6 +29,13 @@ struct AddLockMsg {
     hashlock: u256,
     /// @dev The new timelock to be set for the HTLC.
     timelock: u256,
+}
+#[derive(Drop, Copy, Hash)]
+pub struct StarknetDomain {
+    name: felt252,
+    version: felt252,
+    chain_id: felt252,
+    revision: felt252,
 }
 
 /// @dev used to hash AddLockMsg struct.
@@ -49,6 +59,7 @@ impl StructHashU256 of StructHash<u256> {
         state.finalize()
     }
 }
+
 /// Required for hash computation.
 /// The name and version of our protocol.
 impl SNIP12MetadataImpl of SNIP12Metadata {
@@ -134,21 +145,21 @@ pub trait ITrainERC20<TContractState> {
 ///      back with this function.
 #[starknet::contract]
 mod TrainERC20 {
-    use super::{SNIP12MetadataImpl, StructHashImpl, AddLockMsg, OffchainMessageHash};
-    use openzeppelin_account::interface::{ISRC6Dispatcher, ISRC6DispatcherTrait};
-    use openzeppelin::token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
-    use core::traits::Into;
-    use core::num::traits::Zero;
-    use starknet::storage::{Map, StoragePathEntry};
-    use starknet::{ContractAddress, get_caller_address, get_contract_address, get_block_timestamp};
     use alexandria_bytes::{Bytes, BytesTrait};
+    use core::num::traits::Zero;
+    use core::traits::Into;
+    use openzeppelin::token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
+    use openzeppelin::account::interface::{ISRC6Dispatcher, ISRC6DispatcherTrait};
+    use starknet::storage::{Map, StoragePathEntry};
+    use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_contract_address};
+    use super::{AddLockMsg, OffchainMessageHash, SNIP12MetadataImpl, StructHashImpl};
 
     #[storage]
     struct Storage {
         /// @dev map from ID to HTLC
-        contracts: Map::<u256, HTLC>,
+        contracts: Map<u256, HTLC>,
         /// @dev map from ID to Reward
-        rewards: Map::<u256, Reward>,
+        rewards: Map<u256, Reward>,
     }
 
     #[derive(Drop, Serde, starknet::Store)]
@@ -419,7 +430,7 @@ mod TrainERC20 {
             amount: u256,
             tokenContract: ContractAddress,
         ) -> u256 {
-            assert!(self.validTimelock(timelock), "Invalid TimeLock");
+            assert!(timelock > get_block_timestamp().into() + 1800, "Invalid TimeLock");
             assert!(amount != 0, "Funds Can Not Be Zero");
             assert!(!self.hasHTLC(Id), "HTLC Already Exists");
             assert!(
@@ -430,7 +441,9 @@ mod TrainERC20 {
             // transfer the token from the user into the contract
             let token: IERC20Dispatcher = IERC20Dispatcher { contract_address: tokenContract };
             assert!(
-                token.balance_of(get_caller_address()) >= amount + reward, "Insufficient Balance",
+                token.balance_of(get_caller_address()) >= amount + reward,
+                "Insufficient
+                Balance",
             );
             assert!(
                 token.allowance(get_caller_address(), get_contract_address()) >= amount + reward,
@@ -509,30 +522,30 @@ mod TrainERC20 {
                 if reward.timelock > get_block_timestamp().into() {
                     let transfered = IERC20Dispatcher { contract_address: htlc.tokenContract }
                         .transfer(htlc.srcReceiver, htlc.amount);
-                    let reward_transfered = IERC20Dispatcher { contract_address: htlc.tokenContract }
+                    let reward_transfered = IERC20Dispatcher {
+                        contract_address: htlc.tokenContract,
+                    }
                         .transfer(htlc.sender, reward.amount);
                     assert!(transfered && reward_transfered, "transfer failed");
-
+                } // if the caller is the receiver then they should get and the amount,
+                // and the reward
+                else if get_caller_address() == htlc.srcReceiver {
+                    let transfered = IERC20Dispatcher { contract_address: htlc.tokenContract }
+                        .transfer(htlc.srcReceiver, htlc.amount + reward.amount);
+                    assert!(transfered, "transfer failed");
                 } else {
-                    // if the caller is the receiver then they should get and the amount,
-                    // and the reward
-                    if get_caller_address() == htlc.srcReceiver {
-                        let transfered = IERC20Dispatcher { contract_address: htlc.tokenContract }
-                            .transfer(htlc.srcReceiver, htlc.amount + reward.amount);
-                        assert!(transfered, "transfer failed");
-
-                    } else {
-                        let transfered = IERC20Dispatcher { contract_address: htlc.tokenContract }
-                            .transfer(htlc.srcReceiver, htlc.amount);
-                        let reward_transfered = IERC20Dispatcher { contract_address: htlc.tokenContract }
-                            .transfer(get_caller_address(), reward.amount);
-                        assert!(transfered && reward_transfered, "transfer failed");
+                    let transfered = IERC20Dispatcher { contract_address: htlc.tokenContract }
+                        .transfer(htlc.srcReceiver, htlc.amount);
+                    let reward_transfered = IERC20Dispatcher {
+                        contract_address: htlc.tokenContract,
                     }
+                        .transfer(get_caller_address(), reward.amount);
+                    assert!(transfered && reward_transfered, "transfer failed");
                 }
             } else {
                 // send the tokens to the receiver if the reward is set to zero
                 let transfered = IERC20Dispatcher { contract_address: htlc.tokenContract }
-                    .transfer(htlc.srcReceiver, htlc.amount);
+                   .transfer(htlc.srcReceiver, htlc.amount);
                 assert!(transfered, "transfer failed");
             }
 
@@ -661,3 +674,4 @@ mod TrainERC20 {
         }
     }
 }
+

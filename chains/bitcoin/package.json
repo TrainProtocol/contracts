@@ -34,11 +34,15 @@
     "pre-build": "eslint './src/**/*.{ts, js, json}' && prettier --write src"
   },
   "peerDependencies": {
-    "@mempool/mempool.js": "^2.3.0",
+    "@mempool/mempool.js": "^3.0.0",
     "bip65": "^1.0.3",
-    "bitcoinjs-lib": "^6.1.0",
+    "bitcoinjs-lib": "^6.1.6",
     "ecpair": "^2.1.0",
-    "tiny-secp256k1": "^2.2.1",
+    "tiny-secp256k1": "^2.2.3",
     "varuint-bitcoin": "^1.1.2"
+  },
+  "dependencies": {
+    "@cmdcode/tapscript": "^1.5.3",
+    "@noble/secp256k1": "^2.3.0"
   }
 }

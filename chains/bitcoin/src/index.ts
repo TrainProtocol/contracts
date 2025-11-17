@@ -1,2 +1,2 @@
-export * from './BitcoinHtlc';
+export * from './BitcoinTrain';
 export * from './Core';

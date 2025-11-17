@@ -33,3 +33,5 @@ build/
 .infura
 .secret
 .vscode
+
+chains/bitcoin/metadata/

@@ -1,8 +1,8 @@
 require('dotenv').config();
 import { getHttpV4Endpoint } from '@orbs-network/ton-access';
 import { mnemonicToWalletKey } from 'ton-crypto';
-import { TonClient4, WalletContractV5R1, Address } from '@ton/ton';
-import { Commit, Train } from '../build/train/tact_Train';
+import { TonClient4, WalletContractV5R1, Address, beginCell } from '@ton/ton';
+import { Commit, storeCommit, Train } from '../build/train/tact_Train';
 import { toNano, sleep, createStrMap } from '../utils/utils';
 
 const hopChains = createStrMap([[0n, { $$type: 'StringImpl', data: 'STARKNET_SEPOLIA' }]]);
@@ -18,8 +18,8 @@ const dstAsset: string = 'ETH';
 const dstAddress: string = '0x0430a74277723D1EBba7119339F0F8276ca946c1B2c73DE7636Fd9EBA31e1c1f';
 const srcAsset: string = 'TON';
 const srcReceiver: Address = Address.parse(process.env.srcReceiver!);
-const timelock = BigInt(Math.floor(Date.now() / 1000) + 3600);
-const amount = toNano('0.1');
+const timelock = BigInt(Math.floor(Date.now() / 1000) + 980);
+const amount = toNano('0.15');
 const senderPubKey = BigInt(process.env.senderPubKey!);
 
 async function run() {
@@ -36,7 +36,7 @@ async function run() {
     const contractAddress = Address.parse(process.env.CONTRACT!);
 
     const newContract = Train.fromAddress(contractAddress);
-    const contractProvider = client.open(newContract);
+    // const contractProvider = client.open(newContract);
 
     const commitMessage: Commit = {
         $$type: 'Commit',
@@ -51,11 +51,18 @@ async function run() {
         timelock: timelock,
         senderPubKey: senderPubKey,
         amount: amount,
-        Id: 13n,
+        id: BigInt(process.env.id!),
     };
 
     console.log('Sending Commit message...');
-    await contractProvider.send(walletSender, { value: toNano('1.5'), bounce: true }, commitMessage);
+
+    // await contractProvider.send(walletSender, { value: toNano('1.5'), bounce: true}, commitMessage);
+    await client.provider(newContract.address).internal(walletSender, {
+        value: toNano('0.5'),
+        bounce: true,
+        sendMode: 1, // PAY_GAS_SEPARATELY
+        body: beginCell().store(storeCommit(commitMessage)).endCell(),
+    });
 
     let currentSeqno = seqno;
     while (currentSeqno == seqno) {

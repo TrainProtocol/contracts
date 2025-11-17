@@ -1,0 +1,35 @@
+name: EVM Native Contract Tests
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'chains/evm/solidity/contracts/Train.sol'
+      - 'chains/evm/solidity/test/native.js'
+      
+  pull_request:
+    branches: [dev]
+    paths:
+      - 'chains/evm/solidity/contracts/Train.sol'
+      - 'chains/evm/solidity/test/native.js'
+
+jobs:
+  erc20-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        working-directory: chains/evm/solidity
+        run: npm ci
+
+      - name: Run native tests
+        working-directory: chains/evm/solidity
+        run: npx hardhat test test/native.js --bail --parallel

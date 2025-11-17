@@ -1,0 +1,29 @@
+{
+  "name": "scripts",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@aztec/accounts": "3.0.0-devnet.2",
+    "@aztec/aztec.js": "3.0.0-devnet.2",
+    "@aztec/bb-prover": "3.0.0-devnet.2",
+    "@aztec/noir-contracts.js": "3.0.0-devnet.2",
+    "@aztec/pxe": "3.0.0-devnet.2",
+    "@aztec/test-wallet": "^3.0.0-devnet.2",
+    "dotenv": "^16.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.1",
+    "prettier": "^3.5.3",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3"
+  }
+}

@@ -1,4 +1,4 @@
-import { Contract, Wallet, Provider, Address, DateTime, WalletUnlocked } from 'fuels';
+import { Contract, Wallet, Provider, Address, DateTime } from 'fuels';
 import * as fs from 'fs';
 import * as path from 'path';
 require('dotenv').config();
@@ -20,8 +20,8 @@ async function addLock() {
 
   const contractAddress = Address.fromB256(contractAddressString);
   const contractInstance = new Contract(contractAddress, contractAbi, wallet);
-  const Id = 1n;
-  const hashlock = '0xd25c96a5a03ec5f58893c6e3d23d31751a1b2f0e09792631d5d2463f5a147187';
+  const Id = BigInt(process.env.ID1!);
+  const hashlock = process.env.HASHLOCK!;
   const currentUnixTime = Math.floor(Date.now() / 1000) + 910;
   const timelock = DateTime.fromUnixSeconds(currentUnixTime).toTai64();
 

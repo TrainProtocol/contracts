@@ -1,4 +1,4 @@
-import { Contract, Wallet, Provider, Address, DateTime, bn } from 'fuels';
+import { Contract, Wallet, Provider, Address, DateTime } from 'fuels';
 import * as fs from 'fs';
 import * as path from 'path';
 require('dotenv').config();
@@ -43,10 +43,10 @@ async function commit(): Promise<void> {
     const dstAsset = 'Toncoin'.padEnd(64, ' ');
     const dstAddress = '0QAS8JNB0G4zVkdxABCLVG-Vy3KXE3W3zz1yxpnfu4J-B40y'.padEnd(64, ' ');
     const srcAsset = 'ETH'.padEnd(64, ' ');
-    const srcReceiver = { bits: '0x6364b23e8c34d46d0b68d20e0c1463230a9243a1dd710a7dd8b32dfb927af53a' };
-    const currentUnixTime = Math.floor(Date.now() / 1000) + 901;
+    const srcReceiver = { bits: '0x8d08AAa3252C67dA78f5F4Dd2396aF1a8c231527BFEeB4a96743c646dBE9C9B2' };
+    const currentUnixTime = Math.floor(Date.now() / 1000) + 1000;
     const timelock = DateTime.fromUnixSeconds(currentUnixTime).toTai64();
-    const id = 3n;
+    const id = process.env.ID1;
 
     const contractAddress = Address.fromB256(contractAddressString);
     const contractInstance = new Contract(contractAddress, contractAbi, wallet);

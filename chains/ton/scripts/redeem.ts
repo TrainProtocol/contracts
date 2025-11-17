@@ -1,7 +1,7 @@
 require('dotenv').config();
 import { getHttpV4Endpoint } from '@orbs-network/ton-access';
 import { mnemonicToWalletKey } from 'ton-crypto';
-import { TonClient4, WalletContractV5R1, Address } from '@ton/ton';
+import { TonClient4, WalletContractV5R1, Address, WalletContractV4 } from '@ton/ton';
 import { Redeem, Train } from '../build/train/tact_Train';
 import { sleep, toNano } from '../utils/utils';
 
@@ -11,27 +11,27 @@ export async function run() {
 
     const mnemonic = process.env.MNEMONIC!;
     const key = await mnemonicToWalletKey(mnemonic.split(' '));
-    const wallet = WalletContractV5R1.create({ publicKey: key.publicKey, workchain: 0 });
+    const wallet = WalletContractV4.create({ publicKey: key.publicKey, workchain: 0 });
 
     const walletContract = client.open(wallet);
     const walletSender = walletContract.sender(key.secretKey);
     const seqno = await walletContract.getSeqno();
 
-    const contractAddress = Address.parse(process.env.JETTONCONTRACT!);
+    const contractAddress = Address.parse(process.env.CONTRACT!);
     const newContract = Train.fromAddress(contractAddress);
     const contractProvider = client.open(newContract);
 
-    const Id = BigInt(process.env.id2!);
+    const id = BigInt(process.env.id!);
     const secret = BigInt(process.env.secret!);
 
     const redeemMessage: Redeem = {
         $$type: 'Redeem',
-        Id: Id,
+        id: id,
         secret: secret,
     };
 
     console.log('Redeeming HTLC...');
-    await contractProvider.send(walletSender, { value: toNano('0.2'), bounce: true }, redeemMessage);
+    await contractProvider.send(walletSender, { value: toNano('0.1'), bounce: true }, redeemMessage);
 
     let currentSeqno = seqno;
     while (currentSeqno == seqno) {

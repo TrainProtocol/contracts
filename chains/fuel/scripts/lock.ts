@@ -18,16 +18,16 @@ async function lock() {
   const wallet: WalletUnlocked = Wallet.fromMnemonic(mnemonic);
   wallet.connect(provider);
 
-  const Id = 2n;
+  const Id = process.env.ID2!;
   const dstChain = 'TON'.padEnd(64, ' ');
   const dstAsset = 'Toncoin'.padEnd(64, ' ');
   const dstAddress = '0QAS8JNB0G4zVkdxABCLVG-Vy3KXE3W3zz1yxpnfu4J-B40y'.padEnd(64, ' ');
   const srcAsset = 'ETH'.padEnd(64, ' ');
   const srcReceiver = { bits: '0x8d08AAa3252C67dA78f5F4Dd2396aF1a8c231527BFEeB4a96743c646dBE9C9B2' };
-  const currentUnixTime = Math.floor(Date.now() / 1000) + 900;
+  const currentUnixTime = Math.floor(Date.now() / 1000) + 1900;
   const timelock = DateTime.fromUnixSeconds(currentUnixTime).toTai64();
-  const hashlock = '0x3b7674662e6569056cef73dab8b7809085a32beda0e8eb9e9b580cfc2af22a55';
-  const reward = 2n;
+  const hashlock = process.env.HASHLOCK!;
+  const reward = 1n;
   const rewardTimelock = DateTime.fromUnixSeconds(currentUnixTime - 300).toTai64();
 
   const contractAddress = Address.fromB256(contractAddressString);

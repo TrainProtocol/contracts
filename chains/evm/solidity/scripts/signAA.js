@@ -5,8 +5,8 @@ const { SigningMethod, buildContractSignature } = SafeGlobal;
 
 (async function () {
   let protocolKit = await Safe.init({
-    provider: process.env.eth_sepolia_rpc,
-    signer: process.env.priv_key_testnet_evm,
+    provider: process.env.zk_sync_mainnet_rpc,
+    signer: process.env.priv_key_zk_sync,
     safeAddress: process.env.safe_address,
   });
 
@@ -27,14 +27,14 @@ const { SigningMethod, buildContractSignature } = SafeGlobal;
     domain: {
       name: 'Train',
       version: '1',
-      chainId: 11155111,
-      verifyingContract: '0x25b16a2c77a0D6f17A7fC55FDf03faa6D8292B22',
+      chainId: 324,
+      verifyingContract: '0x98aD8967F66E8527eAe472034f30E1897fFb4e75',
     },
     primaryType: 'addLockMsg',
     message: {
-      Id: '0x4a64a107f0cb32536e5bce6c98c393db21cca7f4ea187ba8c4dca8b51d4ea800',
+      Id: '0x4a64a107f0cb32536e5bce6c98c393db21cca7f4ea187ba8c4dca8b51d4ea80a',
       hashlock: '0x80b41a1cfabc2af6718ad3f104b575f55a4708148ad7f24dd49b4e9da74a5950',
-      timelock: 9999999999,
+      timelock: 1740151841,
     },
   };
 

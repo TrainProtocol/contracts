@@ -1,7 +1,7 @@
 require('dotenv').config();
 import { getHttpV4Endpoint } from '@orbs-network/ton-access';
 import { mnemonicToWalletKey } from 'ton-crypto';
-import { TonClient4, WalletContractV5R1, Address } from '@ton/ton';
+import { TonClient4, WalletContractV5R1, Address, WalletContractV4 } from '@ton/ton';
 import { AddLock, Train } from '../build/train/tact_Train';
 import { toNano, sleep } from '../utils/utils';
 
@@ -17,16 +17,16 @@ async function run() {
     const walletSender = walletContract.sender(key.secretKey);
     const seqno = await walletContract.getSeqno();
 
-    const contractAddress = Address.parse(process.env.JETTONCONTRACT!);
+    const contractAddress = Address.parse(process.env.CONTRACT!);
     const newContract = Train.fromAddress(contractAddress);
     const contractProvider = client.open(newContract);
-    const amount = toNano('0.1');
+    const amount = toNano('0.0051');
 
     const addLockMessage: AddLock = {
         $$type: 'AddLock',
-        Id: BigInt(process.env.id!),
+        id: BigInt(process.env.id!),
         hashlock: BigInt(process.env.hashlock!),
-        timelock: BigInt(Math.floor(Date.now() / 1000) + 3600),
+        timelock: BigInt(Math.floor(Date.now() / 1000) + 930),
     };
 
     console.log('Sending AddLock message...');

@@ -1,72 +1,157 @@
-# @atomic-port/bitcoin
 
-This package is for HTLC transactions between the any blockchains. HTLC allows direct transactions between different chains. Usage and examples are shown below.
+# Train Protocol Bitcoin
 
-<br>
+## Overview
 
-## Attention
+This project is the **Bitcoin implementation of the Train protocol**, adapted with **minimal changes** to fit Bitcoin’s Taproot and UTXO model.
+It provides contract flows for **locking, upgrading, refunding, and redeeming funds** in a hashed time-locked contract (HTLC) style.
 
-This script was created and released for research and experimentation and is not intended to encourage actual use.
-Trading of crypto assets may require licenses, applications, or approvals in some countries.
-Please consider using them at your own risk.
+The architecture mirrors the Train protocol design, but adjusted for:
 
-<br>
+* Bitcoin’s **Taproot trees** (hashlock + refund scripts)
+* **CSV (CheckSequenceVerify)**-based timelocks
+* OP_RETURN metadata outputs for commit chaining
 
-## Test is now open to the public.
+⚠️ **Note on OP_RETURN:**
+Current implementation truncates payloads to fit Bitcoin Core limits. Once **Bitcoin Core v30** is released with extended OP_RETURN support, this project will be updated to support **longer metadata outputs**.
 
-Transactions on each chain in this library are currently available only on the testnet.
-If you wish to use it in a production environment, please change the network and other parameters.
+---
 
-<br>
+## Functions Overview
 
-## Introduction
+### **commit**
 
-Install the necessary libraries
+Locks funds into a Taproot contract with two branches:
 
-**npm**
+* **Multisig path** – requires signatures from both sender and receiver
+* **Refund path** – allows sender to reclaim funds after CSV timelock
 
+The Taproot key path is unspendable. Optionally attaches metadata (`commitId`, memo, or data) into OP_RETURN.
+
+---
+
+### **addLockInit / addLockFinalize**
+
+Upgrades an existing commit contract to a new lock with a **hashlock + refund** script tree.
+
+* **addLockInit** – builds and signs the PSBT with sender
+* **addLockFinalize** – receiver cosigns, finalizes, and broadcasts
+
+This step consumes the old multisig branch and produces a new hashlock contract.
+
+---
+
+### **lock**
+
+Directly funds a Taproot contract with:
+
+* **Hashlock path** – receiver can redeem with secret
+* **Refund path** – sender can reclaim after CSV timelock
+
+Encodes metadata (`lockId`, hashlock, timelock, optional dstChain/asset) into OP_RETURN.
+
+---
+
+### **refund**
+
+Spends the **refund path** of any contract (commit, lock, or addLock).
+Requires CSV timelock to have passed. Refund destination can be:
+
+* A user-provided `refundAddress`
+* A raw `refundScriptHex`
+* Defaults to sender’s P2WPKH
+
+---
+
+### **solverRedeem**
+
+Redeems through the **hashlock path** by revealing the secret.
+
+* Receiver provides the preimage
+* Solver pays the transaction fees
+
+Encodes `commitId + secret` into OP_RETURN for traceability.
+
+---
+
+### **userRedeemPrepare / userRedeemComplete**
+
+Two-phase redeem flow:
+
+* **userRedeemPrepare** – receiver builds a PSBT with `SIGHASH_SINGLE|ANYONECANPAY`, signs it, and reveals the secret
+* **userRedeemComplete** – solver adds fee inputs, finalizes, and broadcasts
+
+This ensures the user only needs the preimage and signature; solver covers fees.
+
+---
+
+### **convertP2WPKHtoP2TR**
+
+Helper to move funds from sender’s P2WPKH UTXOs into a key-path Taproot output.
+
+---
+
+### **convertP2TRtoP2WPKH**
+
+Helper to move funds back from sender’s key-path Taproot UTXOs into P2WPKH.
+
+---
+
+## Usage
+
+Run all scripts with **npm** + **tsx**.
+All scripts automatically read from the latest metadata in `/metadata`. You can override with flags when needed.
+
+### Commit
+
+```bash
+npx tsx test/commit.ts
 ```
-npm install --save @mempool/mempool.js bip65 bitcoinjs-lib@6 ecpair tiny-secp256k1 varuint-bitcoin @atomic-port/bitcoin
+
+### Lock
+
+```bash
+npx tsx test/lock.ts
 ```
 
-**yarn**
+### Refund
 
+Refund contracts (works with **lock**, **commit**, or **addLock** metadata):
+
+```bash
+npx tsx test/refund.ts --meta=lock --refundAddress=tb1qexample...
 ```
-yarn add @mempool/mempool.js bip65 bitcoinjs-lib@6 ecpair tiny-secp256k1 varuint-bitcoin @atomic-port/bitcoin
+
+Flags:
+
+* `--meta=lock|commit|addlock` → choose metadata file (default: auto)
+* `--refundAddress=...` → refund to a specific address
+* `--refundScriptHex=...` → refund to a raw script
+
+### Decode
+
+Decode contract metadata or live txid:
+
+```bash
+npx tsx test/decode.ts <txid>
 ```
 
-HTLC issues a secret and key in advance and uses this to issue a secret lock.
-When both parties agree to the transaction, the secret and key are exchanged separately, and the key is used to receive a token. This is how the cross-chain swap is performed.
+---
 
-<br>
+## Metadata
 
-## Create HTLC contract
+Each step writes a JSON file under `metadata/` to persist contract state:
 
-You can publish using this package with the following operations.
-The output hashPair contains a secret and a proof. The secret is shared in advance, and the proof is issued at a mutually agreed timing.
+* **lock_meta.json** → from `lock.ts`
+* **commit_meta.json** → from `commit.ts`
+* **addlock_meta.json** → from `addLock.ts`
+* **refund_meta.json** → from `refund.ts`
 
-[create-htlc.ts](../../examples/bitcoin/src/create-htlc.ts)
+These files contain:
 
-## Issue a secret lock (aka hashlock)
+* Contract address & Taproot script data
+* Timelock / CSV delay values
+* Control blocks for hashlock & refund paths
+* IDs (`commitId`, `lockId`) for OP_RETURN chaining
 
-
-[lock.ts](../../examples/bitcoin/src/lock.ts)
-
-<br>
-
-## Unlocking by Proof
-
-With a secret lock, locked assets are withdrawn through a secret proof transaction.
-
-[withDraw.ts](../../examples/bitcoin/src/withdraw.ts)
-
-<br>
-
-For more detailed examples, please check the sample collection below
-[examples](examples/README.md)
-
-<br>
-
-## More Documents
-
-- [about bitcoin](https://bitcoin.org/)
+Subsequent scripts automatically read these files, so you can chain flows without re-entering data.

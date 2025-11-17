@@ -1,26 +1,97 @@
-# HashedTimeLockTON
+# TrainProtocol – TON Chain Contracts
 
-## Project structure
+This directory contains the TON chain implementation of TrainProtocol’s **PreHTLC-based atomic swap** contracts with jetton support. These smart contracts enable trust-minimized, permissionless cross-chain bridging within the Train protocol.
 
--   `contracts` - source code of all the smart contracts of the project and their dependencies.
--   `wrappers` - wrapper classes (implementing `Contract` from ton-core) for the contracts, including any [de]serialization primitives and compilation functions.
--   `tests` - tests for the contracts.
--   `scripts` - scripts used by the project, mainly the deployment scripts.
+---
 
-## How to use
+## 📂 Directory Layout
 
-### Build
+```
 
-`npx blueprint build` or `yarn blueprint build`
+chains/ton/
+├── contracts/         # Tact smart contracts
+├── wrappers/          # TypeScript wrappers
+├── tests/             # Unit/E2E tests using TON sandbox
+├── scripts/           # Deployment and interaction scripts
+├── build/             # Compiled artifacts
+└── README.md          # ← You are here
 
-### Test
+````
 
-`npx blueprint test` or `yarn blueprint test`
+---
 
-### Deploy or run another script
+## ⚙️ Setup & Development
 
-`npx blueprint run` or `yarn blueprint run`
+1. Install dependencies:
+   ```bash
+   npm install
+   ```
 
-### Add a new contract
+2. Compile the contracts:
 
-`npx blueprint create ContractName` or `yarn blueprint create ContractName`
+   ```bash
+   npx blueprint build
+   ```
+
+3. Run tests (requires sandbox):
+
+   ```bash
+   npx blueprint test
+   ```
+
+   Or for a specific test suite:
+
+   ```bash
+   npx blueprint test train.spec.ts
+   ```
+
+4. Deployment (example script):
+
+   ```bash
+    npx ts-node scripts/deployContract.ts
+   ```
+
+---
+
+# TON Contract Fee Estimates from Tests
+
+This document summarizes the estimated TON fees for different message types based on sandbox test results.
+
+---
+
+## Jetton Contract Fees
+
+| Message Type    | Estimated Fee (TON) |
+|-----------------|---------------------|
+| JettonSupport   | 0.01285665          |
+| RemoveJetton    | 0.012001987         |
+| Commit          | 0.058337534         |
+| Lock            | 0.058708207         |
+| AddLock         | 0.016310649         |
+| AddLockSig      | 0.01837698          |
+| Refund          | 0.040652117         |
+| Redeem          | 0.075710956         |
+
+---
+
+## Native Contract Fees
+
+| Message Type    | Estimated Fee (TON) |
+|-----------------|---------------------|
+| Commit          | 0.025061979         |
+| AddLock         | 0.016422649         |
+| Lock            | 0.030122977         |
+| Refund          | 0.016338719         |
+| Redeem          | 0.027525638         |
+| AddLockSig      | 0.01899098          |
+
+---
+
+
+
+- Jetton contract tests: `tests/trainjetton.spec.ts`  
+- Native contract tests: `tests/train.spec.ts`
+
+---
+
+**Note:** These fees represent approximate costs of sending each message type on the TON blockchain during testing in a sandbox environment.
