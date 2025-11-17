@@ -1,6 +1,6 @@
 # Train: Permissionless, Trustless Cross-Chain Bridging Protocol
 
-Read the protocol description and spec [draft] - [Train Documentation](https://docs.train.tech/)
+Read the protocol description and spec - [Train Documentation](https://docs.train.tech/)
 
 ## TL;DR
 
@@ -67,7 +67,7 @@ This approach resolves issues with secret management, claim transactions on the 
 
 ## Disclaimer: Development in Progress
 
-Please note that this project is actively under development. It is not ready for deployment on any mainnet environments.
+Please note that this project is actively under development. It is not ready for deployment on any mainnet environments, unless mentioned as audited.
 As we continue to experiment and test new ideas, expect significant changes to the interface. Please be prepared for ongoing modifications.
 
 ## Acknowledgements
