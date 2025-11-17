@@ -5,6 +5,8 @@ coverage.json
 typechain
 typechain-types
 ignition/deployments
+artifacts-zk
+cache-zk
 
 # Hardhat files
 cache

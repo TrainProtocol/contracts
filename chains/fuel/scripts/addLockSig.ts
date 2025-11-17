@@ -1,61 +1,84 @@
-import { Contract, Wallet, Provider, Address, DateTime, WalletUnlocked, Signer, sha256, arrayify, hexlify } from 'fuels';
+import {
+  Provider,
+  Wallet,
+  Contract,
+  Address,
+  DateTime,
+  sha256,
+  concat,
+  BigNumberCoder,
+  B256Coder,
+  bn,
+  hashMessage,
+  Signer,
+} from 'fuels';
 import * as fs from 'fs';
 import * as path from 'path';
 require('dotenv').config();
 
-const filePath = path.join(__dirname, '../out/release/fuel-abi.json');
-const contractAbi = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-const contractAddressString = process.env.CONTRACT as string;
+interface FuelError extends Error {
+  metadata?: {
+    logs?: any[];
+    receipts?: any[];
+    panic?: boolean;
+    revert?: boolean;
+    reason?: string;
+  };
+  code?: string;
+  rawError?: any;
+}
 
 async function addLockSig() {
-  const providerUrl = process.env.PROVIDER?.trim();
-  if (!providerUrl || !providerUrl.startsWith('http')) {
-    throw new Error('Invalid PROVIDER URL. Please check your .env file.');
-  }
+  // ────────────────────────────────
+  const provider = new Provider(process.env.PROVIDER!);
 
-  const provider = new Provider(providerUrl);
-  const signerMnemonic = process.env.MNEMONIC as string;
-  const signerWallet: WalletUnlocked = Wallet.fromMnemonic(signerMnemonic);
-  signerWallet.connect(provider);
-  
-  const senderMnemonic = process.env.MNEMONIC2 as string;
-  const senderWallet: WalletUnlocked = Wallet.fromMnemonic(senderMnemonic);
-  senderWallet.connect(provider);
+  const signer = Wallet.fromMnemonic(process.env.MNEMONIC!);
+  signer.connect(provider);
 
-  const contractAddress = Address.fromB256(contractAddressString);
-  const contractInstance = new Contract(contractAddress, contractAbi, senderWallet);
-  const Id = 3n;
-  const hashlock = '0xd25c96a5a03ec5f58893c6e3d23d31751a1b2f0e09792631d5d2463f5a147187';
-  const currentUnixTime = Math.floor(Date.now() / 1000) + 900;
-  const timelock = DateTime.fromUnixSeconds(currentUnixTime).toTai64();
+  const sender = Wallet.fromMnemonic(process.env.MNEMONIC2!);
+  sender.connect(provider);
 
-  const IdHex = '0x' + Id.toString(16).padStart(64, '0');
-  const timelockHex = '0x' + BigInt(timelock).toString(16).padStart(64, '0');
+  const abi = JSON.parse(fs.readFileSync(path.join(__dirname, '../out/release/fuel-abi.json'), 'utf8'));
+  const contract = new Contract(Address.fromB256(process.env.CONTRACT!), abi, sender);
 
-  const msg = [IdHex,hashlock,timelockHex];
+  // ────────────────────────────────
+  const Id = bn(process.env.ID1!);
+  const hashlock = process.env.HASHLOCK!;
+  const timelock = DateTime.fromUnixSeconds(Math.floor(Date.now() / 1000) + 1000).toTai64();
 
-  const msgBytes = Uint8Array.from(
-  msg.flatMap(hexStr => Array.from(arrayify(hexStr)))
-);
-  let signedmessage = signerWallet.signer().sign(sha256(msgBytes))
-  const signature  = hexlify(signedmessage) 
-  console.log('signiature verifeid off chain: ',signerWallet.address.toB256() == Signer.recoverAddress(sha256(msgBytes),signature).toB256());
+  const idBytes = new BigNumberCoder('u256').encode(Id);
+  const hashlockBytes = new B256Coder().encode(hashlock);
+  const timelockBytes = new BigNumberCoder('u64').encode(bn(timelock));
 
+  const rawData = concat([idBytes, hashlockBytes, timelockBytes]);
+  const message = sha256(rawData);
+
+  const signature: string = await signer.signMessage(message);
+  const messageHash = hashMessage(message);
+
+  const recoveredAddress: Address = Signer.recoverAddress(messageHash, signature);
+  console.log('off chain signature is valid ? : ', recoveredAddress.toString() === signer.address.toString());
+
+  // Call contract function ────────────────────────────────────────
   try {
-    const { transactionId, waitForResult } = await contractInstance.functions
-      .add_lock_sig(signature,IdHex,hashlock,timelock)
+    const { transactionId, waitForResult } = await contract.functions
+      .add_lock_sig(signature, Id, hashlock, bn(timelock))
       .call();
 
-    const { logs,value } = await waitForResult();
+    console.log('TxId:', transactionId);
+    const { logs } = await waitForResult();
+    logs.forEach((l) => console.log('Log:', l));
+  } catch (err) {
+    const fuelError = err as FuelError;
+    console.error('add_lock_sig failed:', fuelError.message || fuelError);
 
-    console.log('tx id: ', transactionId);
-    console.log('add_lock function logs: ',logs[0]);
-    console.log('add_lock function result:', value);
-  } catch (error) {
-    console.error('Error calling add_lock function:', error);
+    if (fuelError.metadata?.logs) {
+      console.log('Contract logs:');
+      fuelError.metadata.logs.forEach((log, i) => console.log(`Log ${i}:`, log));
+    }
   }
 }
 
-addLockSig().catch(console.error);
-
-
+addLockSig().catch((err) => {
+  console.error('Unhandled error:', err);
+});

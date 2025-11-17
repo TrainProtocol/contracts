@@ -5,3 +5,5 @@ license = "Apache-2.0"
 name = "fuel"
 
 [dependencies]
+std = { git = "https://github.com/FuelLabs/sway", tag = "v0.68.4" }
+sway_libs = { git = "https://github.com/FuelLabs/sway-libs", tag = "v0.25.2" }

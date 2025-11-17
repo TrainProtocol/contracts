@@ -1,6 +1,6 @@
 const { buildModule } = require('@nomicfoundation/hardhat-ignition/modules');
 
-module.exports = buildModule('PreHTLCModule', (m) => {
-  const train = m.contract('Train');
+module.exports = buildModule('TokenModule', (m) => {
+  const train = m.contract('TestToken');
   return { train };
 });

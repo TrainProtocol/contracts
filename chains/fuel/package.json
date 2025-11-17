@@ -9,7 +9,7 @@
     "build": "tsc"
   },
   "dependencies": {
-    "fuels": "latest",
+    "fuels": "^0.100.6",
     "dotenv": "^16.0.3"
   },
   "devDependencies": {

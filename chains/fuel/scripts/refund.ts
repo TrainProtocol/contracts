@@ -20,7 +20,8 @@ async function refund() {
 
   const contractAddress = Address.fromB256(contractAddressString);
   const contractInstance = new Contract(contractAddress, contractAbi, wallet);
-  const Id = 2n;
+  const Id = process.env.ID2!;
+
   try {
     const { transactionId, waitForResult } = await contractInstance.functions
       .refund(Id)

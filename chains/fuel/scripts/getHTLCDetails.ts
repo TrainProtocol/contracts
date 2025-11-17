@@ -20,20 +20,9 @@ async function getHTLCDetials() {
 
   const contractAddress = Address.fromB256(contractAddressString);
   const contractInstance = new Contract(contractAddress, contractAbi, wallet);
-  const id = 2n;
+  const id = process.env.ID1!;
 
-  try {
-    const { transactionId, waitForResult } = await contractInstance.functions
-      .get_htlc_details(id)
-      .call();
-
-    const { value } = await waitForResult();
-
-    console.log('tx id: ', transactionId);
-    console.log('get_htlc_details function result:', value);
-  } catch (error) {
-    console.error('Error calling commit function:', error);
-  }
+  console.log((await contractInstance.functions.get_htlc_details(id).get()).value);
 }
 
 getHTLCDetials().catch(console.error);

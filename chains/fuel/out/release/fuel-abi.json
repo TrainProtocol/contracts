@@ -33,6 +33,11 @@
       ]
     },
     {
+      "type": "enum sway_libs::reentrancy::errors::ReentrancyError",
+      "concreteTypeId": "4d216c57b3357523323f59401c7355785b41bdf832f6e1106272186b94797038",
+      "metadataTypeId": 5
+    },
+    {
       "type": "str",
       "concreteTypeId": "8c25cb3686462e9a86d2883c5688a22fe738b0bbc85f458d2d2b5f3f667c6d5a"
     },
@@ -43,47 +48,47 @@
     {
       "type": "struct HTLC",
       "concreteTypeId": "86d8c6f7cae21a575a05f79ba638fb0dad5282a73d2f4ff843b273d20db407a9",
-      "metadataTypeId": 6
+      "metadataTypeId": 7
     },
     {
       "type": "struct Reward",
       "concreteTypeId": "a9d8854d124ad51a13800926dffc832d2b05843a39a669d4d9e5defeecdbba46",
-      "metadataTypeId": 7
+      "metadataTypeId": 8
     },
     {
       "type": "struct TokenCommitted",
       "concreteTypeId": "78acd35e37502d98e65a2ab559087dd216a287a7451d4f935b390221d298b700",
-      "metadataTypeId": 8
+      "metadataTypeId": 9
     },
     {
       "type": "struct TokenLockAdded",
       "concreteTypeId": "ae438802fd396d1a9e35c5d90ac591a3b07fefce2c695bbe8b413c97a45580a0",
-      "metadataTypeId": 9
+      "metadataTypeId": 10
     },
     {
       "type": "struct TokenLocked",
       "concreteTypeId": "40a5216fe49383a63f3bc1fc9ed173b15d65507cf0afb1bf60b45455cf3c8cc2",
-      "metadataTypeId": 10
+      "metadataTypeId": 11
     },
     {
       "type": "struct TokenRedeemed",
       "concreteTypeId": "763c4ffa6ea9a443fa0bd80203751132ca64f37f23d2a7637091737e9cd5b7d7",
-      "metadataTypeId": 11
+      "metadataTypeId": 12
     },
     {
       "type": "struct TokenRefuned",
       "concreteTypeId": "3305d3421a33ef2ee99d7b6a3d1e24e0f49eaee9476c84a9066d33eb7dc306d7",
-      "metadataTypeId": 12
+      "metadataTypeId": 13
     },
     {
       "type": "struct std::address::Address",
       "concreteTypeId": "f597b637c3b0f588fb8d7086c6f4735caa3122b85f0423b82e489f9bb58e2308",
-      "metadataTypeId": 13
+      "metadataTypeId": 14
     },
     {
       "type": "struct std::b512::B512",
       "concreteTypeId": "745e252e80bec590efc3999ae943f07ccea4d5b45b00bb6575499b64abdd3322",
-      "metadataTypeId": 15
+      "metadataTypeId": 16
     },
     {
       "type": "u256",
@@ -125,11 +130,11 @@
       "components": [
         {
           "name": "Address",
-          "typeId": 13
+          "typeId": 14
         },
         {
           "name": "ContractId",
-          "typeId": 16
+          "typeId": 17
         }
       ]
     },
@@ -143,20 +148,30 @@
         },
         {
           "name": "Some",
-          "typeId": 5
+          "typeId": 6
         }
       ],
       "typeParameters": [
-        5
+        6
+      ]
+    },
+    {
+      "type": "enum sway_libs::reentrancy::errors::ReentrancyError",
+      "metadataTypeId": 5,
+      "components": [
+        {
+          "name": "NonReentrant",
+          "typeId": 0
+        }
       ]
     },
     {
       "type": "generic T",
-      "metadataTypeId": 5
+      "metadataTypeId": 6
     },
     {
       "type": "struct HTLC",
-      "metadataTypeId": 6,
+      "metadataTypeId": 7,
       "components": [
         {
           "name": "amount",
@@ -172,11 +187,11 @@
         },
         {
           "name": "sender",
-          "typeId": 13
+          "typeId": 14
         },
         {
           "name": "srcReceiver",
-          "typeId": 13
+          "typeId": 14
         },
         {
           "name": "timelock",
@@ -184,17 +199,17 @@
         },
         {
           "name": "assetId",
-          "typeId": 14
+          "typeId": 15
         },
         {
           "name": "claimed",
-          "typeId": 17
+          "typeId": 18
         }
       ]
     },
     {
       "type": "struct Reward",
-      "metadataTypeId": 7,
+      "metadataTypeId": 8,
       "components": [
         {
           "name": "amount",
@@ -208,7 +223,7 @@
     },
     {
       "type": "struct TokenCommitted",
-      "metadataTypeId": 8,
+      "metadataTypeId": 9,
       "components": [
         {
           "name": "hopChains",
@@ -240,11 +255,11 @@
         },
         {
           "name": "sender",
-          "typeId": 13
+          "typeId": 14
         },
         {
           "name": "srcReceiver",
-          "typeId": 13
+          "typeId": 14
         },
         {
           "name": "srcAsset",
@@ -260,13 +275,13 @@
         },
         {
           "name": "assetId",
-          "typeId": 14
+          "typeId": 15
         }
       ]
     },
     {
       "type": "struct TokenLockAdded",
-      "metadataTypeId": 9,
+      "metadataTypeId": 10,
       "components": [
         {
           "name": "Id",
@@ -284,7 +299,7 @@
     },
     {
       "type": "struct TokenLocked",
-      "metadataTypeId": 10,
+      "metadataTypeId": 11,
       "components": [
         {
           "name": "Id",
@@ -308,11 +323,11 @@
         },
         {
           "name": "sender",
-          "typeId": 13
+          "typeId": 14
         },
         {
           "name": "srcReceiver",
-          "typeId": 13
+          "typeId": 14
         },
         {
           "name": "srcAsset",
@@ -336,13 +351,13 @@
         },
         {
           "name": "assetId",
-          "typeId": 14
+          "typeId": 15
         }
       ]
     },
     {
       "type": "struct TokenRedeemed",
-      "metadataTypeId": 11,
+      "metadataTypeId": 12,
       "components": [
         {
           "name": "Id",
@@ -364,7 +379,7 @@
     },
     {
       "type": "struct TokenRefuned",
-      "metadataTypeId": 12,
+      "metadataTypeId": 13,
       "components": [
         {
           "name": "Id",
@@ -374,16 +389,6 @@
     },
     {
       "type": "struct std::address::Address",
-      "metadataTypeId": 13,
-      "components": [
-        {
-          "name": "bits",
-          "typeId": "7c5ee1cecf5f8eacd1284feb5f0bf2bdea533a51e2f0c9aabe9236d335989f3b"
-        }
-      ]
-    },
-    {
-      "type": "struct std::asset_id::AssetId",
       "metadataTypeId": 14,
       "components": [
         {
@@ -393,8 +398,18 @@
       ]
     },
     {
-      "type": "struct std::b512::B512",
+      "type": "struct std::asset_id::AssetId",
       "metadataTypeId": 15,
+      "components": [
+        {
+          "name": "bits",
+          "typeId": "7c5ee1cecf5f8eacd1284feb5f0bf2bdea533a51e2f0c9aabe9236d335989f3b"
+        }
+      ]
+    },
+    {
+      "type": "struct std::b512::B512",
+      "metadataTypeId": 16,
       "components": [
         {
           "name": "bits",
@@ -404,7 +419,7 @@
     },
     {
       "type": "struct std::contract_id::ContractId",
-      "metadataTypeId": 16,
+      "metadataTypeId": 17,
       "components": [
         {
           "name": "bits",
@@ -414,7 +429,7 @@
     },
     {
       "type": "u8",
-      "metadataTypeId": 17
+      "metadataTypeId": 18
     }
   ],
   "functions": [
@@ -436,6 +451,18 @@
       "name": "add_lock",
       "output": "1b5759d94094368cfd443019e7ca5ec4074300e544e5ea993a979f5da627261e",
       "attributes": [
+        {
+          "name": "doc-comment",
+          "arguments": [
+            " Adds a hashlock and updates the timelock for an existing HTLC.\r"
+          ]
+        },
+        {
+          "name": "doc-comment",
+          "arguments": [
+            " Can only be called by the HTLC's creator if the HTLC exists and has not been claimed. Emits a `TokenLockAdded` event.\r"
+          ]
+        },
         {
           "name": "storage",
           "arguments": [
@@ -467,6 +494,48 @@
       "name": "add_lock_sig",
       "output": "1b5759d94094368cfd443019e7ca5ec4074300e544e5ea993a979f5da627261e",
       "attributes": [
+        {
+          "name": "doc-comment",
+          "arguments": [
+            " Note: Wallets don’t support `personalSign`, so we emulate it by\r"
+          ]
+        },
+        {
+          "name": "doc-comment",
+          "arguments": [
+            " hashing the UTF-8 message via `sha256(toUtf8Bytes(message))`. In Sway,\r"
+          ]
+        },
+        {
+          "name": "doc-comment",
+          "arguments": [
+            " we mimic `toUtf8Bytes` by hex-encoding each byte into its ASCII form.\r"
+          ]
+        },
+        {
+          "name": "doc-comment",
+          "arguments": [
+            "\r"
+          ]
+        },
+        {
+          "name": "doc-comment",
+          "arguments": [
+            " This function adds a hashlock and updates the timelock for an existing\r"
+          ]
+        },
+        {
+          "name": "doc-comment",
+          "arguments": [
+            " HTLC using the signed message, verifies the signature, and, if valid,\r"
+          ]
+        },
+        {
+          "name": "doc-comment",
+          "arguments": [
+            " stores the updated contract and emits a `TokenLockAdded` event.\r"
+          ]
+        },
         {
           "name": "storage",
           "arguments": [
@@ -523,6 +592,18 @@
       "output": "1b5759d94094368cfd443019e7ca5ec4074300e544e5ea993a979f5da627261e",
       "attributes": [
         {
+          "name": "doc-comment",
+          "arguments": [
+            " Creates and commits a new hashed time-locked contract (HTLC).\r"
+          ]
+        },
+        {
+          "name": "doc-comment",
+          "arguments": [
+            " Locks funds in the contract and emits a `TokenCommitted` event.\r"
+          ]
+        },
+        {
           "name": "payable",
           "arguments": []
         },
@@ -546,6 +627,18 @@
       "output": "2b4a62e8055c70f8b1030ea7e332c3ba1288d018326932966c12e739e3b39747",
       "attributes": [
         {
+          "name": "doc-comment",
+          "arguments": [
+            " Retrieves the details of a specific HTLC.\r"
+          ]
+        },
+        {
+          "name": "doc-comment",
+          "arguments": [
+            " Returns the HTLC structure associated with the given identifier.\r"
+          ]
+        },
+        {
           "name": "storage",
           "arguments": [
             "read"
@@ -563,6 +656,18 @@
       "name": "get_reward_details",
       "output": "a639b86dae6d02ef455d2a28f8eedd436f8d828c7ddc22da6b739fc9abb6562c",
       "attributes": [
+        {
+          "name": "doc-comment",
+          "arguments": [
+            " Retrieves the reward details for a specific HTLC.\r"
+          ]
+        },
+        {
+          "name": "doc-comment",
+          "arguments": [
+            " Returns the reward amount and the timelock after which it can be claimed.\r"
+          ]
+        },
         {
           "name": "storage",
           "arguments": [
@@ -618,6 +723,18 @@
       "output": "1b5759d94094368cfd443019e7ca5ec4074300e544e5ea993a979f5da627261e",
       "attributes": [
         {
+          "name": "doc-comment",
+          "arguments": [
+            " Locks funds in a new hashed time-locked contract (HTLC).\r"
+          ]
+        },
+        {
+          "name": "doc-comment",
+          "arguments": [
+            " Creates an HTLC with the specified details and emits a `TokenLocked` event.\r"
+          ]
+        },
+        {
           "name": "payable",
           "arguments": []
         },
@@ -645,6 +762,18 @@
       "output": "b760f44fa5965c2474a3b471467a22c43185152129295af588b022ae50b50903",
       "attributes": [
         {
+          "name": "doc-comment",
+          "arguments": [
+            " Redeems funds from an HTLC using the correct secret.\r"
+          ]
+        },
+        {
+          "name": "doc-comment",
+          "arguments": [
+            " Verifies the provided secret against the hashlock and transfers the funds to the recipient. Emits a `TokenRedeemed` event.\r"
+          ]
+        },
+        {
           "name": "storage",
           "arguments": [
             "read",
@@ -664,6 +793,18 @@
       "output": "b760f44fa5965c2474a3b471467a22c43185152129295af588b022ae50b50903",
       "attributes": [
         {
+          "name": "doc-comment",
+          "arguments": [
+            " Refunds the locked funds from an HTLC after the timelock expires.\r"
+          ]
+        },
+        {
+          "name": "doc-comment",
+          "arguments": [
+            " Can only be called if the HTLC exists and the timelock has passed. Emits a `TokenRefunded` event.\r"
+          ]
+        },
+        {
           "name": "storage",
           "arguments": [
             "read",
@@ -674,6 +815,10 @@
     }
   ],
   "loggedTypes": [
+    {
+      "logId": "5557842539076482339",
+      "concreteTypeId": "4d216c57b3357523323f59401c7355785b41bdf832f6e1106272186b94797038"
+    },
     {
       "logId": "10098701174489624218",
       "concreteTypeId": "8c25cb3686462e9a86d2883c5688a22fe738b0bbc85f458d2d2b5f3f667c6d5a"
