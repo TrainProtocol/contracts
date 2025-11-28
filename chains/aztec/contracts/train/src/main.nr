@@ -27,8 +27,8 @@ pub contract Train {
         protocol_types::{address::AztecAddress, traits::{Deserialize, Packable, Serialize}},
         state_vars::{DelayedPublicMutable, map::Map, private_immutable::PrivateImmutable},
     };
-    use dep::sha256;
-    use dep::token::Token;
+    use sha256;
+    use token::Token;
 
     use crate::lib::{bytes_to_u128_limbs, u128_limbs_to_bytes};
     use crate::types::events::{
@@ -108,7 +108,7 @@ pub contract Train {
         );
 
         Token::at(token)
-            .transfer_to_public(
+            .transfer_private_to_public(
                 context.msg_sender().expect(f"Sender must not be none!"),
                 context.this_address(),
                 amount,
@@ -213,12 +213,24 @@ pub contract Train {
         let htlc_private = storage.contracts_private.at(Id).get_note();
         let htlc_public = storage.contracts_public.at(Id).get_current_value();
 
-        let partial_note = Token::at(htlc_public.token)
-            .prepare_private_balance_increase(htlc_private.owner)
-            .call(&mut context);
+        let commitment = Token::at(htlc_public.token)
+            .initialize_transfer_commitment(
+                htlc_private.owner,
+                context.this_address()
+            ).call(&mut context);
         Token::at(htlc_public.token)
-            .finalize_transfer_to_private(htlc_public.amount, partial_note)
-            .enqueue(&mut context);
+            .transfer_public_to_commitment(
+                context.this_address(),
+                commitment,
+                htlc_public.amount,
+                0 as Field,
+            ).enqueue(&mut context);
+        // let partial_note = Token::at(htlc_public.token)
+        //     .prepare_private_balance_increase(htlc_private.owner)
+        //     .call(&mut context);
+        // Token::at(htlc_public.token)
+        //     .finalize_transfer_to_private(htlc_public.amount, partial_note)
+        //     .enqueue(&mut context);
     }
 
     #[external("public")]
@@ -290,14 +302,24 @@ pub contract Train {
             MessageDelivery.CONSTRAINED_ONCHAIN,
         );
 
+
         Token::at(token)
-            .transfer_to_public(
+            .transfer_private_to_public(
                 context.msg_sender().expect(f"Sender must not be none!"),
                 context.this_address(),
                 amount,
                 randomness,
             )
             .call(&mut context);
+
+        // Token::at(token)
+        //     .transfer_to_public(
+        //         context.msg_sender().expect(f"Sender must not be none!"),
+        //         context.this_address(),
+        //         amount,
+        //         randomness,
+        //     )
+        //     .call(&mut context);
     }
 
     #[internal]
@@ -371,22 +393,40 @@ pub contract Train {
         let htlc_public = storage.contracts_public.at(Id).get_current_value();
         if (htlc_public.ownership_hash_high == 0 as u128) {
             if htlc_public.ownership_hash_low == 0 as u128 {
-                let partial_note = Token::at(htlc_public.token)
-                    .prepare_private_balance_increase(htlc_public.src_receiver)
-                    .call(&mut context);
-                Token::at(htlc_public.token)
-                    .finalize_transfer_to_private(htlc_public.amount, partial_note)
-                    .enqueue(&mut context);
+                let commitment = Token::at(htlc_public.token).initialize_transfer_commitment(
+                    htlc_public.src_receiver, context.this_address()
+                ).call(&mut context);
+                Token::at(htlc_public.token).transfer_public_to_commitment(
+                    context.this_address(),
+                    commitment,
+                    htlc_public.amount,
+                    0 as Field,
+                ).enqueue(&mut context);
+                // let partial_note = Token::at(htlc_public.token)
+                //     .prepare_private_balance_increase(htlc_public.src_receiver)
+                //     .call(&mut context);
+                // Token::at(htlc_public.token)
+                //     .finalize_transfer_to_private(htlc_public.amount, partial_note)
+                //     .enqueue(&mut context);
             }
         } else {
-            let partial_note = Token::at(htlc_public.token)
-                .prepare_private_balance_increase(context.msg_sender().expect(
-                    f"Sender must not be none!",
-                ))
-                .call(&mut context);
-            Token::at(htlc_public.token)
-                .finalize_transfer_to_private(htlc_public.amount, partial_note)
-                .enqueue(&mut context);
+            let commitment = Token::at(htlc_public.token).initialize_transfer_commitment(
+                context.msg_sender().expect(f"Sender must not be none!"), context.this_address()
+            ).call(&mut context);
+            Token::at(htlc_public.token).transfer_public_to_commitment(
+                context.this_address(),
+                commitment,
+                htlc_public.amount,
+                0 as Field,
+            ).enqueue(&mut context);
+            // let partial_note = Token::at(htlc_public.token)
+            //     .prepare_private_balance_increase(context.msg_sender().expect(
+            //         f"Sender must not be none!",
+            //     ))
+            //     .call(&mut context);
+            // Token::at(htlc_public.token)
+            //     .finalize_transfer_to_private(htlc_public.amount, partial_note)
+            //     .enqueue(&mut context);
         }
     }
 
