@@ -8,8 +8,24 @@ crate-type = ["cdylib"]
 
 [dependencies]
 wasm-bindgen = "0.2"
-zcash-core = { path = "../zcash-core" }
+wasm-bindgen-futures = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde-wasm-bindgen = "0.6"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["Request", "RequestInit", "RequestMode", "Response", "Window", "Headers"] }
+hex = "0.4"
+getrandom = { version = "0.2", features = ["js", "custom"] }
+bip39 = "2.0"
 sha2 = "0.10"
+base64 = "0.22"
+# For BIP32 key derivation
+ripemd = "0.1"
+bs58 = "0.5"
+hmac = "0.12"
+# For secp256k1 operations
+k256 = { version = "0.13", features = ["ecdsa"] }
+
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = "0.1.7"

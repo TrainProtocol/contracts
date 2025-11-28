@@ -1,6 +1,13 @@
+target/
 zcash-core/target/
 zcash-wasm/target/
-zcash-wasm/pkg/.gitignore
-# zcash-wasm/pkg/
+zcash-wasm/pkg/
 *.wasm.old
 *.log
+
+Cargo.lock
+
+scripts/node_modules/
+scripts/package-lock.json
+
+.env

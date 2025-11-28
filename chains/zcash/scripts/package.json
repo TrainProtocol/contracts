@@ -1,0 +1,12 @@
+{
+  "name": "zcash-scripts",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Test scripts for Zcash WASM package",
+  "scripts": {
+    "test": "node test-wasm.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3"
+  }
+}
