@@ -11,18 +11,18 @@ require('@typechain/hardhat');
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
   solidity: {
-    compilers: [{ version: '0.8.24' }],
+    compilers: [{ version: '0.8.30' }],
     overrides: {
       'contracts/TestToken.sol': {
-        version: '0.8.23',
+        version: '0.8.30',
         settings: { optimizer: { enabled: true, runs: 200 }, viaIR: true },
       },
       'contracts/TrainERC20.sol': {
-        version: '0.8.23',
+        version: '0.8.30',
         settings: { optimizer: { enabled: true, runs: 200 }, viaIR: true },
       },
       'contracts/Train.sol': {
-        version: '0.8.23',
+        version: '0.8.30',
         settings: { optimizer: { enabled: true, runs: 200 }, viaIR: true },
       },
     },
@@ -148,29 +148,7 @@ module.exports = {
   },
 
   etherscan: {
-    apiKey: {
-      binanceMainnet: process.env.BSCSCAN_API_KEY || '',
-      berachain: process.env.berachain || '',
-      unichainSepolia: process.env.unichainSepolia || '',
-      immutableTestnet: process.env.immutableTestnet || '',
-      optimismSepolia: process.env.optimismSepolia || '',
-      lineaSepolia: process.env.lineaSepolia || '',
-      taikoHekla: process.env.taikoHekla || '',
-      arbitrumSepolia: process.env.arbitrumSepolia || '',
-      minato: process.env.minato || '',
-      sepolia: process.env.sepolia || '',
-      kakarot_sepolia: process.env.kakarotSepolia || '',
-      mantleSepolia: process.env.mantleSepolia || '',
-      mainnet: process.env.sepolia || '',
-      optimisticEthereum: process.env.optimismSepolia || '',
-      arbitrumOne: process.env.arbitrumSepolia || '',
-      base: process.env.baseAPIKey || '',
-      baseSepolia: process.env.sepolia || '',
-      zkSyncEraSepolia: process.env.zk_sync || '',
-      zkSyncEraMainnet: process.env.zk_sync || '',
-      linea_mainnet: process.env.linea_mainnet || '',
-      moonbaseAlphaTestnet: process.env.moonbase || '',
-    },
+    apiKey: process.env.ETHERSCAN_API_KEY || '',
     customChains: [
       {
         network: 'moonbaseAlphaTestnet',
