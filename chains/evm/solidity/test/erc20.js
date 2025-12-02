@@ -48,11 +48,9 @@ async function lockUserHTLC(fixture, overrides = {}) {
 
   await train
     .connect(caller)
-    .lock(
+    .lockSrc(
       swapId,
       hashlock,
-      0,
-      0,
       timelock,
       srcReceiver,
       meta.srcAsset,
@@ -81,7 +79,7 @@ async function lockSolverHTLC(fixture, swapId, overrides = {}) {
 
   await train
     .connect(caller)
-    .lock(
+    .lockDst(
       swapId,
       hashlock,
       reward,
@@ -100,7 +98,7 @@ async function lockSolverHTLC(fixture, swapId, overrides = {}) {
 }
 
 describe('TrainERC20', function () {
-  describe('lock', function () {
+  describe('lockSrc/lockDst', function () {
     it('initializes a user HTLC and tracks the swap owner history', async function () {
       const fixture = await loadFixture(deployTrainERC20Fixture);
       const { train, initiator, receiver, tokenAddress } = fixture;
@@ -113,11 +111,9 @@ describe('TrainERC20', function () {
       await expect(
         train
           .connect(initiator)
-          .lock(
+          .lockSrc(
             swapId,
             hashlock,
-            0,
-            0,
             timelock,
             receiver.address,
             DEFAULT_META.srcAsset,
@@ -128,7 +124,7 @@ describe('TrainERC20', function () {
             tokenAddress
           )
       )
-        .to.emit(train, 'UserLocked')
+        .to.emit(train, 'SrcLocked')
         .withArgs(
           swapId,
           hashlock,
@@ -165,11 +161,9 @@ describe('TrainERC20', function () {
 
       await train
         .connect(initiator)
-        .lock(
+        .lockSrc(
           swapId,
           hashlock,
-          0,
-          0,
           timelock,
           receiver.address,
           DEFAULT_META.srcAsset,
@@ -183,11 +177,9 @@ describe('TrainERC20', function () {
       await expect(
         train
           .connect(initiator)
-          .lock(
+          .lockSrc(
             swapId,
             hashSecret(55n),
-            0,
-            0,
             timelock + 100,
             receiver.address,
             DEFAULT_META.srcAsset,
@@ -214,7 +206,7 @@ describe('TrainERC20', function () {
       await expect(
         train
           .connect(solverA)
-          .lock(
+          .lockDst(
             swapId,
             hashlock,
             solverReward,
@@ -229,7 +221,7 @@ describe('TrainERC20', function () {
             fixture.tokenAddress
           )
       )
-        .to.emit(train, 'SolverLocked')
+        .to.emit(train, 'DstLocked')
         .withArgs(
           swapId,
           1,
@@ -254,7 +246,7 @@ describe('TrainERC20', function () {
       await expect(
         train
           .connect(solverB)
-          .lock(
+          .lockDst(
             swapId,
             secondHashlock,
             solverReward,
@@ -269,7 +261,7 @@ describe('TrainERC20', function () {
             fixture.tokenAddress
           )
       )
-        .to.emit(train, 'SolverLocked')
+        .to.emit(train, 'DstLocked')
         .withArgs(
           swapId,
           2,
@@ -305,7 +297,7 @@ describe('TrainERC20', function () {
       await expect(
         train
           .connect(solverA)
-          .lock(
+          .lockDst(
             swapId,
             hashlock,
             solverReward,
@@ -319,7 +311,7 @@ describe('TrainERC20', function () {
             solverAmount,
             fixture.tokenAddress
           )
-      ).to.emit(train, 'SolverLocked');
+      ).to.emit(train, 'DstLocked');
 
       await expect(
         lockUserHTLC(fixture, { swapId, caller: initiator, hashlock: hashSecret(902n) })
@@ -328,7 +320,7 @@ describe('TrainERC20', function () {
       await expect(
         train
           .connect(solverB)
-          .lock(
+          .lockDst(
             swapId,
             hashSecret(903n),
             solverReward,
@@ -342,24 +334,22 @@ describe('TrainERC20', function () {
             solverAmount,
             fixture.tokenAddress
           )
-      ).to.emit(train, 'SolverLocked');
+      ).to.emit(train, 'DstLocked');
 
       const userSwaps = await train.getUserSwaps(initiator.address);
       expect(userSwaps.length).to.equal(0);
     });
 
-    it('requires timelocks to be at least 15 minutes in the future', async function () {
+    it('requires timelocks to be at least 30 minutes in the future for users', async function () {
       const fixture = await loadFixture(deployTrainERC20Fixture);
       const { train, initiator, receiver, tokenAddress } = fixture;
-      const soon = (await time.latest()) + 899;
+      const soon = (await time.latest()) + 1799;
       await expect(
         train
           .connect(initiator)
-          .lock(
+          .lockSrc(
             ethers.id('erc20-short-timelock'),
             hashSecret(1n),
-            0,
-            0,
             soon,
             receiver.address,
             DEFAULT_META.srcAsset,
@@ -382,7 +372,7 @@ describe('TrainERC20', function () {
       await expect(
         train
           .connect(solverA)
-          .lock(
+          .lockDst(
             swapId,
             hashSecret(22n),
             reward,
@@ -402,7 +392,7 @@ describe('TrainERC20', function () {
       await expect(
         train
           .connect(solverA)
-          .lock(
+          .lockDst(
             swapId,
             hashSecret(23n),
             reward,
@@ -425,11 +415,9 @@ describe('TrainERC20', function () {
       await expect(
         train
           .connect(initiator)
-          .lock(
+          .lockSrc(
             ethers.id('erc20-zero-amount'),
             hashSecret(6n),
-            0,
-            0,
             await futureTimestamp(),
             receiver.address,
             DEFAULT_META.srcAsset,
@@ -452,7 +440,7 @@ describe('TrainERC20', function () {
       await expect(
         train
           .connect(initiator)
-          .lock(
+          .lockDst(
             ethers.id('erc20-allowance'),
             hashSecret(90n),
             reward,
@@ -467,6 +455,194 @@ describe('TrainERC20', function () {
             tokenAddress
           )
       ).to.be.revertedWithCustomError(train, 'NoAllowance');
+    });
+
+    it('reverts when solver reward is less than 10% of amount', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, initiator, solverA, receiver, tokenAddress } = fixture;
+      const { swapId } = await lockUserHTLC(fixture, { swapId: ethers.id('erc20-low-reward') });
+      const timelock = await futureTimestamp(3600);
+      const amount = ethers.parseEther('1');
+      const lowReward = ethers.parseEther('0.05');
+      await expect(
+        train
+          .connect(solverA)
+          .lockDst(
+            swapId,
+            hashSecret(1001n),
+            lowReward,
+            timelock - 60,
+            timelock,
+            receiver.address,
+            DEFAULT_META.srcAsset,
+            DEFAULT_META.dstChain,
+            DEFAULT_META.dstAddress,
+            DEFAULT_META.dstAsset,
+            amount,
+            tokenAddress
+          )
+      ).to.be.revertedWithCustomError(train, 'InvalidRewardAmount');
+    });
+
+    it('accepts solver reward exactly at 10% of amount', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, initiator, solverA, receiver, tokenAddress } = fixture;
+      const { swapId } = await lockUserHTLC(fixture, { swapId: ethers.id('erc20-exact-10') });
+      const timelock = await futureTimestamp(3600);
+      const amount = ethers.parseEther('1');
+      const reward = ethers.parseEther('0.1');
+      await expect(
+        train
+          .connect(solverA)
+          .lockDst(
+            swapId,
+            hashSecret(1002n),
+            reward,
+            timelock - 60,
+            timelock,
+            receiver.address,
+            DEFAULT_META.srcAsset,
+            DEFAULT_META.dstChain,
+            DEFAULT_META.dstAddress,
+            DEFAULT_META.dstAsset,
+            amount,
+            tokenAddress
+          )
+      ).to.emit(train, 'DstLocked');
+      const htlc = await train.getHTLCDetails(swapId, 1);
+      expect(htlc.amount).to.equal(amount);
+      expect(htlc.reward).to.equal(reward);
+    });
+
+    it('handles rounding guard: 91/9 reverts using multiplication check', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, initiator, solverA, receiver, tokenAddress } = fixture;
+      const { swapId } = await lockUserHTLC(fixture, { swapId: ethers.id('erc20-rounding') });
+      const timelock = await futureTimestamp(3600);
+      const amount = 91n;
+      const reward = 9n;
+      await expect(
+        train
+          .connect(solverA)
+          .lockDst(
+            swapId,
+            hashSecret(1003n),
+            reward,
+            timelock - 60,
+            timelock,
+            receiver.address,
+            DEFAULT_META.srcAsset,
+            DEFAULT_META.dstChain,
+            DEFAULT_META.dstAddress,
+            DEFAULT_META.dstAsset,
+            amount,
+            tokenAddress
+          )
+      ).to.be.revertedWithCustomError(train, 'InvalidRewardAmount');
+    });
+
+    it('accepts minimum viable amounts where reward is exactly 10%', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, initiator, solverA, receiver, tokenAddress } = fixture;
+      const { swapId } = await lockUserHTLC(fixture, { swapId: ethers.id('erc20-min-viable') });
+      const timelock = await futureTimestamp(3600);
+      const amount = 10n;
+      const reward = 1n;
+      await expect(
+        train
+          .connect(solverA)
+          .lockDst(
+            swapId,
+            hashSecret(1004n),
+            reward,
+            timelock - 60,
+            timelock,
+            receiver.address,
+            DEFAULT_META.srcAsset,
+            DEFAULT_META.dstChain,
+            DEFAULT_META.dstAddress,
+            DEFAULT_META.dstAsset,
+            amount,
+            tokenAddress
+          )
+      ).to.emit(train, 'DstLocked');
+      const h = await train.getHTLCDetails(swapId, 1);
+      expect(h.amount).to.equal(amount);
+      expect(h.reward).to.equal(reward);
+    });
+
+    it('accepts user timelock exactly at 30 minutes with +1s buffer', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, initiator, receiver, tokenAddress } = fixture;
+      const now = await time.latest();
+      const boundary = now + 1801; // buffer
+      await expect(
+        train
+          .connect(initiator)
+          .lockSrc(
+            ethers.id('erc20-src-boundary'),
+            hashSecret(2001n),
+            boundary,
+            receiver.address,
+            DEFAULT_META.srcAsset,
+            DEFAULT_META.dstChain,
+            DEFAULT_META.dstAddress,
+            DEFAULT_META.dstAsset,
+            ethers.parseEther('0.1'),
+            tokenAddress
+          )
+      ).to.emit(train, 'SrcLocked');
+    });
+
+    it('accepts solver timelock exactly at 15 minutes with +1s buffer', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, solverA, receiver, tokenAddress } = fixture;
+      const now = await time.latest();
+      const timelock = now + 901; // buffer
+      await expect(
+        train
+          .connect(solverA)
+          .lockDst(
+            ethers.id('erc20-dst-boundary'),
+            hashSecret(2002n),
+            ethers.parseEther('0.02'),
+            timelock - 60,
+            timelock,
+            receiver.address,
+            DEFAULT_META.srcAsset,
+            DEFAULT_META.dstChain,
+            DEFAULT_META.dstAddress,
+            DEFAULT_META.dstAsset,
+            ethers.parseEther('0.2'),
+            tokenAddress
+          )
+      ).to.emit(train, 'DstLocked');
+    });
+
+    it('allows rewardTimelock equal to timelock (on-boundary)', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, initiator, solverA, receiver, tokenAddress } = fixture;
+      const { swapId } = await lockUserHTLC(fixture, { swapId: ethers.id('erc20-on-boundary') });
+      const timelock = await futureTimestamp(3600);
+      const rewardTimelock = timelock;
+      await expect(
+        train
+          .connect(solverA)
+          .lockDst(
+            swapId,
+            hashSecret(3001n),
+            ethers.parseEther('0.05'),
+            rewardTimelock,
+            timelock,
+            receiver.address,
+            DEFAULT_META.srcAsset,
+            DEFAULT_META.dstChain,
+            DEFAULT_META.dstAddress,
+            DEFAULT_META.dstAsset,
+            ethers.parseEther('0.5'),
+            tokenAddress
+          )
+      ).to.emit(train, 'DstLocked');
     });
   });
 

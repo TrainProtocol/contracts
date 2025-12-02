@@ -32,6 +32,7 @@ contract TrainERC20 is ReentrancyGuard {
   error InvalidTimelock();
   error InvalidRewardTimelock();
   error SwapAlreadyInitialized();
+  error InvalidRewardAmount();
   error NoAllowance();
 
   /// @dev ERC20 HTLC storage struct. Same layout as Train.sol plus token address.
@@ -54,7 +55,7 @@ contract TrainERC20 is ReentrancyGuard {
   mapping(address => bytes32[]) private userSwaps;
 
   /// @dev Events mirror Train.sol with an extra token parameter for ERC20 context.
-  event UserLocked(
+  event SrcLocked(
     bytes32 indexed swapId,
     bytes32 hashlock,
     string dstChain,
@@ -68,7 +69,7 @@ contract TrainERC20 is ReentrancyGuard {
     address token
   );
 
-  event SolverLocked(
+  event DstLocked(
     bytes32 indexed swapId,
     uint256 indexed htlcId,
     bytes32 hashlock,
@@ -99,8 +100,62 @@ contract TrainERC20 is ReentrancyGuard {
     _;
   }
 
-  /// @notice Locks ERC20 tokens using the mirrored Train.sol HTLC logic.
-  function lock(
+  /// @notice Locks ERC20 tokens for a user-initiated HTLC (no reward).
+  function lockSrc(
+    bytes32 swapId,
+    bytes32 hashlock,
+    uint48 timelock,
+    address payable srcReceiver,
+    string calldata srcAsset,
+    string calldata dstChain,
+    string calldata dstAddress,
+    string calldata dstAsset,
+    uint256 amount,
+    address token
+  ) external nonReentrant returns (bytes32, uint256) {
+    if (amount == 0) revert FundsNotSent();
+    if (block.timestamp + 1800 > timelock) revert InvalidTimelock();
+
+    if (contracts[swapId][0].sender != address(0)) revert SwapAlreadyInitialized();
+
+    IERC20 erc = IERC20(token);
+    if (erc.allowance(msg.sender, address(this)) < amount) revert NoAllowance();
+    erc.safeTransferFrom(msg.sender, address(this), amount);
+
+    userSwaps[msg.sender].push(swapId);
+
+    contracts[swapId][0] = HTLC(
+      amount,
+      hashlock,
+      uint256(1),
+      payable(msg.sender),
+      srcReceiver,
+      timelock,
+      uint8(1),
+      0,
+      0,
+      token
+    );
+
+    emit SrcLocked(
+      swapId,
+      hashlock,
+      dstChain,
+      dstAddress,
+      dstAsset,
+      msg.sender,
+      srcReceiver,
+      srcAsset,
+      amount,
+      timelock,
+      token
+    );
+
+    return (swapId, 0);
+  }
+
+  /// @notice Locks ERC20 tokens for a solver-initiated HTLC (with reward).
+  function lockDst(
     bytes32 swapId,
     bytes32 hashlock,
     uint256 reward,
@@ -116,28 +171,24 @@ contract TrainERC20 is ReentrancyGuard {
   ) external nonReentrant returns (bytes32, uint256) {
     if (amount == 0) revert FundsNotSent();
     if (block.timestamp + 900 > timelock) revert InvalidTimelock();
+    if (reward == 0) revert InvalidRewardAmount();
 
-    bool isSolver = reward > 0;
-    if (isSolver) {
-      if (rewardTimelock > timelock || rewardTimelock <= block.timestamp) revert InvalidRewardTimelock();
+    // Enforce reward at least 10% of amount via multiplication to avoid rounding
+    unchecked {
+      if (reward * 10 < amount) revert InvalidRewardAmount();
     }
+
+    if (rewardTimelock > timelock || rewardTimelock <= block.timestamp) revert InvalidRewardTimelock();
 
     uint256 htlcId;
     bool isNewSwap = (contracts[swapId][0].sender == address(0));
-
-    if (!isSolver) {
-      if (!isNewSwap) revert SwapAlreadyInitialized();
-      userSwaps[msg.sender].push(swapId);
+    if (isNewSwap) {
       htlcId = 0;
     } else {
-      if (isNewSwap) {
-        htlcId = 0;
-      } else {
-        htlcId = 1;
-        while (contracts[swapId][htlcId].sender != address(0)) {
-          unchecked {
-            htlcId++;
-          }
+      htlcId = 1;
+      while (contracts[swapId][htlcId].sender != address(0)) {
+        unchecked {
+          htlcId++;
         }
       }
     }
@@ -160,38 +211,22 @@ contract TrainERC20 is ReentrancyGuard {
       token
     );
 
-    if (reward == 0) {
-      emit UserLocked(
-        swapId,
-        hashlock,
-        dstChain,
-        dstAddress,
-        dstAsset,
-        msg.sender,
-        srcReceiver,
-        srcAsset,
-        amount,
-        timelock,
-        token
-      );
-    } else {
-      emit SolverLocked(
-        swapId,
-        htlcId,
-        hashlock,
-        dstChain,
-        dstAddress,
-        dstAsset,
-        msg.sender,
-        srcReceiver,
-        srcAsset,
-        amount,
-        reward,
-        rewardTimelock,
-        timelock,
-        token
-      );
-    }
+    emit DstLocked(
+      swapId,
+      htlcId,
+      hashlock,
+      dstChain,
+      dstAddress,
+      dstAsset,
+      msg.sender,
+      srcReceiver,
+      srcAsset,
+      amount,
+      reward,
+      rewardTimelock,
+      timelock,
+      token
+    );
 
     return (swapId, htlcId);
   }
