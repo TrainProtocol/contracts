@@ -11,27 +11,32 @@ require('@typechain/hardhat');
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
   solidity: {
-    compilers: [{ version: '0.8.30' }],
+    compilers: [
+      {
+        version: '0.8.30',
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 200,
+          },
+          viaIR: true,
+          evmVersion: 'cancun',
+        },
+      },
+    ],
     overrides: {
       'contracts/TestToken.sol': {
         version: '0.8.30',
-        settings: { optimizer: { enabled: true, runs: 200 }, viaIR: true },
+        settings: { optimizer: { enabled: true, runs: 200 }, viaIR: true, evmVersion: 'cancun' },
       },
       'contracts/TrainERC20.sol': {
         version: '0.8.30',
-        settings: { optimizer: { enabled: true, runs: 200 }, viaIR: true },
+        settings: { optimizer: { enabled: true, runs: 200 }, viaIR: true, evmVersion: 'cancun' },
       },
       'contracts/Train.sol': {
         version: '0.8.30',
-        settings: { optimizer: { enabled: true, runs: 200 }, viaIR: true },
+        settings: { optimizer: { enabled: true, runs: 200 }, viaIR: true, evmVersion: 'cancun' },
       },
-    },
-    settings: {
-      optimizer: {
-        enabled: true,
-        runs: 200,
-      },
-      viaIR: true,
     },
   },
 
