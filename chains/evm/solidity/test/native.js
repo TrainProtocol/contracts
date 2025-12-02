@@ -242,6 +242,100 @@ describe('Train', function () {
       expect(solverHTLC.reward).to.equal(reward);
     });
 
+    it('permits a solver-first swap and blocks later user initialization', async function () {
+      const { train, initiator, solverA, solverB, receiver } = await loadFixture(deployTrainFixture);
+      const swapId = ethers.id('solver-first');
+      const solverAmount = ethers.parseEther('0.8');
+      const solverReward = ethers.parseEther('0.15');
+      const timelock = await futureTimestamp(4200);
+      const rewardTimelock = timelock - 30;
+      const hashlock = hashSecret(901n);
+
+      await expect(
+        train
+          .connect(solverA)
+          .lock(
+            swapId,
+            hashlock,
+            solverReward,
+            rewardTimelock,
+            timelock,
+            receiver.address,
+            DEFAULT_META.srcAsset,
+            DEFAULT_META.dstChain,
+            DEFAULT_META.dstAddress,
+            DEFAULT_META.dstAsset,
+            { value: solverAmount + solverReward }
+          )
+      )
+        .to.emit(train, 'SolverLocked')
+        .withArgs(
+          swapId,
+          0,
+          hashlock,
+          DEFAULT_META.dstChain,
+          DEFAULT_META.dstAddress,
+          DEFAULT_META.dstAsset,
+          solverA.address,
+          receiver.address,
+          DEFAULT_META.srcAsset,
+          solverAmount,
+          solverReward,
+          rewardTimelock,
+          timelock
+        );
+
+      const solverDetails = await train.getHTLCDetails(swapId, 0);
+      expect(solverDetails.sender).to.equal(solverA.address);
+      expect(solverDetails.amount).to.equal(solverAmount);
+      expect(solverDetails.reward).to.equal(solverReward);
+
+      await expect(lockUserHTLC(train, initiator, receiver, { swapId })).to.be.revertedWithCustomError(
+        train,
+        'SwapAlreadyInitialized'
+      );
+
+      const secondHashlock = hashSecret(902n);
+      const secondTimelock = await futureTimestamp(5200);
+      const secondRewardTimelock = secondTimelock - 60;
+      await expect(
+        train
+          .connect(solverB)
+          .lock(
+            swapId,
+            secondHashlock,
+            solverReward,
+            secondRewardTimelock,
+            secondTimelock,
+            receiver.address,
+            DEFAULT_META.srcAsset,
+            DEFAULT_META.dstChain,
+            DEFAULT_META.dstAddress,
+            DEFAULT_META.dstAsset,
+            { value: solverAmount + solverReward }
+          )
+      )
+        .to.emit(train, 'SolverLocked')
+        .withArgs(
+          swapId,
+          1,
+          secondHashlock,
+          DEFAULT_META.dstChain,
+          DEFAULT_META.dstAddress,
+          DEFAULT_META.dstAsset,
+          solverB.address,
+          receiver.address,
+          DEFAULT_META.srcAsset,
+          solverAmount,
+          solverReward,
+          secondRewardTimelock,
+          secondTimelock
+        );
+
+      const userSwaps = await train.getUserSwaps(initiator.address);
+      expect(userSwaps.length).to.equal(0);
+    });
+
     it('reverts when the timelock is sooner than 15 minutes', async function () {
       const { train, initiator, receiver } = await loadFixture(deployTrainFixture);
       const soon = (await time.latest()) + 899;
@@ -313,7 +407,7 @@ describe('Train', function () {
             DEFAULT_META.dstAsset,
             { value: reward + ethers.parseEther('1') }
           )
-      ).to.be.revertedWithCustomError(train, 'InvaliRewardData');
+      ).to.be.revertedWithCustomError(train, 'InvalidRewardTimelock');
 
       const now = await time.latest();
       await expect(
@@ -332,7 +426,7 @@ describe('Train', function () {
             DEFAULT_META.dstAsset,
             { value: reward + ethers.parseEther('1') }
           )
-      ).to.be.revertedWithCustomError(train, 'InvaliRewardData');
+      ).to.be.revertedWithCustomError(train, 'InvalidRewardTimelock');
     });
   });
 

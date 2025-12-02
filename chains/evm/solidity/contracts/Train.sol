@@ -26,9 +26,8 @@ contract Train is ReentrancyGuard {
   error HashlockNotMatch();
   error AlreadyClaimed();
   error InvalidTimelock();
-  error InvaliRewardData();
+  error InvalidRewardTimelock();
   error SwapAlreadyInitialized();
-  error SwapNotInitialized();
   error InvalidSwapOwner();
   error TransferFailed();
 
@@ -109,7 +108,7 @@ contract Train is ReentrancyGuard {
   mapping(address => bytes32[]) private userSwaps;
 
   /// @notice Locks funds in a new hashed time-locked contract (HTLC).
-  /// @dev Creates an HTLC with the specified details and emits a `TokenLocked` event. The htlcId is automatically generated.
+  /// @dev Creates an HTLC with the specified details and emits a `UserLocked` or `SolverLocked` event. The htlcId is automatically generated.
   /// @param swapId The identifier for the swap (can have multiple HTLCs).
   /// @param hashlock The hash of the secret required for redeeming the HTLC.
   /// @param reward The reward amount in wei granted to the caller of redeem.
@@ -120,7 +119,7 @@ contract Train is ReentrancyGuard {
   /// @param dstChain The destination blockchain for the swap.
   /// @param dstAddress The recipient address on the destination chain.
   /// @param dstAsset The asset on the destination chain.
-  /// @return uint256 The unique identifier of the created HTLC.
+  /// @return (bytes32, uint256) Returns the swapId and the unique htlcId of the created HTLC.
   function lock(
     bytes32 swapId,
     bytes32 hashlock,
@@ -137,25 +136,27 @@ contract Train is ReentrancyGuard {
     if (block.timestamp + 900 > timelock) revert InvalidTimelock();
     bool isSolver = reward > 0;
     if (isSolver) {
-      if (rewardTimelock > timelock || rewardTimelock <= block.timestamp) revert InvaliRewardData();
+      if (rewardTimelock > timelock || rewardTimelock <= block.timestamp) revert InvalidRewardTimelock();
     }
 
-    HTLC storage meta = contracts[swapId][0];
+    uint256 htlcId;
+    bool isNewSwap = (contracts[swapId][0].sender == address(0)); // true when swapId does not exist yet
 
-    bool isNewSwap = (meta.sender == address(0));
-    uint256 htlcId = 0;
-
-    if (isNewSwap && !isSolver) {
+    if (!isSolver) {
+      // User can only initialize a swap once and always maps to slot 0
+      if (!isNewSwap) revert SwapAlreadyInitialized();
       userSwaps[msg.sender].push(swapId);
-    }
-
-    if (!isNewSwap && !isSolver) {
-      revert SwapAlreadyInitialized();
-    } else if (!isNewSwap && isSolver) {
-      htlcId = 1;
-      while (contracts[swapId][htlcId].sender != address(0)) {
-        unchecked {
-          htlcId++;
+      htlcId = 0;
+    } else {
+      // Solvers can either initialize the swap (take slot 0) or append additional offers
+      if (isNewSwap) {
+        htlcId = 0; // solver is first to open the swap so they occupy slot 0
+      } else {
+        htlcId = 1;
+        while (contracts[swapId][htlcId].sender != address(0)) {
+          unchecked {
+            htlcId++; // find next free slot for additional solver HTLCs
+          }
         }
       }
     }
@@ -213,7 +214,7 @@ contract Train is ReentrancyGuard {
   /// @return bool Returns `true` if the refund is successful.
   function refund(bytes32 swapId, uint256 htlcId) external _exists(swapId, htlcId) nonReentrant returns (bool) {
     HTLC storage htlc = contracts[swapId][htlcId];
-    if (htlc.claimed == 2 || htlc.claimed == 3) revert AlreadyClaimed();
+    if (htlc.claimed != 1) revert AlreadyClaimed();
     if (htlc.timelock > block.timestamp) revert NotPassedTimelock();
 
     htlc.claimed = 2;
@@ -240,7 +241,7 @@ contract Train is ReentrancyGuard {
     HTLC storage htlc = contracts[swapId][htlcId];
 
     if (htlc.hashlock != sha256(abi.encodePacked(secret))) revert HashlockNotMatch();
-    if (htlc.claimed == 3 || htlc.claimed == 2) revert AlreadyClaimed();
+    if (htlc.claimed != 1) revert AlreadyClaimed();
 
     htlc.claimed = 3;
     htlc.secret = secret;
