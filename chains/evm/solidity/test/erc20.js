@@ -1,965 +1,664 @@
 const { expect } = require('chai');
-const { keccak256, toUtf8Bytes, parseEther } = require('ethers');
-const TrainERC20 = require('../ignition/modules/deployERC20');
+const { loadFixture, time } = require('@nomicfoundation/hardhat-network-helpers');
+const { ethers } = require('hardhat');
 
-describe('Train ERC20 contract', () => {
-  let trainErc20, token, deployer, user1, user2;
-  let hopChains, hopAssets, hopAddresses, dstChain, dstAsset, dstAddress, srcAsset, srcReceiver;
+const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+const hashSecret = (secret) => ethers.sha256(abiCoder.encode(['uint256'], [secret]));
+const DEFAULT_META = {
+  srcAsset: 'ETH',
+  dstChain: 'Linea',
+  dstAddress: '0xdestination',
+  dstAsset: 'USDC',
+};
+const TOKEN_MINT = ethers.parseEther('1000');
+const futureTimestamp = async (offsetSeconds = 3600) => (await time.latest()) + offsetSeconds;
 
-  beforeEach(async () => {
-    [deployer, user1, user2] = await ethers.getSigners();
+async function deployTrainERC20Fixture() {
+  const [deployer, initiator, solverA, solverB, receiver, relayer] = await ethers.getSigners();
+  const TrainERC20 = await ethers.getContractFactory('TrainERC20');
+  const train = await TrainERC20.deploy();
+  await train.waitForDeployment();
 
-    const TestToken = await ethers.getContractFactory('TestToken');
-    token = await TestToken.deploy();
-    await token.waitForDeployment();
+  const TestToken = await ethers.getContractFactory('TestToken');
+  const token = await TestToken.deploy();
+  await token.waitForDeployment();
 
-    ({ trainErc20 } = await ignition.deploy(TrainERC20));
+  const tokenAddress = await token.getAddress();
+  const trainAddress = await train.getAddress();
+  const holders = [initiator, solverA, solverB, receiver, relayer];
 
-    hopChains = ['ETH'];
-    hopAssets = ['ETH'];
-    hopAddresses = [user1.address];
-    dstChain = 'ETH';
-    dstAsset = 'ETH';
-    dstAddress = user2.address;
-    srcAsset = 'ETH';
-    srcReceiver = user2.address;
+  for (const signer of holders) {
+    await token.mint(signer.address, TOKEN_MINT);
+    await token.connect(signer).approve(trainAddress, ethers.MaxUint256);
+  }
 
-    await token.connect(user1).mint(user1.address, parseEther('100'));
-    await token.connect(user1).approve(await trainErc20.getAddress(), parseEther('100'));
-    await token.connect(user2).mint(user2.address, parseEther('100'));
-    await token.connect(user2).approve(await trainErc20.getAddress(), parseEther('100'));
-  });
+  return { train, token, tokenAddress, trainAddress, deployer, initiator, solverA, solverB, receiver, relayer };
+}
 
-  // ===========================
-  //         COMMIT
-  // ===========================
-  describe('commit', () => {
-    it('should deploy Train ERC20 contract', async () => {
-      expect(await trainErc20.getAddress()).to.match(/^0x[a-fA-F0-9]{40}$/);
-    });
+async function lockUserHTLC(fixture, overrides = {}) {
+  const { train, tokenAddress, initiator, receiver } = fixture;
+  const caller = overrides.caller ?? initiator;
+  const swapId = overrides.swapId ?? ethers.id(`user-${overrides.label ?? 'default'}`);
+  const amount = overrides.amount ?? ethers.parseEther('1');
+  const secret = overrides.secret ?? 111n;
+  const hashlock = overrides.hashlock ?? hashSecret(secret);
+  const timelock = overrides.timelock ?? (await futureTimestamp(overrides.timelockOffset ?? 3600));
+  const meta = { ...DEFAULT_META, ...overrides.meta };
+  const srcReceiver = overrides.srcReceiver ?? receiver.address;
 
-    it('commits tokens and emits TokenCommitted', async () => {
-      const block = await ethers.provider.getBlock('latest');
-      const timelock = block.timestamp + 3600;
-      const Id = keccak256(toUtf8Bytes('erc20-case1'));
-      const amount = parseEther('10');
-      const tokenAddress = await token.getAddress();
+  await train
+    .connect(caller)
+    .lock(
+      swapId,
+      hashlock,
+      0,
+      0,
+      timelock,
+      srcReceiver,
+      meta.srcAsset,
+      meta.dstChain,
+      meta.dstAddress,
+      meta.dstAsset,
+      amount,
+      tokenAddress
+    );
+
+  return { swapId, amount, secret, hashlock, timelock, srcReceiver, htlcId: 0 };
+}
+
+async function lockSolverHTLC(fixture, swapId, overrides = {}) {
+  const { train, tokenAddress, receiver } = fixture;
+  const caller = overrides.caller ?? fixture.solverA;
+  const amount = overrides.amount ?? ethers.parseEther('0.5');
+  const reward = overrides.reward ?? ethers.parseEther('0.05');
+  const secret = overrides.secret ?? 222n;
+  const hashlock = overrides.hashlock ?? hashSecret(secret);
+  const timelock = overrides.timelock ?? (await futureTimestamp(overrides.timelockOffset ?? 3600));
+  const rewardTimelock = overrides.rewardTimelock ?? (reward > 0n ? timelock - (overrides.rewardLead ?? 120) : 0);
+  const meta = { ...DEFAULT_META, ...overrides.meta };
+  const srcReceiver = overrides.srcReceiver ?? receiver.address;
+  const expectedId = overrides.expectedId ?? 1;
+
+  await train
+    .connect(caller)
+    .lock(
+      swapId,
+      hashlock,
+      reward,
+      rewardTimelock,
+      timelock,
+      srcReceiver,
+      meta.srcAsset,
+      meta.dstChain,
+      meta.dstAddress,
+      meta.dstAsset,
+      amount,
+      tokenAddress
+    );
+
+  return { swapId, amount, reward, secret, hashlock, timelock, rewardTimelock, srcReceiver, htlcId: expectedId };
+}
+
+describe('TrainERC20', function () {
+  describe('lock', function () {
+    it('initializes a user HTLC and tracks the swap owner history', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, initiator, receiver, tokenAddress } = fixture;
+      const swapId = ethers.id('erc20-user-init');
+      const secret = 333n;
+      const hashlock = hashSecret(secret);
+      const amount = ethers.parseEther('5');
+      const timelock = await futureTimestamp(3600);
 
       await expect(
-        trainErc20
-          .connect(user1)
-          .commit(
-            hopChains,
-            hopAssets,
-            hopAddresses,
-            dstChain,
-            dstAsset,
-            dstAddress,
-            srcAsset,
-            Id,
-            srcReceiver,
+        train
+          .connect(initiator)
+          .lock(
+            swapId,
+            hashlock,
+            0,
+            0,
             timelock,
+            receiver.address,
+            DEFAULT_META.srcAsset,
+            DEFAULT_META.dstChain,
+            DEFAULT_META.dstAddress,
+            DEFAULT_META.dstAsset,
             amount,
             tokenAddress
           )
       )
-        .to.emit(trainErc20, 'TokenCommitted')
+        .to.emit(train, 'UserLocked')
         .withArgs(
-          Id,
-          hopChains,
-          hopAssets,
-          hopAddresses,
-          dstChain,
-          dstAddress,
-          dstAsset,
-          user1.address,
-          srcReceiver,
-          srcAsset,
+          swapId,
+          hashlock,
+          DEFAULT_META.dstChain,
+          DEFAULT_META.dstAddress,
+          DEFAULT_META.dstAsset,
+          initiator.address,
+          receiver.address,
+          DEFAULT_META.srcAsset,
           amount,
           timelock,
           tokenAddress
         );
 
-      const htlc = await trainErc20.getHTLCDetails(Id);
-      expect(htlc.amount).to.equal(amount);
-      expect(htlc.tokenContract).to.equal(tokenAddress);
-      expect(htlc.sender).to.equal(user1.address);
-      expect(htlc.srcReceiver).to.equal(srcReceiver);
-      expect(htlc.timelock).to.equal(timelock);
-      expect(htlc.claimed).to.equal(1);
+      const details = await train.getHTLCDetails(swapId, 0);
+      expect(details.amount).to.equal(amount);
+      expect(details.hashlock).to.equal(hashlock);
+      expect(details.sender).to.equal(initiator.address);
+      expect(details.srcReceiver).to.equal(receiver.address);
+      expect(details.timelock).to.equal(timelock);
+      expect(details.claimed).to.equal(1);
+
+      const swaps = await train.getUserSwaps(initiator.address);
+      expect(swaps).to.deep.equal([swapId]);
     });
 
-    it('commit reverts if amount is zero', async () => {
-      const block = await ethers.provider.getBlock('latest');
-      const timelock = block.timestamp + 3600;
-      const Id = keccak256(toUtf8Bytes('erc20-case2'));
-      const tokenAddress = await token.getAddress();
+    it('prevents duplicate user initialization for a swapId', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, initiator, receiver, tokenAddress } = fixture;
+      const swapId = ethers.id('erc20-duplicate');
+      const amount = ethers.parseEther('2');
+      const timelock = await futureTimestamp(3600);
+      const hashlock = hashSecret(44n);
+
+      await train
+        .connect(initiator)
+        .lock(
+          swapId,
+          hashlock,
+          0,
+          0,
+          timelock,
+          receiver.address,
+          DEFAULT_META.srcAsset,
+          DEFAULT_META.dstChain,
+          DEFAULT_META.dstAddress,
+          DEFAULT_META.dstAsset,
+          amount,
+          tokenAddress
+        );
 
       await expect(
-        trainErc20
-          .connect(user1)
-          .commit(
-            hopChains,
-            hopAssets,
-            hopAddresses,
-            dstChain,
-            dstAsset,
-            dstAddress,
-            srcAsset,
-            Id,
-            srcReceiver,
+        train
+          .connect(initiator)
+          .lock(
+            swapId,
+            hashSecret(55n),
+            0,
+            0,
+            timelock + 100,
+            receiver.address,
+            DEFAULT_META.srcAsset,
+            DEFAULT_META.dstChain,
+            DEFAULT_META.dstAddress,
+            DEFAULT_META.dstAsset,
+            amount,
+            tokenAddress
+          )
+      ).to.be.revertedWithCustomError(train, 'SwapAlreadyInitialized');
+    });
+
+    it('allows multiple solver HTLCs with incrementing IDs', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, initiator, solverA, solverB, receiver } = fixture;
+      const { swapId } = await lockUserHTLC(fixture, { swapId: ethers.id('erc20-solvers') });
+
+      const solverReward = ethers.parseEther('0.1');
+      const solverAmount = ethers.parseEther('0.8');
+      const timelock = await futureTimestamp(4000);
+      const rewardTimelock = timelock - 60;
+      const hashlock = hashSecret(777n);
+
+      await expect(
+        train
+          .connect(solverA)
+          .lock(
+            swapId,
+            hashlock,
+            solverReward,
+            rewardTimelock,
             timelock,
+            receiver.address,
+            DEFAULT_META.srcAsset,
+            DEFAULT_META.dstChain,
+            DEFAULT_META.dstAddress,
+            DEFAULT_META.dstAsset,
+            solverAmount,
+            fixture.tokenAddress
+          )
+      )
+        .to.emit(train, 'SolverLocked')
+        .withArgs(
+          swapId,
+          1,
+          hashlock,
+          DEFAULT_META.dstChain,
+          DEFAULT_META.dstAddress,
+          DEFAULT_META.dstAsset,
+          solverA.address,
+          receiver.address,
+          DEFAULT_META.srcAsset,
+          solverAmount,
+          solverReward,
+          rewardTimelock,
+          timelock,
+          fixture.tokenAddress
+        );
+
+      const secondHashlock = hashSecret(888n);
+      const secondTimelock = await futureTimestamp(5000);
+      const secondRewardTimelock = secondTimelock - 120;
+
+      await expect(
+        train
+          .connect(solverB)
+          .lock(
+            swapId,
+            secondHashlock,
+            solverReward,
+            secondRewardTimelock,
+            secondTimelock,
+            receiver.address,
+            DEFAULT_META.srcAsset,
+            DEFAULT_META.dstChain,
+            DEFAULT_META.dstAddress,
+            DEFAULT_META.dstAsset,
+            solverAmount,
+            fixture.tokenAddress
+          )
+      )
+        .to.emit(train, 'SolverLocked')
+        .withArgs(
+          swapId,
+          2,
+          secondHashlock,
+          DEFAULT_META.dstChain,
+          DEFAULT_META.dstAddress,
+          DEFAULT_META.dstAsset,
+          solverB.address,
+          receiver.address,
+          DEFAULT_META.srcAsset,
+          solverAmount,
+          solverReward,
+          secondRewardTimelock,
+          secondTimelock,
+          fixture.tokenAddress
+        );
+
+      const solverDetails = await train.getHTLCDetails(swapId, 2);
+      expect(solverDetails.sender).to.equal(solverB.address);
+      expect(solverDetails.reward).to.equal(solverReward);
+    });
+
+    it('allows solver-first swaps but blocks later user initialization', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, initiator, solverA, solverB, receiver } = fixture;
+      const swapId = ethers.id('erc20-solver-first');
+      const solverAmount = ethers.parseEther('0.7');
+      const solverReward = ethers.parseEther('0.2');
+      const timelock = await futureTimestamp(3600);
+      const rewardTimelock = timelock - 30;
+      const hashlock = hashSecret(901n);
+
+      await expect(
+        train
+          .connect(solverA)
+          .lock(
+            swapId,
+            hashlock,
+            solverReward,
+            rewardTimelock,
+            timelock,
+            receiver.address,
+            DEFAULT_META.srcAsset,
+            DEFAULT_META.dstChain,
+            DEFAULT_META.dstAddress,
+            DEFAULT_META.dstAsset,
+            solverAmount,
+            fixture.tokenAddress
+          )
+      ).to.emit(train, 'SolverLocked');
+
+      await expect(
+        lockUserHTLC(fixture, { swapId, caller: initiator, hashlock: hashSecret(902n) })
+      ).to.be.revertedWithCustomError(train, 'SwapAlreadyInitialized');
+
+      await expect(
+        train
+          .connect(solverB)
+          .lock(
+            swapId,
+            hashSecret(903n),
+            solverReward,
+            rewardTimelock,
+            timelock + 300,
+            receiver.address,
+            DEFAULT_META.srcAsset,
+            DEFAULT_META.dstChain,
+            DEFAULT_META.dstAddress,
+            DEFAULT_META.dstAsset,
+            solverAmount,
+            fixture.tokenAddress
+          )
+      ).to.emit(train, 'SolverLocked');
+
+      const userSwaps = await train.getUserSwaps(initiator.address);
+      expect(userSwaps.length).to.equal(0);
+    });
+
+    it('requires timelocks to be at least 15 minutes in the future', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, initiator, receiver, tokenAddress } = fixture;
+      const soon = (await time.latest()) + 899;
+      await expect(
+        train
+          .connect(initiator)
+          .lock(
+            ethers.id('erc20-short-timelock'),
+            hashSecret(1n),
+            0,
+            0,
+            soon,
+            receiver.address,
+            DEFAULT_META.srcAsset,
+            DEFAULT_META.dstChain,
+            DEFAULT_META.dstAddress,
+            DEFAULT_META.dstAsset,
+            ethers.parseEther('1'),
+            tokenAddress
+          )
+      ).to.be.revertedWithCustomError(train, 'InvalidTimelock');
+    });
+
+    it('enforces reward timelock bounds for solver HTLCs', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, solverA, receiver, tokenAddress } = fixture;
+      const { swapId } = await lockUserHTLC(fixture, { swapId: ethers.id('erc20-reward-guard') });
+      const timelock = await futureTimestamp(3600);
+      const reward = ethers.parseEther('0.2');
+
+      await expect(
+        train
+          .connect(solverA)
+          .lock(
+            swapId,
+            hashSecret(22n),
+            reward,
+            timelock + 1,
+            timelock,
+            receiver.address,
+            DEFAULT_META.srcAsset,
+            DEFAULT_META.dstChain,
+            DEFAULT_META.dstAddress,
+            DEFAULT_META.dstAsset,
+            ethers.parseEther('0.5'),
+            tokenAddress
+          )
+      ).to.be.revertedWithCustomError(train, 'InvalidRewardTimelock');
+
+      const now = await time.latest();
+      await expect(
+        train
+          .connect(solverA)
+          .lock(
+            swapId,
+            hashSecret(23n),
+            reward,
+            now,
+            timelock,
+            receiver.address,
+            DEFAULT_META.srcAsset,
+            DEFAULT_META.dstChain,
+            DEFAULT_META.dstAddress,
+            DEFAULT_META.dstAsset,
+            ethers.parseEther('0.5'),
+            tokenAddress
+          )
+      ).to.be.revertedWithCustomError(train, 'InvalidRewardTimelock');
+    });
+
+    it('requires non-zero token amount', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, initiator, receiver, tokenAddress } = fixture;
+      await expect(
+        train
+          .connect(initiator)
+          .lock(
+            ethers.id('erc20-zero-amount'),
+            hashSecret(6n),
+            0,
+            0,
+            await futureTimestamp(),
+            receiver.address,
+            DEFAULT_META.srcAsset,
+            DEFAULT_META.dstChain,
+            DEFAULT_META.dstAddress,
+            DEFAULT_META.dstAsset,
             0,
             tokenAddress
           )
-      ).to.be.revertedWithCustomError(trainErc20, 'FundsNotSent');
+      ).to.be.revertedWithCustomError(train, 'FundsNotSent');
     });
 
-    it('commit reverts if HTLC with same Id exists', async () => {
-      const block = await ethers.provider.getBlock('latest');
-      const timelock = block.timestamp + 3600;
-      const Id = keccak256(toUtf8Bytes('erc20-case3'));
-      const amount = parseEther('1');
-      const tokenAddress = await token.getAddress();
-
-      await trainErc20
-        .connect(user1)
-        .commit(
-          hopChains,
-          hopAssets,
-          hopAddresses,
-          dstChain,
-          dstAsset,
-          dstAddress,
-          srcAsset,
-          Id,
-          srcReceiver,
-          timelock,
-          amount,
-          tokenAddress
-        );
+    it('requires allowance to cover amount plus reward', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, initiator, receiver, token, tokenAddress, trainAddress } = fixture;
+      const amount = ethers.parseEther('2');
+      const reward = ethers.parseEther('1');
+      await token.connect(initiator).approve(trainAddress, amount); // approve only amount
 
       await expect(
-        trainErc20
-          .connect(user1)
-          .commit(
-            hopChains,
-            hopAssets,
-            hopAddresses,
-            dstChain,
-            dstAsset,
-            dstAddress,
-            srcAsset,
-            Id,
-            srcReceiver,
-            timelock,
+        train
+          .connect(initiator)
+          .lock(
+            ethers.id('erc20-allowance'),
+            hashSecret(90n),
+            reward,
+            (await futureTimestamp(3600)) - 60,
+            await futureTimestamp(3600),
+            receiver.address,
+            DEFAULT_META.srcAsset,
+            DEFAULT_META.dstChain,
+            DEFAULT_META.dstAddress,
+            DEFAULT_META.dstAsset,
             amount,
             tokenAddress
           )
-      ).to.be.revertedWithCustomError(trainErc20, 'HTLCAlreadyExists');
-    });
-
-    it('reverts if timelock is less than 15 minutes in the future', async () => {
-      const block = await ethers.provider.getBlock('latest');
-      const timelock = block.timestamp + 100;
-      const Id = keccak256(toUtf8Bytes('erc20-case4'));
-      const amount = parseEther('1');
-      const tokenAddress = await token.getAddress();
-
-      await expect(
-        trainErc20
-          .connect(user1)
-          .commit(
-            hopChains,
-            hopAssets,
-            hopAddresses,
-            dstChain,
-            dstAsset,
-            dstAddress,
-            srcAsset,
-            Id,
-            srcReceiver,
-            timelock,
-            amount,
-            tokenAddress
-          )
-      ).to.be.revertedWithCustomError(trainErc20, 'InvalidTimelock');
-    });
-
-    it('reverts if sender has insufficient balance', async () => {
-      const block = await ethers.provider.getBlock('latest');
-      const timelock = block.timestamp + 3600;
-      const Id = keccak256(toUtf8Bytes('erc20-case5'));
-      const tooMuch = parseEther('1000');
-      const tokenAddress = await token.getAddress();
-
-      await expect(
-        trainErc20
-          .connect(user1)
-          .commit(
-            hopChains,
-            hopAssets,
-            hopAddresses,
-            dstChain,
-            dstAsset,
-            dstAddress,
-            srcAsset,
-            Id,
-            srcReceiver,
-            timelock,
-            tooMuch,
-            tokenAddress
-          )
-      ).to.be.revertedWithCustomError(trainErc20, 'InsufficientBalance');
-    });
-
-    it('reverts if contract is not approved for enough tokens', async () => {
-      const block = await ethers.provider.getBlock('latest');
-      const timelock = block.timestamp + 3600;
-      const Id = keccak256(toUtf8Bytes('erc20-case6'));
-      const amount = parseEther('2');
-      const tokenAddress = await token.getAddress();
-
-      await token.connect(user2).approve(await trainErc20.getAddress(), 0);
-
-      await expect(
-        trainErc20
-          .connect(user2)
-          .commit(
-            hopChains,
-            hopAssets,
-            hopAddresses,
-            dstChain,
-            dstAsset,
-            dstAddress,
-            srcAsset,
-            Id,
-            srcReceiver,
-            timelock,
-            amount,
-            tokenAddress
-          )
-      ).to.be.revertedWithCustomError(trainErc20, 'NoAllowance');
-    });
-
-    it('allows different users to commit unique Ids', async () => {
-      const block = await ethers.provider.getBlock('latest');
-      const timelock1 = block.timestamp + 2000;
-      const timelock2 = block.timestamp + 3000;
-      const Id1 = keccak256(toUtf8Bytes('erc20-user1'));
-      const Id2 = keccak256(toUtf8Bytes('erc20-user2'));
-      const amount = parseEther('1');
-      const tokenAddress = await token.getAddress();
-
-      await expect(
-        trainErc20
-          .connect(user1)
-          .commit(
-            hopChains,
-            hopAssets,
-            hopAddresses,
-            dstChain,
-            dstAsset,
-            dstAddress,
-            srcAsset,
-            Id1,
-            srcReceiver,
-            timelock1,
-            amount,
-            tokenAddress
-          )
-      ).to.emit(trainErc20, 'TokenCommitted');
-
-      await expect(
-        trainErc20
-          .connect(user2)
-          .commit(
-            hopChains,
-            hopAssets,
-            hopAddresses,
-            dstChain,
-            dstAsset,
-            dstAddress,
-            srcAsset,
-            Id2,
-            user1.address,
-            timelock2,
-            amount,
-            tokenAddress
-          )
-      ).to.emit(trainErc20, 'TokenCommitted');
-    });
-
-    it('commit stores correct data for the new HTLC', async () => {
-      const block = await ethers.provider.getBlock('latest');
-      const timelock = block.timestamp + 5000;
-      const Id = keccak256(toUtf8Bytes('erc20-datacase'));
-      const amount = parseEther('2');
-      const tokenAddress = await token.getAddress();
-
-      const tx = await trainErc20
-        .connect(user1)
-        .commit([], [], [], dstChain, dstAsset, dstAddress, srcAsset, Id, srcReceiver, timelock, amount, tokenAddress);
-      const receipt = await tx.wait();
-      console.log(`Actual gas used commit (hop depth is 0): ${receipt.gasUsed.toString()}`);
-
-      const htlc = await trainErc20.getHTLCDetails(Id);
-      expect(htlc.amount).to.equal(amount);
-      expect(htlc.tokenContract).to.equal(tokenAddress);
-      expect(htlc.sender).to.equal(user1.address);
-      expect(htlc.srcReceiver).to.equal(srcReceiver);
-      expect(htlc.timelock).to.equal(timelock);
-      expect(htlc.claimed).to.equal(1);
+      ).to.be.revertedWithCustomError(train, 'NoAllowance');
     });
   });
 
-  // ===========================
-  //         LOCK
-  // ===========================
-  describe('lock', () => {
-    let lockParams, tokenAddress, lockId, hashlock, reward, rewardTimelock, timelock, amount;
-
-    beforeEach(async () => {
-      const block = await ethers.provider.getBlock('latest');
-      const now = block.timestamp;
-      lockId = keccak256(toUtf8Bytes('erc20-lock-case'));
-      hashlock = keccak256(toUtf8Bytes('erc20-lock-secret'));
-      timelock = now + 2000;
-      reward = parseEther('1');
-      rewardTimelock = timelock - 100;
-      amount = parseEther('10');
-      tokenAddress = await token.getAddress();
-
-      lockParams = {
-        Id: lockId,
-        hashlock,
-        reward,
-        rewardTimelock,
-        timelock,
-        srcReceiver: user2.address,
-        srcAsset: 'ETH',
-        dstChain: 'ETH',
-        dstAddress: user2.address,
-        dstAsset: 'ETH',
-        amount,
-        tokenContract: tokenAddress,
-      };
+  describe('refund', function () {
+    it('reverts for unknown HTLCs', async function () {
+      const { train } = await loadFixture(deployTrainERC20Fixture);
+      await expect(train.refund(ethers.id('erc20-missing'), 0)).to.be.revertedWithCustomError(train, 'HTLCNotExists');
     });
 
-    it('locks ERC20 tokens and emits TokenLocked', async () => {
-      await expect(trainErc20.connect(user1).lock(lockParams))
-        .to.emit(trainErc20, 'TokenLocked')
-        .withArgs(
-          lockParams.Id,
-          lockParams.hashlock,
-          lockParams.dstChain,
-          lockParams.dstAddress,
-          lockParams.dstAsset,
-          user1.address,
-          lockParams.srcReceiver,
-          lockParams.srcAsset,
-          amount,
-          reward,
-          rewardTimelock,
-          timelock,
-          tokenAddress
-        );
-
-      const htlc = await trainErc20.getHTLCDetails(lockParams.Id);
-      expect(htlc.amount).to.equal(amount);
-      expect(htlc.hashlock).to.equal(hashlock);
-      expect(htlc.tokenContract).to.equal(tokenAddress);
-      expect(htlc.sender).to.equal(user1.address);
-      expect(htlc.srcReceiver).to.equal(user2.address);
-      expect(htlc.timelock).to.equal(timelock);
-      expect(htlc.claimed).to.equal(1);
-
-      const rewardStruct = await trainErc20.getRewardDetails(lockParams.Id);
-      expect(rewardStruct.amount).to.equal(reward);
-      expect(rewardStruct.timelock).to.equal(rewardTimelock);
-    });
-
-    it('reverts if timelock is less than 1800 seconds in the future', async () => {
-      const block = await ethers.provider.getBlock('latest');
-      const now = block.timestamp;
-      const badParams = { ...lockParams, timelock: now + 100 };
-      await expect(trainErc20.connect(user1).lock(badParams)).to.be.revertedWithCustomError(
-        trainErc20,
-        'InvalidTimelock'
+    it('reverts before the timelock expires', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, initiator, receiver } = fixture;
+      const { swapId } = await lockUserHTLC(fixture, { swapId: ethers.id('erc20-refund-too-soon') });
+      await expect(train.connect(initiator).refund(swapId, 0)).to.be.revertedWithCustomError(
+        train,
+        'NotPassedTimelock'
       );
     });
 
-    it('reverts if rewardTimelock > timelock', async () => {
-      const badParams = { ...lockParams, rewardTimelock: timelock + 100 };
-      await expect(trainErc20.connect(user1).lock(badParams)).to.be.revertedWithCustomError(
-        trainErc20,
-        'InvaliRewardTimelock'
-      );
+    it('refunds user HTLCs and marks them claimed', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, initiator, receiver, token } = fixture;
+      const { swapId, timelock, amount } = await lockUserHTLC(fixture, { swapId: ethers.id('erc20-refund-user') });
+
+      await time.increaseTo(timelock + 1);
+      const balanceBefore = await token.balanceOf(initiator.address);
+      await expect(train.connect(initiator).refund(swapId, 0)).to.emit(train, 'TokenRefunded').withArgs(swapId, 0);
+      const balanceAfter = await token.balanceOf(initiator.address);
+      expect(balanceAfter - balanceBefore).to.equal(amount);
+
+      const details = await train.getHTLCDetails(swapId, 0);
+      expect(details.claimed).to.equal(2);
     });
 
-    it('reverts if rewardTimelock <= now', async () => {
-      const block = await ethers.provider.getBlock('latest');
-      const now = block.timestamp;
-      const badParams = { ...lockParams, rewardTimelock: now };
-      await expect(trainErc20.connect(user1).lock(badParams)).to.be.revertedWithCustomError(
-        trainErc20,
-        'InvaliRewardTimelock'
-      );
+    it('refunds solver HTLCs including the reward', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, solverA, receiver, initiator, token } = fixture;
+      const { swapId } = await lockUserHTLC(fixture, { caller: initiator, swapId: ethers.id('erc20-refund-solver') });
+      const solverLock = await lockSolverHTLC(fixture, swapId, {
+        caller: solverA,
+        amount: ethers.parseEther('0.9'),
+        reward: ethers.parseEther('0.3'),
+        expectedId: 1,
+      });
+
+      await time.increaseTo(solverLock.timelock + 1);
+      const balanceBefore = await token.balanceOf(solverA.address);
+      await train.connect(solverA).refund(swapId, solverLock.htlcId);
+      const balanceAfter = await token.balanceOf(solverA.address);
+      expect(balanceAfter - balanceBefore).to.equal(solverLock.amount + solverLock.reward);
     });
 
-    it('reverts if HTLC with same Id already exists', async () => {
-      await trainErc20.connect(user1).lock(lockParams);
-      await expect(trainErc20.connect(user1).lock(lockParams)).to.be.revertedWithCustomError(
-        trainErc20,
-        'HTLCAlreadyExists'
-      );
-    });
-
-    it('reverts if sent amount is zero', async () => {
-      const badParams = { ...lockParams, amount: 0 };
-      await expect(trainErc20.connect(user1).lock(badParams)).to.be.revertedWithCustomError(trainErc20, 'FundsNotSent');
-    });
-
-    it('reverts if balance too low (including reward)', async () => {
-      const bigAmount = parseEther('1000');
-      const badParams = { ...lockParams, amount: bigAmount };
-      await expect(trainErc20.connect(user1).lock(badParams)).to.be.revertedWithCustomError(
-        trainErc20,
-        'InsufficientBalance'
-      );
-    });
-
-    it('reverts if not enough allowance for both amount and reward', async () => {
-      await token.connect(user1).approve(await trainErc20.getAddress(), 0);
-      await expect(trainErc20.connect(user1).lock(lockParams)).to.be.revertedWithCustomError(trainErc20, 'NoAllowance');
-    });
-
-    it('stores no reward if reward is 0', async () => {
-      const paramsNoReward = { ...lockParams, reward: 0 };
-      const tx = await trainErc20.connect(user1).lock(paramsNoReward);
-      const receipt = await tx.wait();
-      console.log(`Actual gas used lock (no reward): ${receipt.gasUsed.toString()}`);
-      const rewardStruct = await trainErc20.getRewardDetails(lockParams.Id);
-      expect(rewardStruct.amount).to.equal(0n);
-      expect(rewardStruct.timelock).to.equal(0);
+    it('cannot refund twice', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, initiator } = fixture;
+      const { swapId, timelock } = await lockUserHTLC(fixture, { swapId: ethers.id('erc20-refund-double') });
+      await time.increaseTo(timelock + 1);
+      await train.connect(initiator).refund(swapId, 0);
+      await expect(train.connect(initiator).refund(swapId, 0)).to.be.revertedWithCustomError(train, 'AlreadyClaimed');
     });
   });
 
-  // ===========================
-  //         ADDLOCK
-  // ===========================
-  describe('addLock', () => {
-    let Id, tokenAddress, timelock, newHashlock, newTimelock, amount;
+  describe('redeem', function () {
+    it('redeems a user HTLC and stores the secret', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, receiver, relayer } = fixture;
+      const { swapId, secret, hashlock, amount } = await lockUserHTLC(fixture, {
+        swapId: ethers.id('erc20-redeem-user'),
+        secret: 888n,
+        amount: ethers.parseEther('1.2'),
+      });
 
-    beforeEach(async () => {
-      const block = await ethers.provider.getBlock('latest');
-      timelock = block.timestamp + 2000;
-      Id = keccak256(toUtf8Bytes('erc20-addlock-case'));
-      amount = parseEther('5');
-      tokenAddress = await token.getAddress();
-      newHashlock = keccak256(toUtf8Bytes('erc20-new-hashlock'));
-      newTimelock = timelock + 1000;
-
-      await trainErc20
-        .connect(user1)
-        .commit(
-          hopChains,
-          hopAssets,
-          hopAddresses,
-          dstChain,
-          dstAsset,
-          dstAddress,
-          srcAsset,
-          Id,
-          srcReceiver,
-          timelock,
-          amount,
-          tokenAddress
-        );
-    });
-
-    it('adds hashlock and updates timelock if sender is correct and hashlock not set', async () => {
-      await expect(trainErc20.connect(user1).addLock(Id, newHashlock, newTimelock))
-        .to.emit(trainErc20, 'TokenLockAdded')
-        .withArgs(Id, newHashlock, newTimelock);
-
-      const htlc = await trainErc20.getHTLCDetails(Id);
-      expect(htlc.hashlock).to.equal(newHashlock);
-      expect(htlc.timelock).to.equal(newTimelock);
-    });
-
-    it('reverts if HTLC does not exist', async () => {
-      const fakeId = keccak256(toUtf8Bytes('erc20-nonexistent'));
-      await expect(trainErc20.connect(user1).addLock(fakeId, newHashlock, newTimelock)).to.be.revertedWithCustomError(
-        trainErc20,
-        'HTLCNotExists'
-      );
-    });
-
-    it('reverts if sender is not HTLC creator', async () => {
-      await expect(trainErc20.connect(user2).addLock(Id, newHashlock, newTimelock)).to.be.revertedWithCustomError(
-        trainErc20,
-        'NoAllowance'
-      );
-    });
-
-    it('reverts if hashlock already set', async () => {
-      const tx = await trainErc20.connect(user1).addLock(Id, newHashlock, newTimelock);
-      const receipt = await tx.wait();
-      console.log(`Actual gas used addLock: ${receipt.gasUsed.toString()}`);
-
-      // Try to set it again (should fail)
-      const altHashlock = keccak256(toUtf8Bytes('erc20-alt-hashlock'));
-      await expect(
-        trainErc20.connect(user1).addLock(Id, altHashlock, newTimelock + 1000)
-      ).to.be.revertedWithCustomError(trainErc20, 'HashlockAlreadySet');
-    });
-
-    it('reverts if timelock is less than 15 minutes ahead', async () => {
-      const block = await ethers.provider.getBlock('latest');
-      const badTimelock = block.timestamp + 100; // <900s in future
-      await expect(trainErc20.connect(user1).addLock(Id, newHashlock, badTimelock)).to.be.revertedWithCustomError(
-        trainErc20,
-        'InvalidTimelock'
-      );
-    });
-
-    it('reverts if HTLC is already claimed', async () => {
-      // Simulate as if HTLC was refunded
-      await ethers.provider.send('evm_setNextBlockTimestamp', [timelock + 1]);
-      await ethers.provider.send('evm_mine');
-      await trainErc20.connect(user1).refund(Id);
-
-      await expect(trainErc20.connect(user1).addLock(Id, newHashlock, newTimelock)).to.be.revertedWithCustomError(
-        trainErc20,
-        'AlreadyClaimed'
-      );
-    });
-  });
-
-  // ===========================
-  //         ADDLOCKSIG
-  // ===========================
-
-  describe('addLockSig', () => {
-    let Id,
-      tokenAddress,
-      timelock,
-      newHashlock,
-      newTimelock,
-      amount,
-      message,
-      domain,
-      types,
-      signer,
-      signature,
-      r,
-      s,
-      v;
-
-    beforeEach(async () => {
-      const block = await ethers.provider.getBlock('latest');
-      timelock = block.timestamp + 2000;
-      Id = keccak256(toUtf8Bytes('erc20-addlocksig-case'));
-      amount = parseEther('5');
-      tokenAddress = await token.getAddress();
-      newHashlock = keccak256(toUtf8Bytes('erc20-addlocksig-hashlock'));
-      newTimelock = timelock + 1000;
-      signer = user1;
-
-      // Commit HTLC as user1 (the signer)
-      await trainErc20
-        .connect(signer)
-        .commit(
-          hopChains,
-          hopAssets,
-          hopAddresses,
-          dstChain,
-          dstAsset,
-          dstAddress,
-          srcAsset,
-          Id,
-          srcReceiver,
-          timelock,
-          amount,
-          tokenAddress
-        );
-
-      // Prepare EIP-712 domain and types (must match the contract)
-      domain = {
-        name: 'Train',
-        version: '1',
-        chainId: await signer.provider.getNetwork().then((n) => n.chainId),
-        verifyingContract: await trainErc20.getAddress(),
-      };
-      types = {
-        addLockMsg: [
-          { name: 'Id', type: 'bytes32' },
-          { name: 'hashlock', type: 'bytes32' },
-          { name: 'timelock', type: 'uint48' },
-        ],
-      };
-      message = {
-        Id,
-        hashlock: newHashlock,
-        timelock: newTimelock,
-      };
-
-      // Sign the typed data as user1
-      signature = await signer.signTypedData(domain, types, message);
-      r = '0x' + signature.slice(2, 66);
-      s = '0x' + signature.slice(66, 130);
-      v = parseInt(signature.slice(130, 132), 16);
-    });
-
-    it('adds hashlock and updates timelock via valid signature', async () => {
-      await expect(trainErc20.connect(user2).addLockSig(message, r, s, v))
-        .to.emit(trainErc20, 'TokenLockAdded')
-        .withArgs(Id, newHashlock, newTimelock);
-
-      const htlc = await trainErc20.getHTLCDetails(Id);
-      expect(htlc.hashlock).to.equal(newHashlock);
-      expect(htlc.timelock).to.equal(newTimelock);
-    });
-
-    it('reverts if signature is from a different signer', async () => {
-      // Sign with user2 (not HTLC creator)
-      const badSignature = await user2.signTypedData(domain, types, message);
-      const badR = '0x' + badSignature.slice(2, 66);
-      const badS = '0x' + badSignature.slice(66, 130);
-      const badV = parseInt(badSignature.slice(130, 132), 16);
-
-      await expect(trainErc20.connect(user2).addLockSig(message, badR, badS, badV)).to.be.revertedWithCustomError(
-        trainErc20,
-        'InvalidSignature'
-      );
-    });
-
-    it('reverts if not enough timelock', async () => {
-      const block = await ethers.provider.getBlock('latest');
-      const badTimelock = block.timestamp + 100; // <900s in future
-      const badMessage = { ...message, timelock: badTimelock };
-
-      // Must sign the new message!
-      const badSignature = await signer.signTypedData(domain, types, badMessage);
-      const badR = '0x' + badSignature.slice(2, 66);
-      const badS = '0x' + badSignature.slice(66, 130);
-      const badV = parseInt(badSignature.slice(130, 132), 16);
-
-      await expect(trainErc20.connect(user2).addLockSig(badMessage, badR, badS, badV)).to.be.revertedWithCustomError(
-        trainErc20,
-        'InvalidTimelock'
-      );
-    });
-
-    it('reverts if hashlock already set', async () => {
-      // Set it first time
-      const tx = await trainErc20.connect(user2).addLockSig(message, r, s, v);
-      const receipt = await tx.wait();
-      console.log(`Actual gas used addLockSig: ${receipt.gasUsed.toString()}`);
-
-      // Try again with a new signature (for a different hashlock)
-      const altMessage = { ...message, hashlock: keccak256(toUtf8Bytes('erc20-alt')) };
-      const altSignature = await signer.signTypedData(domain, types, altMessage);
-      const altR = '0x' + altSignature.slice(2, 66);
-      const altS = '0x' + altSignature.slice(66, 130);
-      const altV = parseInt(altSignature.slice(130, 132), 16);
-
-      await expect(trainErc20.connect(user2).addLockSig(altMessage, altR, altS, altV)).to.be.revertedWithCustomError(
-        trainErc20,
-        'HashlockAlreadySet'
-      );
-    });
-
-    it('reverts if HTLC does not exist', async () => {
-      const fakeId = keccak256(toUtf8Bytes('erc20-nohtlc'));
-      const fakeMsg = { ...message, Id: fakeId };
-      const fakeSig = await signer.signTypedData(domain, types, fakeMsg);
-      const fakeR = '0x' + fakeSig.slice(2, 66);
-      const fakeS = '0x' + fakeSig.slice(66, 130);
-      const fakeV = parseInt(fakeSig.slice(130, 132), 16);
-
-      await expect(trainErc20.connect(user2).addLockSig(fakeMsg, fakeR, fakeS, fakeV)).to.be.revertedWithCustomError(
-        trainErc20,
-        'HTLCNotExists'
-      );
-    });
-
-    it('reverts if HTLC is already claimed', async () => {
-      await ethers.provider.send('evm_setNextBlockTimestamp', [timelock + 1]);
-      await ethers.provider.send('evm_mine');
-      await trainErc20.connect(user1).refund(Id);
-
-      await expect(trainErc20.connect(user2).addLockSig(message, r, s, v)).to.be.revertedWithCustomError(
-        trainErc20,
-        'AlreadyClaimed'
-      );
-    });
-  });
-
-  // ===========================
-  //          REFUND
-  // ===========================
-
-  describe('refund', () => {
-    let Id, timelock, amount, tokenAddress, reward, rewardTimelock;
-
-    beforeEach(async () => {
-      const block = await ethers.provider.getBlock('latest');
-      const now = block.timestamp;
-      timelock = now + 1200;
-      Id = keccak256(toUtf8Bytes('erc20-refund-case'));
-      amount = parseEther('10');
-      tokenAddress = await token.getAddress();
-
-      await trainErc20
-        .connect(user1)
-        .commit(
-          hopChains,
-          hopAssets,
-          hopAddresses,
-          dstChain,
-          dstAsset,
-          dstAddress,
-          srcAsset,
-          Id,
-          srcReceiver,
-          timelock,
-          amount,
-          tokenAddress
-        );
-    });
-
-    it('reverts if HTLC does not exist', async () => {
-      const randomId = keccak256(toUtf8Bytes('erc20-refund-no-htlc'));
-      await expect(trainErc20.connect(user1).refund(randomId)).to.be.revertedWithCustomError(
-        trainErc20,
-        'HTLCNotExists'
-      );
-    });
-
-    it('reverts if HTLC is already claimed (refunded)', async () => {
-      // Fast-forward time so refund is possible
-      await ethers.provider.send('evm_setNextBlockTimestamp', [timelock + 1]);
-      await ethers.provider.send('evm_mine');
-      const tx = await trainErc20.connect(user1).refund(Id);
-      const receipt = await tx.wait();
-      console.log(`Actual gas used refund (no reward): ${receipt.gasUsed.toString()}`);
-
-      await expect(trainErc20.connect(user1).refund(Id)).to.be.revertedWithCustomError(trainErc20, 'AlreadyClaimed');
-    });
-
-    it('reverts if timelock has not passed', async () => {
-      await expect(trainErc20.connect(user1).refund(Id)).to.be.revertedWithCustomError(trainErc20, 'NotPassedTimelock');
-    });
-
-    it('refunds after timelock and emits TokenRefunded', async () => {
-      await ethers.provider.send('evm_setNextBlockTimestamp', [timelock + 1]);
-      await ethers.provider.send('evm_mine');
-      await expect(trainErc20.connect(user1).refund(Id)).to.emit(trainErc20, 'TokenRefunded').withArgs(Id);
-
-      const htlc = await trainErc20.getHTLCDetails(Id);
-      expect(htlc.claimed).to.equal(2);
-    });
-
-    it('refunds full amount to sender (without reward)', async () => {
-      await ethers.provider.send('evm_setNextBlockTimestamp', [timelock + 1]);
-      await ethers.provider.send('evm_mine');
-      const balBefore = await token.balanceOf(user1.address);
-
-      await trainErc20.connect(user1).refund(Id);
-
-      const balAfter = await token.balanceOf(user1.address);
+      const balBefore = await fixture.token.balanceOf(receiver.address);
+      await expect(train.connect(relayer).redeem(swapId, 0, secret))
+        .to.emit(train, 'TokenRedeemed')
+        .withArgs(swapId, 0, relayer.address, secret, hashlock);
+      const balAfter = await fixture.token.balanceOf(receiver.address);
       expect(balAfter - balBefore).to.equal(amount);
+
+      const details = await train.getHTLCDetails(swapId, 0);
+      expect(details.claimed).to.equal(3);
+      expect(details.secret).to.equal(secret);
     });
 
-    it('refunds full amount + reward if present', async () => {
-      // Create HTLC with reward
-      const block = await ethers.provider.getBlock('latest');
-      const now = block.timestamp;
-      const timelock2 = now + 1900;
-      const Id2 = keccak256(toUtf8Bytes('erc20-refund-reward-case'));
-      reward = parseEther('1');
-      rewardTimelock = timelock2 - 100;
-      const total = amount + reward;
-
-      await token.connect(user1).mint(user1.address, reward);
-      await token.connect(user1).approve(await trainErc20.getAddress(), total);
-
-      await trainErc20.connect(user1).lock({
-        Id: Id2,
-        hashlock: keccak256(toUtf8Bytes('erc20-lock-hashlock')),
-        reward: reward,
-        rewardTimelock,
-        timelock: timelock2,
-        srcReceiver,
-        srcAsset,
-        dstChain,
-        dstAddress,
-        dstAsset,
-        amount,
-        tokenContract: tokenAddress,
+    it('pays solver reward to the sender if redeemed before reward timelock', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, solverA, receiver, relayer, token } = fixture;
+      const { swapId } = await lockUserHTLC(fixture, { swapId: ethers.id('erc20-redeem-before') });
+      const solverLock = await lockSolverHTLC(fixture, swapId, {
+        caller: solverA,
+        amount: ethers.parseEther('0.8'),
+        reward: ethers.parseEther('0.15'),
+        expectedId: 1,
       });
 
-      await ethers.provider.send('evm_setNextBlockTimestamp', [timelock2 + 1]);
-      await ethers.provider.send('evm_mine');
-
-      const balBefore = await token.balanceOf(user1.address);
-
-      await trainErc20.connect(user1).refund(Id2);
-
-      const balAfter = await token.balanceOf(user1.address);
-
-      expect(balAfter - balBefore).to.equal(amount + reward);
-    });
-  });
-
-  // ===========================
-  //          REDEEM
-  // ===========================
-
-  describe('redeem', () => {
-    let Id, secret, hashlock, timelock, amount, reward, rewardTimelock, tokenAddress;
-
-    beforeEach(async () => {
-      const block = await ethers.provider.getBlock('latest');
-      const now = block.timestamp;
-      Id = keccak256(toUtf8Bytes('redeem-case'));
-      tokenAddress = await token.getAddress();
-      amount = parseEther('10');
-      reward = parseEther('1');
-      secret = 12345n;
-      hashlock = await ethers.sha256(ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [secret]));
-      timelock = now + 2000;
-      rewardTimelock = timelock - 100;
-
-      // Mint enough tokens and approve for lock (amount + reward)
-      await token.connect(user1).mint(user1.address, amount + reward);
-      await token.connect(user1).approve(await trainErc20.getAddress(), amount + reward);
-
-      await trainErc20.connect(user1).lock({
-        Id,
-        hashlock,
-        reward,
-        rewardTimelock,
-        timelock,
-        srcReceiver,
-        srcAsset,
-        dstChain,
-        dstAddress,
-        dstAsset,
-        amount,
-        tokenContract: tokenAddress,
-      });
+      const solverBefore = await token.balanceOf(solverA.address);
+      const receiverBefore = await token.balanceOf(receiver.address);
+      await train.connect(relayer).redeem(swapId, solverLock.htlcId, solverLock.secret);
+      const solverAfter = await token.balanceOf(solverA.address);
+      const receiverAfter = await token.balanceOf(receiver.address);
+      expect(solverAfter - solverBefore).to.equal(solverLock.reward);
+      expect(receiverAfter - receiverBefore).to.equal(solverLock.amount);
     });
 
-    it('redeems funds with correct secret and emits TokenRedeemed', async () => {
-      await expect(trainErc20.connect(user2).redeem(Id, secret))
-        .to.emit(trainErc20, 'TokenRedeemed')
-        .withArgs(Id, user2.address, secret, hashlock);
-
-      const htlc = await trainErc20.getHTLCDetails(Id);
-      expect(htlc.claimed).to.equal(3);
-      expect(htlc.secret).to.equal(secret);
-    });
-
-    it('pays reward to sender and funds to receiver if redeemed before rewardTimelock', async () => {
-      const balSenderBefore = await token.balanceOf(user1.address);
-      const balReceiverBefore = await token.balanceOf(user2.address);
-
-      await trainErc20.connect(user2).redeem(Id, secret);
-
-      const balSenderAfter = await token.balanceOf(user1.address);
-      const balReceiverAfter = await token.balanceOf(user2.address);
-
-      expect(balSenderAfter - balSenderBefore).to.equal(reward);
-      expect(balReceiverAfter - balReceiverBefore).to.equal(amount);
-    });
-
-    it('pays both reward and funds to receiver if redeemed after rewardTimelock', async () => {
-      await ethers.provider.send('evm_setNextBlockTimestamp', [rewardTimelock + 10]);
-      await ethers.provider.send('evm_mine');
-
-      const balSenderBefore = await token.balanceOf(user1.address);
-      const balReceiverBefore = await token.balanceOf(user2.address);
-
-      await trainErc20.connect(user2).redeem(Id, secret);
-
-      const balSenderAfter = await token.balanceOf(user1.address);
-      const balReceiverAfter = await token.balanceOf(user2.address);
-
-      expect(balReceiverAfter - balReceiverBefore).to.equal(amount + reward);
-      expect(balSenderAfter - balSenderBefore).to.equal(0n);
-    });
-
-    it('redeems without reward: receiver gets all funds', async () => {
-      // Make a new HTLC with no reward
-      const block = await ethers.provider.getBlock('latest');
-      const now = block.timestamp;
-      const Id2 = keccak256(toUtf8Bytes('redeem-noreward'));
-      const amount2 = parseEther('7');
-      const secret2 = 55555n;
-      const hashlock2 = await ethers.sha256(ethers.AbiCoder.defaultAbiCoder().encode(['uint256'], [secret2]));
-      const timelock2 = now + 2000;
-
-      await token.connect(user1).mint(user1.address, amount2);
-      await token.connect(user1).approve(await trainErc20.getAddress(), amount2);
-
-      await trainErc20.connect(user1).lock({
-        Id: Id2,
-        hashlock: hashlock2,
-        reward: 0,
-        rewardTimelock: timelock2 - 100,
-        timelock: timelock2,
-        srcReceiver,
-        srcAsset,
-        dstChain,
-        dstAddress,
-        dstAsset,
-        amount: amount2,
-        tokenContract: tokenAddress,
+    it('lets the receiver claim reward after the reward timelock', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, solverA, receiver, token } = fixture;
+      const { swapId } = await lockUserHTLC(fixture, { swapId: ethers.id('erc20-redeem-receiver') });
+      const solverLock = await lockSolverHTLC(fixture, swapId, {
+        caller: solverA,
+        amount: ethers.parseEther('0.6'),
+        reward: ethers.parseEther('0.2'),
+        rewardLead: 10,
+        expectedId: 1,
       });
 
-      const balReceiverBefore = await token.balanceOf(user2.address);
-      const tx = await trainErc20.connect(user2).redeem(Id2, secret2);
-      const receipt = await tx.wait();
-      console.log(`Actual gas used redeem (no reward): ${receipt.gasUsed.toString()}`);
-      const balReceiverAfter = await token.balanceOf(user2.address);
-
-      expect(balReceiverAfter - balReceiverBefore).to.equal(amount2);
+      await time.increaseTo(solverLock.rewardTimelock + 1);
+      const receiverBefore = await token.balanceOf(receiver.address);
+      await train.connect(receiver).redeem(swapId, solverLock.htlcId, solverLock.secret);
+      const receiverAfter = await token.balanceOf(receiver.address);
+      expect(receiverAfter - receiverBefore).to.equal(solverLock.amount + solverLock.reward);
     });
 
-    it('reverts if HTLC does not exist', async () => {
-      const fakeId = keccak256(toUtf8Bytes('not-exist'));
-      await expect(trainErc20.connect(user2).redeem(fakeId, secret)).to.be.revertedWithCustomError(
-        trainErc20,
-        'HTLCNotExists'
-      );
+    it('awards the reward to a relayer after the reward timelock when receiver differs', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, solverA, receiver, relayer, token } = fixture;
+      const { swapId } = await lockUserHTLC(fixture, { swapId: ethers.id('erc20-redeem-relayer') });
+      const solverLock = await lockSolverHTLC(fixture, swapId, {
+        caller: solverA,
+        amount: ethers.parseEther('0.7'),
+        reward: ethers.parseEther('0.25'),
+        rewardLead: 5,
+        expectedId: 1,
+      });
+
+      await time.increaseTo(solverLock.rewardTimelock + 1);
+      const receiverBefore = await token.balanceOf(receiver.address);
+      const relayerBefore = await token.balanceOf(relayer.address);
+      await train.connect(relayer).redeem(swapId, solverLock.htlcId, solverLock.secret);
+      const receiverAfter = await token.balanceOf(receiver.address);
+      const relayerAfter = await token.balanceOf(relayer.address);
+      expect(receiverAfter - receiverBefore).to.equal(solverLock.amount);
+      expect(relayerAfter - relayerBefore).to.equal(solverLock.reward);
     });
 
-    it('reverts if secret does not match hashlock', async () => {
-      await expect(trainErc20.connect(user2).redeem(Id, 999n)).to.be.revertedWithCustomError(
-        trainErc20,
+    it('reverts if the secret is invalid or HTLC missing or already claimed', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { train, solverA, receiver, relayer } = fixture;
+      const { swapId } = await lockUserHTLC(fixture, { swapId: ethers.id('erc20-redeem-guards') });
+      const solverLock = await lockSolverHTLC(fixture, swapId, { caller: solverA, expectedId: 1 });
+
+      await expect(train.connect(relayer).redeem(swapId, solverLock.htlcId, 999n)).to.be.revertedWithCustomError(
+        train,
         'HashlockNotMatch'
       );
-    });
+      await expect(
+        train.connect(relayer).redeem(ethers.id('missing'), 0, solverLock.secret)
+      ).to.be.revertedWithCustomError(train, 'HTLCNotExists');
 
-    it('reverts if HTLC is already claimed (redeemed)', async () => {
-      await trainErc20.connect(user2).redeem(Id, secret);
-      await expect(trainErc20.connect(user2).redeem(Id, secret)).to.be.revertedWithCustomError(
-        trainErc20,
+      await train.connect(relayer).redeem(swapId, solverLock.htlcId, solverLock.secret);
+      await expect(
+        train.connect(relayer).redeem(swapId, solverLock.htlcId, solverLock.secret)
+      ).to.be.revertedWithCustomError(train, 'AlreadyClaimed');
+
+      const refunded = await lockUserHTLC(fixture, { swapId: ethers.id('erc20-redeem-after-refund'), secret: 999n });
+      await time.increaseTo(refunded.timelock + 1);
+      await train.connect(receiver).refund(refunded.swapId, 0);
+      await expect(train.connect(relayer).redeem(refunded.swapId, 0, refunded.secret)).to.be.revertedWithCustomError(
+        train,
         'AlreadyClaimed'
       );
     });
+  });
 
-    it('reverts if HTLC is already claimed (refunded)', async () => {
-      await ethers.provider.send('evm_setNextBlockTimestamp', [timelock + 1]);
-      await ethers.provider.send('evm_mine');
-      await trainErc20.connect(user1).refund(Id);
-      await expect(trainErc20.connect(user2).redeem(Id, secret)).to.be.revertedWithCustomError(
-        trainErc20,
-        'AlreadyClaimed'
-      );
+  describe('view helpers', function () {
+    it('returns zeroed struct for unknown HTLCs', async function () {
+      const { train } = await loadFixture(deployTrainERC20Fixture);
+      const details = await train.getHTLCDetails(ethers.id('erc20-view-missing'), 9);
+      expect(details.amount).to.equal(0n);
+      expect(details.sender).to.equal(ethers.ZeroAddress);
+      expect(details.hashlock).to.equal(ethers.ZeroHash);
+    });
+
+    it('tracks user swaps while ignoring solver-only locks', async function () {
+      const fixture = await loadFixture(deployTrainERC20Fixture);
+      const { initiator, solverA, receiver, train } = fixture;
+      const first = await lockUserHTLC(fixture, { swapId: ethers.id('erc20-view-user1') });
+      const second = await lockUserHTLC(fixture, { swapId: ethers.id('erc20-view-user2') });
+      await lockSolverHTLC(fixture, second.swapId, { caller: solverA, expectedId: 1 });
+
+      const swaps = await train.getUserSwaps(initiator.address);
+      expect(swaps).to.deep.equal([first.swapId, second.swapId]);
     });
   });
 });
