@@ -28,8 +28,7 @@ contract Train is ReentrancyGuard {
   error InvalidTimelock();
   error InvalidRewardTimelock();
   error SwapAlreadyInitialized();
-  error InvalidSwapOwner();
-  error TransferFailed();
+  error InvalidRewardAmount();
 
   /// @dev Represents a hashed time-locked contract (HTLC) used in the Train protocol.
   struct HTLC {
@@ -54,7 +53,7 @@ contract Train is ReentrancyGuard {
   }
 
   /// @dev Emitted when an HTLC is locked by a user (no reward).
-  event UserLocked(
+  event SrcLocked(
     bytes32 indexed swapId,
     bytes32 hashlock,
     string dstChain,
@@ -68,7 +67,7 @@ contract Train is ReentrancyGuard {
   );
 
   /// @dev Emitted when an HTLC is locked by a solver (with reward).
-  event SolverLocked(
+  event DstLocked(
     bytes32 indexed swapId,
     uint256 indexed htlcId,
     bytes32 hashlock,
@@ -107,12 +106,74 @@ contract Train is ReentrancyGuard {
   /// @dev Storage for tracking historical swaps per user
   mapping(address => bytes32[]) private userSwaps;
 
-  /// @notice Locks funds in a new hashed time-locked contract (HTLC).
-  /// @dev Creates an HTLC with the specified details and emits a `UserLocked` or `SolverLocked` event. The htlcId is automatically generated.
-  /// @param swapId The identifier for the swap (can have multiple HTLCs).
+  /// @notice Locks funds in a new HTLC initiated by a user on the source chain.
+  /// @dev Creates an HTLC at htlcId 0 for a new swap. Users can only initialize a swap once. Emits a `SrcLocked` event.
+  /// @param swapId The identifier for the swap.
+  /// @param hashlock The hash of the secret required for redeeming the HTLC.
+  /// @param timelock The timestamp after which the funds can be refunded if not claimed.
+  /// @param srcReceiver The recipient of the funds if the HTLC is successfully redeemed.
+  /// @param srcAsset The asset being locked in the HTLC.
+  /// @param dstChain The destination blockchain for the swap.
+  /// @param dstAddress The recipient address on the destination chain.
+  /// @param dstAsset The asset on the destination chain.
+  /// @return (bytes32, uint256) Returns the swapId and htlcId (always 0 for users).
+  function lockSrc(
+    bytes32 swapId,
+    bytes32 hashlock,
+    uint48 timelock,
+    address payable srcReceiver,
+    string calldata srcAsset,
+    string calldata dstChain,
+    string calldata dstAddress,
+    string calldata dstAsset
+  ) external payable nonReentrant returns (bytes32, uint256) {
+    if (msg.value == 0) revert FundsNotSent();
+    if (block.timestamp + 1800 > timelock) revert InvalidTimelock();
+
+    // User can only initialize a swap once and always maps to slot 0
+    if (contracts[swapId][0].sender != address(0)) revert SwapAlreadyInitialized();
+
+    userSwaps[msg.sender].push(swapId);
+
+    contracts[swapId][0] = HTLC(
+      msg.value,
+      hashlock,
+      uint256(1),
+      payable(msg.sender),
+      srcReceiver,
+      timelock,
+      uint8(1),
+      0, // no reward for user HTLCs
+      0 // no reward timelock
+    );
+
+    emit SrcLocked(
+      swapId,
+      hashlock,
+      dstChain,
+      dstAddress,
+      dstAsset,
+      msg.sender,
+      srcReceiver,
+      srcAsset,
+      msg.value,
+      timelock
+    );
+
+    return (swapId, 0);
+  }
+
+  /// @notice Locks funds in a new HTLC created by a solver on the destination chain.
+  /// @dev Enforces the solver reward to be at least 10% of the swap amount using
+  ///      multiplication (reward * 10 >= amount) to avoid integer-division rounding.
+  ///      Overflow safety is guaranteed by Solidity 0.8+, and the check is performed
+  ///      inside an `unchecked` block for a minor gas optimization. Multiple solver
+  ///      HTLCs can be created per swapId; htlcId is 0 for first lock, otherwise the
+  ///      next free index. Emits `DstLocked` on success.
+  /// @param swapId The identifier for the swap (can have multiple solver HTLCs).
   /// @param hashlock The hash of the secret required for redeeming the HTLC.
   /// @param reward The reward amount in wei granted to the caller of redeem.
-  /// @param rewardTimelock The timelock (timestamp) after which the reward can be claimed.
+  /// @param rewardTimelock The timelock (timestamp) after which the reward can be claimed by anyone.
   /// @param timelock The timestamp after which the funds can be refunded if not claimed.
   /// @param srcReceiver The recipient of the funds if the HTLC is successfully redeemed.
   /// @param srcAsset The asset being locked in the HTLC.
@@ -120,7 +181,7 @@ contract Train is ReentrancyGuard {
   /// @param dstAddress The recipient address on the destination chain.
   /// @param dstAsset The asset on the destination chain.
   /// @return (bytes32, uint256) Returns the swapId and the unique htlcId of the created HTLC.
-  function lock(
+  function lockDst(
     bytes32 swapId,
     bytes32 hashlock,
     uint256 reward,
@@ -132,37 +193,35 @@ contract Train is ReentrancyGuard {
     string calldata dstAddress,
     string calldata dstAsset
   ) external payable nonReentrant returns (bytes32, uint256) {
-    if (msg.value <= reward || msg.value == 0) revert FundsNotSent();
-    if (block.timestamp + 900 > timelock) revert InvalidTimelock();
-    bool isSolver = reward > 0;
-    if (isSolver) {
-      if (rewardTimelock > timelock || rewardTimelock <= block.timestamp) revert InvalidRewardTimelock();
+    if (msg.value == 0) revert FundsNotSent();
+
+    uint256 amount = msg.value - reward;
+    // Reject trivial invalid inputs; enforce reward >= 10% of amount
+    if (amount == 0 || reward == 0) revert InvalidRewardAmount();
+    // Multiplication form avoids division rounding: reward * 10 >= amount
+    unchecked {
+      if (reward * 10 < amount) revert InvalidRewardAmount();
     }
 
-    uint256 htlcId;
-    bool isNewSwap = (contracts[swapId][0].sender == address(0)); // true when swapId does not exist yet
+    if (block.timestamp + 900 > timelock) revert InvalidTimelock();
+    if (rewardTimelock > timelock || rewardTimelock <= block.timestamp) revert InvalidRewardTimelock();
 
-    if (!isSolver) {
-      // User can only initialize a swap once and always maps to slot 0
-      if (!isNewSwap) revert SwapAlreadyInitialized();
-      userSwaps[msg.sender].push(swapId);
-      htlcId = 0;
+    uint256 htlcId;
+    bool isNewSwap = (contracts[swapId][0].sender == address(0));
+
+    if (isNewSwap) {
+      htlcId = 0; // solver is first to open the swap so they occupy slot 0
     } else {
-      // Solvers can either initialize the swap (take slot 0) or append additional offers
-      if (isNewSwap) {
-        htlcId = 0; // solver is first to open the swap so they occupy slot 0
-      } else {
-        htlcId = 1;
-        while (contracts[swapId][htlcId].sender != address(0)) {
-          unchecked {
-            htlcId++; // find next free slot for additional solver HTLCs
-          }
+      htlcId = 1;
+      while (contracts[swapId][htlcId].sender != address(0)) {
+        unchecked {
+          htlcId++; // find next free slot for additional solver HTLCs
         }
       }
     }
 
     contracts[swapId][htlcId] = HTLC(
-      msg.value - reward,
+      amount,
       hashlock,
       uint256(1),
       payable(msg.sender),
@@ -173,37 +232,22 @@ contract Train is ReentrancyGuard {
       rewardTimelock
     );
 
-    // Emit different events based on whether this is a user or solver HTLC
-    if (reward == 0) {
-      emit UserLocked(
-        swapId,
-        hashlock,
-        dstChain,
-        dstAddress,
-        dstAsset,
-        msg.sender,
-        srcReceiver,
-        srcAsset,
-        msg.value,
-        timelock
-      );
-    } else {
-      emit SolverLocked(
-        swapId,
-        htlcId,
-        hashlock,
-        dstChain,
-        dstAddress,
-        dstAsset,
-        msg.sender,
-        srcReceiver,
-        srcAsset,
-        msg.value - reward,
-        reward,
-        rewardTimelock,
-        timelock
-      );
-    }
+    emit DstLocked(
+      swapId,
+      htlcId,
+      hashlock,
+      dstChain,
+      dstAddress,
+      dstAsset,
+      msg.sender,
+      srcReceiver,
+      srcAsset,
+      amount,
+      reward,
+      rewardTimelock,
+      timelock
+    );
+
     return (swapId, htlcId);
   }
 
@@ -274,9 +318,9 @@ contract Train is ReentrancyGuard {
   }
 
   /// @notice Retrieves all swaps created by a user.
-  /// @dev Returns swapIds where the address initialized the swap (reward == 0 path).
+  /// @dev Returns swapIds where the user called lockSrc to initialize the swap.
   /// @param user The user address.
-  /// @return bytes32[] Array of swap IDs owned by the user.
+  /// @return bytes32[] Array of swap IDs created by the user.
   function getUserSwaps(address user) public view returns (bytes32[] memory) {
     return userSwaps[user];
   }
