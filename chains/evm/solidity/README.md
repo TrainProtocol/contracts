@@ -1,77 +1,64 @@
-# Train Contract
+# Train EVM Contracts
 
-## Overview
+This Hardhat package contains the EVM leg of the Train protocol. The current Solidity sources are:
 
-The **Train Contract** enables secure, atomic cross-chain swaps.
+| File                       | Purpose                                                                        |
+| -------------------------- | ------------------------------------------------------------------------------ |
+| `contracts/Train.sol`      | Native ETH hashed-timelock contract that escrows value via `msg.value`.        |
+| `contracts/TrainERC20.sol` | ERC20 mirror of `Train.sol`, using `SafeERC20` transfers and allowance checks. |
+| `contracts/TestToken.sol`  | Minimal mintable token used only inside the automated tests.                   |
 
-## Features
+Both Train contracts implement the same swap lifecycle and storage layout so off-chain tooling can treat them interchangeably.
 
-- **Secure Swaps**: Trustless cross-chain transactions.
-- **EIP-712 Signatures**: Off-chain message verification.
-- **Event-Based Tracking**: Real-time updates.
-- **Timelock & Hashlock**: Ensures safe fund handling.
+## HTLC Model
 
-## Functions
+- `lock` opens an HTLC. User flows (reward `0`) always consume `htlcId = 0` and register in `userSwaps`. Solver flows (reward > 0) either take slot `0` (if first) or append to the next open slot.
+- Funds stay locked until a matching secret pre-image is supplied via `redeem` or the timelock passes and anyone can `refund`.
+- Rewards are optional and include a separate `rewardTimelock` so solvers/relayers can claim the fee even if the receiver lags.
+- Errors such as `InvalidTimelock`, `FundsNotSent`, `NoAllowance`, or `SwapAlreadyInitialized` enforce invariants in both contracts.
 
-- **commit(...)** - Lock funds.
-- **lock(...)** - Lock funds with a hashlock.
-- **addLock(...)** - Update an HTLC with a new hashlock and timelock.
-- **addLockSig(...)** - Add a hashlock using a signed message.
-- **redeem(Id, secret)** - Claim funds with a secret.
-- **refund(Id)** - Reclaim expired funds.
+Events (`UserLocked`, `SolverLocked`, `TokenRedeemed`, `TokenRefunded`) surface all data required for off-chain monitoring. The ERC20 variant simply appends the `token` address to the event schema.
 
-## Events
+## Development & Testing
 
-- `TokenCommitted`: Funds locked.
-- `TokenLocked`: Hashlock added.
-- `TokenLockAdded`: Additional lock applied.
-- `TokenRedeemed`: Swap completed.
-- `TokenRefunded`: Funds refunded.
+All work happens from `chains/evm/solidity` using Node 18+ and Hardhat **2.20.1** (Solidity **0.8.30**, optimizer enabled, via-IR). Two deterministic test suites cover the native and ERC20 variants:
 
-## Gas Estimates
+```bash
+# Native ETH contract
+npx hardhat test test/native.js
 
-> _The following gas usage was measured from Hardhat tests on both native ETH and ERC20 implementations._  
-> _All values are for "typical" single-hop cases, without reward unless specified._
+# ERC20 mirror (mints/approves TestToken per signer)
 
-### Native Token (ETH)
+```
 
-| Function     | Description                                 | Gas Used (Typical, hop depth = 0) |
-|--------------|---------------------------------------------|-----------------------------------|
-| commit       | Open HTLC (no hashlock)                     | ~149,581                          |
-| lock         | Open HTLC (with hashlock, no reward)        | ~148,214                          |
-| addLock      | Add hashlock/timelock to open HTLC          | ~39,456                           |
-| addLockSig   | Add hashlock/timelock via EIP-712 signature | ~47,626                           |
-| redeem       | Redeem funds (no reward)                    | ~52,706                           |
-| refund       | Refund sender (no reward)                   | ~44,066                           |
+For gas measurements, enable the gas reporter on-demand: `cd chains/evm/solidity; $env:REPORT_GAS="true"; npx hardhat test test/native.js`.
 
-_Values are from Hardhat test suite (`test/native.js`).  
-Real-world usage may differ with input size, hop depth, reward, etc._
+## Gas Snapshots
 
-### ERC20 Token
+Collected with `REPORT_GAS=true npx hardhat test ...` on Hardhat's in-process network (Paris rules, 30M gas block, optimizer runs = 200). Figures report min/avg/max across every call seen during the suite.
 
-| Function     | Description                                 | Gas Used (Typical, hop depth = 0) |
-|--------------|---------------------------------------------|-----------------------------------|
-| commit       | Open HTLC (no hashlock)                     | ~212,908                          |
-| lock         | Open HTLC (with hashlock, no reward)        | ~213,931                          |
-| addLock      | Add hashlock/timelock to open HTLC          | ~39,503                           |
-| addLockSig   | Add hashlock/timelock via EIP-712 signature | ~47,721                           |
-| redeem       | Redeem funds (no reward)                    | ~63,610                           |
-| refund       | Refund sender (no reward)                   | ~48,055                           |
+### `Train.sol`
 
-_Values from Hardhat test suite (`test/erc20.js`).  
-ERC20 operations require allowance and token transfer, so are generally higher than native._
+| Method   | Min     | Avg     | Max     | Calls |
+| -------- | ------- | ------- | ------- | ----- |
+| `lock`   | 178,523 | 194,103 | 196,863 | 60    |
+| `redeem` | 55,829  | 60,476  | 67,606  | 11    |
+| `refund` | 44,677  | 44,737  | 44,836  | 8     |
 
+### `TrainERC20.sol`
 
-## Usage
+| Method   | Min     | Avg     | Max     | Calls |
+| -------- | ------- | ------- | ------- | ----- |
+| `lock`   | 214,925 | 234,738 | 253,058 | 31    |
+| `redeem` | 59,851  | 67,583  | 73,633  | 6     |
+| `refund` | 51,122  | 53,084  | 56,095  | 5     |
 
-Deploy with Solidity `0.8.23` and OpenZeppelin. Use Hardhat, Foundry, or Remix.
+_ERC20 flows cost more because every HTLC transfer moves `amount + reward` into the contract and back out with `safeTransfer` checks._
 
-## Security
+## Usage Notes
 
-- Use **secure hash functions** (`sha256`).
-- Set **appropriate timelock durations**.
-- Sign off-chain messages with **secure private keys**.
+- Hashlocks are computed as `sha256(abi.encodePacked(secret))`; tests use a `uint256` secret to avoid ABI ambiguity.
+- Timelocks must sit at least 15 minutes in the future. Solver reward timelocks must be `<= timelock` and strictly greater than `block.timestamp` when submitted.
+- ERC20 callers must approve **amount + reward** before calling `lock`; otherwise `NoAllowance` reverts.
+- `getUserSwaps(address)` returns only swaps opened through the rewardless path (slot `0`). 
 
-## License
-
-Released under **MIT License**.
