@@ -17,6 +17,9 @@ import '@openzeppelin/contracts/utils/ReentrancyGuard.sol';
 /// @dev Manages HTLCs for trustless cross-chain transactions with event-based updates.
 
 contract Train is ReentrancyGuard {
+  /// @dev Gas stipend for external calls to prevent griefing attacks
+  uint256 constant GAS_STIPEND = 10_000;
+
   constructor() {}
 
   /// @dev Custom errors to simplify failure handling in the contract.
@@ -29,6 +32,7 @@ contract Train is ReentrancyGuard {
   error InvalidRewardTimelock();
   error SwapAlreadyInitialized();
   error InvalidRewardAmount();
+  error TransferFailed();
 
   /// @dev Represents a hashed time-locked contract (HTLC) used in the Train protocol.
   struct HTLC {
@@ -262,11 +266,13 @@ contract Train is ReentrancyGuard {
     if (htlc.timelock > block.timestamp) revert NotPassedTimelock();
 
     htlc.claimed = 2;
+    bool success;
     if (htlc.reward != 0) {
-      htlc.sender.call{ value: htlc.amount + htlc.reward, gas: 10000 }('');
+      (success, ) = htlc.sender.call{ value: htlc.amount + htlc.reward, gas: GAS_STIPEND }('');
     } else {
-      htlc.sender.call{ value: htlc.amount, gas: 10000 }('');
+      (success, ) = htlc.sender.call{ value: htlc.amount, gas: GAS_STIPEND }('');
     }
+    if (!success) revert TransferFailed();
     emit TokenRefunded(swapId, htlcId);
     return true;
   }
@@ -290,17 +296,24 @@ contract Train is ReentrancyGuard {
     htlc.claimed = 3;
     htlc.secret = secret;
 
+    bool success;
     if (htlc.reward == 0) {
-      htlc.srcReceiver.call{ value: htlc.amount, gas: 10000 }('');
+      (success, ) = htlc.srcReceiver.call{ value: htlc.amount, gas: GAS_STIPEND }('');
+      if (!success) revert TransferFailed();
     } else if (htlc.rewardTimelock > block.timestamp) {
-      htlc.srcReceiver.call{ value: htlc.amount, gas: 10000 }('');
-      htlc.sender.call{ value: htlc.reward, gas: 10000 }('');
+      (success, ) = htlc.srcReceiver.call{ value: htlc.amount, gas: GAS_STIPEND }('');
+      if (!success) revert TransferFailed();
+      (success, ) = htlc.sender.call{ value: htlc.reward, gas: GAS_STIPEND }('');
+      if (!success) revert TransferFailed();
     } else {
       if (msg.sender == htlc.srcReceiver) {
-        htlc.srcReceiver.call{ value: htlc.amount + htlc.reward, gas: 10000 }('');
+        (success, ) = htlc.srcReceiver.call{ value: htlc.amount + htlc.reward, gas: GAS_STIPEND }('');
+        if (!success) revert TransferFailed();
       } else {
-        htlc.srcReceiver.call{ value: htlc.amount, gas: 10000 }('');
-        msg.sender.call{ value: htlc.reward, gas: 10000 }('');
+        (success, ) = htlc.srcReceiver.call{ value: htlc.amount, gas: GAS_STIPEND }('');
+        if (!success) revert TransferFailed();
+        (success, ) = msg.sender.call{ value: htlc.reward, gas: GAS_STIPEND }('');
+        if (!success) revert TransferFailed();
       }
     }
 

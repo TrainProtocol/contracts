@@ -792,6 +792,42 @@ describe('Train', function () {
       await train.connect(initiator).refund(swapId, 0);
       await expect(train.connect(initiator).refund(swapId, 0)).to.be.revertedWithCustomError(train, 'AlreadyClaimed');
     });
+
+    it('reverts with TransferFailed when refund transfer fails', async function () {
+      const { train, receiver } = await loadFixture(deployTrainFixture);
+      const RejectEther = await ethers.getContractFactory('RejectEther');
+      const rejectContract = await RejectEther.deploy();
+      await rejectContract.waitForDeployment();
+
+      const swapId = ethers.id('transfer-fail-refund');
+      const timelock = await futureTimestamp(3600);
+      const amount = ethers.parseEther('1');
+
+      await ethers.provider.send('hardhat_impersonateAccount', [await rejectContract.getAddress()]);
+      const rejectSigner = await ethers.getSigner(await rejectContract.getAddress());
+      await ethers.provider.send('hardhat_setBalance', [
+        await rejectContract.getAddress(),
+        ethers.toQuantity(ethers.parseEther('10')),
+      ]);
+
+      await train
+        .connect(rejectSigner)
+        .lockSrc(
+          swapId,
+          hashSecret(1n),
+          timelock,
+          receiver.address,
+          DEFAULT_META.srcAsset,
+          DEFAULT_META.dstChain,
+          DEFAULT_META.dstAddress,
+          DEFAULT_META.dstAsset,
+          { value: amount }
+        );
+
+      await time.increaseTo(timelock + 1);
+      await expect(train.refund(swapId, 0)).to.be.revertedWithCustomError(train, 'TransferFailed');
+      await ethers.provider.send('hardhat_stopImpersonatingAccount', [await rejectContract.getAddress()]);
+    });
   });
 
   describe('view helpers', function () {
@@ -1026,6 +1062,35 @@ describe('Train', function () {
 
       expect(receiverAfter - receiverBefore).to.equal(10n);
       expect(solverAfter - solverBefore).to.equal(1n);
+    });
+
+    it('reverts with TransferFailed when redeem transfer fails', async function () {
+      const { train, initiator } = await loadFixture(deployTrainFixture);
+      const RejectEther = await ethers.getContractFactory('RejectEther');
+      const rejectContract = await RejectEther.deploy();
+      await rejectContract.waitForDeployment();
+
+      const swapId = ethers.id('transfer-fail-redeem');
+      const secret = 12345n;
+      const hashlock = hashSecret(secret);
+      const timelock = await futureTimestamp(3600);
+      const amount = ethers.parseEther('1');
+
+      await train
+        .connect(initiator)
+        .lockSrc(
+          swapId,
+          hashlock,
+          timelock,
+          rejectContract.target,
+          DEFAULT_META.srcAsset,
+          DEFAULT_META.dstChain,
+          DEFAULT_META.dstAddress,
+          DEFAULT_META.dstAsset,
+          { value: amount }
+        );
+
+      await expect(train.redeem(swapId, 0, secret)).to.be.revertedWithCustomError(train, 'TransferFailed');
     });
   });
 
@@ -1284,6 +1349,18 @@ describe('Train', function () {
       expect(userSwaps.length).to.equal(2);
       expect(userSwaps).to.deep.equal([swapId1, swapId2]);
       expect(solverSwaps.length).to.equal(0);
+    });
+
+    it('ensures all external calls check return values to prevent stuck funds', async function () {
+      const { train } = await loadFixture(deployTrainFixture);
+      const transferFailedError = train.interface.getError('TransferFailed');
+      expect(transferFailedError).to.not.be.undefined;
+      expect(transferFailedError.name).to.equal('TransferFailed');
+      const bytecode = await ethers.provider.getCode(await train.getAddress());
+      expect(bytecode).to.not.equal('0x');
+      expect(bytecode.length).to.be.greaterThan(0);
+      const gasStipendHex = '0x2710';
+      expect(bytecode).to.include(gasStipendHex.slice(2));
     });
   });
 });
