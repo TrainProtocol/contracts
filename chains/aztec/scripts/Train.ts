@@ -4,7 +4,7 @@
 /* eslint-disable */
 import { AztecAddress, CompleteAddress } from '@aztec/aztec.js/addresses';
 import { type AbiType, type AztecAddressLike, type ContractArtifact, EventSelector, decodeFromAbi, type EthAddressLike, type FieldLike, type FunctionSelectorLike, loadContractArtifact, loadContractArtifactForPublic, type NoirCompiledContract, type U128Like, type WrappedFieldLike } from '@aztec/aztec.js/abi';
-import { Contract, ContractBase, ContractFunctionInteraction, type ContractInstanceWithAddress, type ContractMethod, type ContractStorageLayout, DeployMethod } from '@aztec/aztec.js/contracts';
+import { Contract, ContractBase, ContractFunctionInteraction, type ContractMethod, type ContractStorageLayout, DeployMethod } from '@aztec/aztec.js/contracts';
 import { EthAddress } from '@aztec/aztec.js/addresses';
 import { Fr, Point } from '@aztec/aztec.js/fields';
 import { type PublicKey, PublicKeys } from '@aztec/aztec.js/keys';
@@ -13,6 +13,52 @@ import TrainContractArtifactJson from '../contracts/train/target/train-Train.jso
 export const TrainContractArtifact = loadContractArtifact(TrainContractArtifactJson as NoirCompiledContract);
 
 
+      export type TokenRefunded = {
+        swap_id: FieldLike
+htlc_id: FieldLike
+      }
+    
+
+      export type TokenRedeemed = {
+        swap_id: FieldLike
+htlc_id: FieldLike
+redeem_address: AztecAddressLike
+secret_high: (bigint | number)
+secret_low: (bigint | number)
+hashlock: (bigint | number)[]
+      }
+    
+
+      export type SrcLocked = {
+        swap_id: FieldLike
+hashlock: (bigint | number)[]
+dst_chain: string
+dst_address: string
+dst_asset: string
+sender: AztecAddressLike
+src_receiver: AztecAddressLike
+src_asset: string
+amount: (bigint | number)
+timelock: (bigint | number)
+      }
+    
+
+      export type DstLocked = {
+        swap_id: FieldLike
+htlc_id: FieldLike
+hashlock: (bigint | number)[]
+dst_chain: string
+dst_address: string
+dst_asset: string
+sender: AztecAddressLike
+src_receiver: AztecAddressLike
+src_asset: string
+amount: (bigint | number)
+reward: (bigint | number)
+reward_timelock: (bigint | number)
+timelock: (bigint | number)
+      }
+    
 
 /**
  * Type-safe interface for contract Train;
@@ -20,10 +66,10 @@ export const TrainContractArtifact = loadContractArtifact(TrainContractArtifactJ
 export class TrainContract extends ContractBase {
   
   private constructor(
-    instance: ContractInstanceWithAddress,
+    address: AztecAddress,
     wallet: Wallet,
   ) {
-    super(instance, TrainContractArtifact, wallet);
+    super(address, TrainContractArtifact, wallet);
   }
   
 
@@ -32,13 +78,13 @@ export class TrainContract extends ContractBase {
    * Creates a contract instance.
    * @param address - The deployed contract's address.
    * @param wallet - The wallet to use when interacting with the contract.
-   * @returns A promise that resolves to a new Contract instance.
+   * @returns A new Contract instance.
    */
-  public static async at(
+  public static at(
     address: AztecAddress,
     wallet: Wallet,
-  ) {
-    return Contract.at(address, TrainContract.artifact, wallet) as Promise<TrainContract>;
+  ): TrainContract {
+    return Contract.at(address, TrainContract.artifact, wallet) as TrainContract;
   }
 
   
@@ -46,14 +92,14 @@ export class TrainContract extends ContractBase {
    * Creates a tx to deploy a new instance of this contract.
    */
   public static deploy(wallet: Wallet, ) {
-    return new DeployMethod<TrainContract>(PublicKeys.default(), wallet, TrainContractArtifact, TrainContract.at, Array.from(arguments).slice(1));
+    return new DeployMethod<TrainContract>(PublicKeys.default(), wallet, TrainContractArtifact, (instance, wallet) => TrainContract.at(instance.address, wallet), Array.from(arguments).slice(1));
   }
 
   /**
    * Creates a tx to deploy a new instance of this contract using the specified public keys hash to derive the address.
    */
   public static deployWithPublicKeys(publicKeys: PublicKeys, wallet: Wallet, ) {
-    return new DeployMethod<TrainContract>(publicKeys, wallet, TrainContractArtifact, TrainContract.at, Array.from(arguments).slice(2));
+    return new DeployMethod<TrainContract>(publicKeys, wallet, TrainContractArtifact, (instance, wallet) => TrainContract.at(instance.address, wallet), Array.from(arguments).slice(2));
   }
 
   /**
@@ -67,7 +113,7 @@ export class TrainContract extends ContractBase {
       opts.publicKeys ?? PublicKeys.default(),
       opts.wallet,
       TrainContractArtifact,
-      TrainContract.at,
+      (instance, wallet) => TrainContract.at(instance.address, wallet),
       Array.from(arguments).slice(1),
       opts.method ?? 'constructor',
     );
@@ -90,38 +136,41 @@ export class TrainContract extends ContractBase {
   }
   
 
-  public static get storage(): ContractStorageLayout<'contracts_private' | 'contracts_public'> {
+  public static get storage(): ContractStorageLayout<'contracts' | 'user_swaps_count' | 'user_swaps'> {
       return {
-        contracts_private: {
+        contracts: {
       slot: new Fr(1n),
     },
-contracts_public: {
+user_swaps_count: {
       slot: new Fr(2n),
+    },
+user_swaps: {
+      slot: new Fr(3n),
     }
-      } as ContractStorageLayout<'contracts_private' | 'contracts_public'>;
+      } as ContractStorageLayout<'contracts' | 'user_swaps_count' | 'user_swaps'>;
     }
     
 
   /** Type-safe wrappers for the public methods exposed by the contract. */
   public declare methods: {
     
-    /** add_lock_private_user(Id: field, hashlock_high: integer, hashlock_low: integer, timelock: integer) */
-    add_lock_private_user: ((Id: FieldLike, hashlock_high: (bigint | number), hashlock_low: (bigint | number), timelock: (bigint | number)) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** commit_private_user(Id: field, src_receiver: struct, timelock: integer, token: struct, amount: integer, src_asset: string, dst_chain: string, dst_asset: string, dst_address: string, randomness: field) */
-    commit_private_user: ((Id: FieldLike, src_receiver: AztecAddressLike, timelock: (bigint | number), token: AztecAddressLike, amount: (bigint | number), src_asset: string, dst_chain: string, dst_asset: string, dst_address: string, randomness: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
     /** constructor() */
     constructor: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** get_htlc_public(key: field) */
-    get_htlc_public: ((key: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** get_htlc(swap_id: field, htlc_id: field) */
+    get_htlc: ((swap_id: FieldLike, htlc_id: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** is_contract_initialized(id: field) */
-    is_contract_initialized: ((id: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** get_user_swaps_count(user: struct) */
+    get_user_swaps_count: ((user: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** lock_private_solver(Id: field, hashlock_high: integer, hashlock_low: integer, amount: integer, ownership_hash_high: integer, ownership_hash_low: integer, timelock: integer, token: struct, randomness: field, src_asset: string, dst_chain: string, dst_asset: string, dst_address: string) */
-    lock_private_solver: ((Id: FieldLike, hashlock_high: (bigint | number), hashlock_low: (bigint | number), amount: (bigint | number), ownership_hash_high: (bigint | number), ownership_hash_low: (bigint | number), timelock: (bigint | number), token: AztecAddressLike, randomness: FieldLike, src_asset: string, dst_chain: string, dst_asset: string, dst_address: string) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** has_htlc(swap_id: field, htlc_id: field) */
+    has_htlc: ((swap_id: FieldLike, htlc_id: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** lock_dst(swap_id: field, htlc_id: field, hashlock_high: integer, hashlock_low: integer, reward: integer, reward_timelock: integer, timelock: integer, src_receiver: struct, token: struct, total_amount: integer, src_asset: string, dst_chain: string, dst_asset: string, dst_address: string) */
+    lock_dst: ((swap_id: FieldLike, htlc_id: FieldLike, hashlock_high: (bigint | number), hashlock_low: (bigint | number), reward: (bigint | number), reward_timelock: (bigint | number), timelock: (bigint | number), src_receiver: AztecAddressLike, token: AztecAddressLike, total_amount: (bigint | number), src_asset: string, dst_chain: string, dst_asset: string, dst_address: string) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** lock_src(swap_id: field, hashlock_high: integer, hashlock_low: integer, timelock: integer, src_receiver: struct, token: struct, amount: integer, src_asset: string, dst_chain: string, dst_asset: string, dst_address: string) */
+    lock_src: ((swap_id: FieldLike, hashlock_high: (bigint | number), hashlock_low: (bigint | number), timelock: (bigint | number), src_receiver: AztecAddressLike, token: AztecAddressLike, amount: (bigint | number), src_asset: string, dst_chain: string, dst_asset: string, dst_address: string) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** process_message(message_ciphertext: struct, message_context: struct) */
     process_message: ((message_ciphertext: FieldLike[], message_context: { tx_hash: FieldLike, unique_note_hashes_in_tx: FieldLike[], first_nullifier_in_tx: FieldLike, recipient: AztecAddressLike }) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
@@ -129,15 +178,333 @@ contracts_public: {
     /** public_dispatch(selector: field) */
     public_dispatch: ((selector: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** redeem_private(Id: field, secret_high: integer, secret_low: integer, ownership_key_high: integer, ownership_key_low: integer) */
-    redeem_private: ((Id: FieldLike, secret_high: (bigint | number), secret_low: (bigint | number), ownership_key_high: (bigint | number), ownership_key_low: (bigint | number)) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** redeem(swap_id: field, htlc_id: field, secret_high: integer, secret_low: integer) */
+    redeem: ((swap_id: FieldLike, htlc_id: FieldLike, secret_high: (bigint | number), secret_low: (bigint | number)) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** refund_private(Id: field) */
-    refund_private: ((Id: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** refund(swap_id: field, htlc_id: field) */
+    refund: ((swap_id: FieldLike, htlc_id: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** sync_private_state() */
     sync_private_state: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
   };
 
+  
+    public static get events(): { TokenRefunded: {abiType: AbiType, eventSelector: EventSelector, fieldNames: string[] }, TokenRedeemed: {abiType: AbiType, eventSelector: EventSelector, fieldNames: string[] }, SrcLocked: {abiType: AbiType, eventSelector: EventSelector, fieldNames: string[] }, DstLocked: {abiType: AbiType, eventSelector: EventSelector, fieldNames: string[] } } {
+    return {
+      TokenRefunded: {
+        abiType: {
+    "kind": "struct",
+    "fields": [
+        {
+            "name": "swap_id",
+            "type": {
+                "kind": "field"
+            }
+        },
+        {
+            "name": "htlc_id",
+            "type": {
+                "kind": "field"
+            }
+        }
+    ],
+    "path": "Train::TokenRefunded"
+},
+        eventSelector: EventSelector.fromString("0x04359982"),
+        fieldNames: ["swap_id","htlc_id"],
+      },
+TokenRedeemed: {
+        abiType: {
+    "kind": "struct",
+    "fields": [
+        {
+            "name": "swap_id",
+            "type": {
+                "kind": "field"
+            }
+        },
+        {
+            "name": "htlc_id",
+            "type": {
+                "kind": "field"
+            }
+        },
+        {
+            "name": "redeem_address",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "inner",
+                        "type": {
+                            "kind": "field"
+                        }
+                    }
+                ],
+                "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
+            }
+        },
+        {
+            "name": "secret_high",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 128
+            }
+        },
+        {
+            "name": "secret_low",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 128
+            }
+        },
+        {
+            "name": "hashlock",
+            "type": {
+                "kind": "array",
+                "length": 32,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        }
+    ],
+    "path": "Train::TokenRedeemed"
+},
+        eventSelector: EventSelector.fromString("0x82e3418e"),
+        fieldNames: ["swap_id","htlc_id","redeem_address","secret_high","secret_low","hashlock"],
+      },
+SrcLocked: {
+        abiType: {
+    "kind": "struct",
+    "fields": [
+        {
+            "name": "swap_id",
+            "type": {
+                "kind": "field"
+            }
+        },
+        {
+            "name": "hashlock",
+            "type": {
+                "kind": "array",
+                "length": 32,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        },
+        {
+            "name": "dst_chain",
+            "type": {
+                "kind": "string",
+                "length": 30
+            }
+        },
+        {
+            "name": "dst_address",
+            "type": {
+                "kind": "string",
+                "length": 90
+            }
+        },
+        {
+            "name": "dst_asset",
+            "type": {
+                "kind": "string",
+                "length": 30
+            }
+        },
+        {
+            "name": "sender",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "inner",
+                        "type": {
+                            "kind": "field"
+                        }
+                    }
+                ],
+                "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
+            }
+        },
+        {
+            "name": "src_receiver",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "inner",
+                        "type": {
+                            "kind": "field"
+                        }
+                    }
+                ],
+                "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
+            }
+        },
+        {
+            "name": "src_asset",
+            "type": {
+                "kind": "string",
+                "length": 30
+            }
+        },
+        {
+            "name": "amount",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 128
+            }
+        },
+        {
+            "name": "timelock",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 64
+            }
+        }
+    ],
+    "path": "Train::SrcLocked"
+},
+        eventSelector: EventSelector.fromString("0x2c334ea7"),
+        fieldNames: ["swap_id","hashlock","dst_chain","dst_address","dst_asset","sender","src_receiver","src_asset","amount","timelock"],
+      },
+DstLocked: {
+        abiType: {
+    "kind": "struct",
+    "fields": [
+        {
+            "name": "swap_id",
+            "type": {
+                "kind": "field"
+            }
+        },
+        {
+            "name": "htlc_id",
+            "type": {
+                "kind": "field"
+            }
+        },
+        {
+            "name": "hashlock",
+            "type": {
+                "kind": "array",
+                "length": 32,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        },
+        {
+            "name": "dst_chain",
+            "type": {
+                "kind": "string",
+                "length": 30
+            }
+        },
+        {
+            "name": "dst_address",
+            "type": {
+                "kind": "string",
+                "length": 90
+            }
+        },
+        {
+            "name": "dst_asset",
+            "type": {
+                "kind": "string",
+                "length": 30
+            }
+        },
+        {
+            "name": "sender",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "inner",
+                        "type": {
+                            "kind": "field"
+                        }
+                    }
+                ],
+                "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
+            }
+        },
+        {
+            "name": "src_receiver",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "inner",
+                        "type": {
+                            "kind": "field"
+                        }
+                    }
+                ],
+                "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
+            }
+        },
+        {
+            "name": "src_asset",
+            "type": {
+                "kind": "string",
+                "length": 30
+            }
+        },
+        {
+            "name": "amount",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 128
+            }
+        },
+        {
+            "name": "reward",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 128
+            }
+        },
+        {
+            "name": "reward_timelock",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 64
+            }
+        },
+        {
+            "name": "timelock",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 64
+            }
+        }
+    ],
+    "path": "Train::DstLocked"
+},
+        eventSelector: EventSelector.fromString("0x8818cb5e"),
+        fieldNames: ["swap_id","htlc_id","hashlock","dst_chain","dst_address","dst_asset","sender","src_receiver","src_asset","amount","reward","reward_timelock","timelock"],
+      }
+    };
+  }
   
 }
