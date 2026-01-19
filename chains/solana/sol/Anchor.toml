@@ -1,14 +1,19 @@
 [toolchain]
+anchor_version = "0.30.1"
 
 [features]
 resolution = true
 skip-lint = false
 
+[programs.x1-testnet]
+train_htlc = "11111111111111111111111111111112"
+train_discovery = "11111111111111111111111111111113"
+
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "localnet"
+cluster = "https://rpc.testnet.x1.xyz"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
