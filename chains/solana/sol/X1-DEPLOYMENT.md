@@ -69,10 +69,10 @@ Before deploying to X1, ensure you have:
 
                               ```bash
                               # Set X1 testnet as the active cluster
-                              solana config set -u https://rpc.testnet.x1.xyz
+                              npx solana config set -u https://rpc.testnet.x1.xyz
 
                               # Verify configuration
-                              solana config get
+                              npx solana config get
 
                               # Output should show:
                               # RPC URL: https://rpc.testnet.x1.xyz
@@ -86,21 +86,21 @@ Before deploying to X1, ensure you have:
 
                               ```bash
                               # Get your wallet address
-                              solana address
+                              npx solana address
 
                               # Visit https://xolana.xen.network/web_faucet
                               # Enter your wallet address and request test tokens
                               # Wait 1-2 minutes for tokens to arrive
 
                               # Check your balance
-                              solana balance
+                              npx solana balance
                               ```
 
                               ### 4. Build the TRAIN Contracts
 
                               ```bash
                               # Build all Anchor programs
-                              anchor build
+                              npx anchor build
 
                               # Output should show:
                               # Compiling train_htlc v0.1.0
@@ -112,7 +112,7 @@ Before deploying to X1, ensure you have:
 
                               ```bash
                               # Deploy the contracts
-                              anchor deploy
+                              npx anchor deploy
 
                               # This will:
                               # 1. Create IDL (Interface Definition Language)
@@ -134,7 +134,7 @@ Before deploying to X1, ensure you have:
 
                               ```bash
                               # Run Anchor test suite
-                              anchor test
+                              npx anchor test
 
                               # This will:
                               # 1. Start a local X1 validator
@@ -183,7 +183,7 @@ Before deploying to X1, ensure you have:
                                                       **Solution**:
                                                       ```bash
                                                       # Verify RPC endpoint is correct
-                                                      solana config get
+                                                      npx solana config get
 
                                                       # Test connection
                                                       curl https://rpc.testnet.x1.xyz
@@ -199,13 +199,13 @@ Before deploying to X1, ensure you have:
                                                       **Solution**:
                                                       ```bash
                                                       # Check your balance
-                                                      solana balance
+                                                      npx solana balance
 
                                                       # Request more tokens from faucet:
                                                       # https://xolana.xen.network/web_faucet
 
                                                       # Or transfer from another testnet wallet
-                                                      solana transfer RECIPIENT_ADDRESS AMOUNT
+                                                      npx solana transfer RECIPIENT_ADDRESS AMOUNT
                                                       ```
 
                                                       ### Issue: Program Deployment Failed
@@ -215,10 +215,10 @@ Before deploying to X1, ensure you have:
                                                       **Solution**:
                                                       ```bash
                                                       # Build in release mode (smaller binary)
-                                                      anchor build --release
+                                                      npx anchor build --release
 
                                                       # Deploy release build
-                                                      anchor deploy --program-name train_htlc --program-keypair target/deploy/train_htlc-keypair.json
+                                                      npx anchor deploy --program-name train_htlc --program-keypair target/deploy/train_htlc-keypair.json
                                                       ```
 
                                                       ## Next Steps After Deployment
@@ -248,20 +248,20 @@ Before deploying to X1, ensure you have:
                                                                                                                    
                                                                                                                        - ```bash
                                                                                                                          # Check program info
-                                                                                                                         solana program show YOUR_PROGRAM_ID
+                                                                                                                         npx solana program show YOUR_PROGRAM_ID
 
                                                                                                                          # View program account data
-                                                                                                                         solana account YOUR_PROGRAM_ID
+                                                                                                                         npx solana account YOUR_PROGRAM_ID
                                                                                                                          ```
                                                                                                                          
                                                                                                                          ### Update Programs (if needed)
                                                                                                                          
                                                                                                                          ```bash
                                                                                                                          # Rebuild with changes
-                                                                                                                         anchor build
+                                                                                                                         npx anchor build
 
                                                                                                                          # Deploy update
-                                                                                                                         anchor deploy
+                                                                                                                         npx anchor deploy
                                                                                                                          ```
                                                                                                                          
                                                                                                                          ## Resources
