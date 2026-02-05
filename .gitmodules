@@ -1,0 +1,6 @@
+[submodule "chains/evm/solidity/lib/forge-std"]
+	path = chains/evm/solidity/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "chains/evm/solidity/lib/openzeppelin-contracts"]
+	path = chains/evm/solidity/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts

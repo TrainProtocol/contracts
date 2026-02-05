@@ -1,68 +1,416 @@
-# Train EVM Contracts
+# Train Protocol - EVM Implementation
 
-This Hardhat package contains the EVM leg of the Train protocol. The current Solidity sources are:
+Trustless cross-chain bridge using Hashed Time-Locked Contracts (HTLC).
 
-| File                       | Purpose                                                                        |
-| -------------------------- | ------------------------------------------------------------------------------ |
-| `contracts/Train.sol`      | Native ETH hashed-timelock contract that escrows value via `msg.value`.        |
-| `contracts/TrainERC20.sol` | ERC20 mirror of `Train.sol`, using `SafeERC20` transfers and allowance checks. |
-| `contracts/TestToken.sol`  | Minimal mintable token used only inside the automated tests.                   |
+## Overview
 
-Both Train contracts implement the same swap lifecycle and storage layout so off-chain tooling can treat them interchangeably.
+Train Protocol enables permissionless cross-chain token swaps without trusted intermediaries. Users lock funds on the source chain, solvers fulfill the swap on the destination chain, and atomic reveals ensure either both sides complete or both refund.
 
-## HTLC Model
 
-- `lockSrc` opens a user HTLC (no reward). User flows always consume `htlcId = 0` and register in `userSwaps`.
-- `lockDst` opens a solver HTLC (with reward). Solver flows either take slot `0` (if first for a `swapId`) or append to the next open slot.
-- Funds stay locked until a matching secret pre-image is supplied via `redeem` or the timelock passes and anyone can `refund`.
-- Rewards include a separate `rewardTimelock` so solvers/relayers can claim the fee even if the receiver lags. Rewards must be at least 10% of the swap amount (ETH: `msg.value - reward`; ERC20: `amount`) validated via multiplication to avoid integer rounding.
-- Errors such as `InvalidTimelock`, `InvalidRewardTimelock`, `InvalidRewardAmount`, `FundsNotSent`, `NoAllowance`, or `SwapAlreadyInitialized` enforce invariants in both contracts.
+## Contract Architecture
 
-Events (`SrcLocked`, `DstLocked`, `TokenRedeemed`, `TokenRefunded`) surface all data required for off-chain monitoring. The ERC20 variant appends the `token` address to the event schema.
+### Single Unified Contract
 
-## Development & Testing
+The `Train.sol` contract handles both native ETH and ERC20 tokens with a unified interface:
 
-All work happens from `chains/evm/solidity` using Solidity **0.8.30** (optimizer enabled, via-IR, Cancun target). Two deterministic test suites cover the native and ERC20 variants (including boundary and tiny-amount cases):
+- **Native ETH**: Pass `token = address(0)` and send ETH via `msg.value`
+- **ERC20 Tokens**: Pass `token = tokenAddress` and approve before calling
 
-```bash
-# Native ETH contract
-npx hardhat test test/native.js
-
-# ERC20 mirror (mints/approves TestToken per signer)
-npx hardhat test test/erc20.js
+### Storage Structure
 
 ```
+┌─────────────────────────────────────────────────────────────┐
+│                       Train Contract                         │
+├─────────────────────────────────────────────────────────────┤
+│  userLocks: hashlock => UserLock                            │
+│  ├── One lock per hashlock (unique)                         │
+│  └── Used by users initiating swaps                         │
+├─────────────────────────────────────────────────────────────┤
+│  solverLocks: hashlock => index => SolverLock               │
+│  ├── Multiple locks per hashlock (index 1, 2, 3, ...)       │
+│  └── Used by solvers fulfilling swaps                       │
+├─────────────────────────────────────────────────────────────┤
+│  solverLockCount: hashlock => count                         │
+│  └── Tracks number of solver locks per hashlock             │
+└─────────────────────────────────────────────────────────────┘
+```
 
-For gas measurements, enable reporting when running the tests.
+## Core Functions
 
-## Gas Snapshots
+### User Operations
 
-Collected with `REPORT_GAS=true npx hardhat test ...` on Hardhat's in-process network (Cancun rules, 30M gas block, optimizer runs = 200). Figures report min/avg/max across every call seen during the suite.
+#### `userLock(params, dst, data)`
 
-### `Train.sol`
+Creates a user lock to initiate a cross-chain swap.
 
-| Method    | Min     | Avg     | Max     | Calls |
-| --------- | ------- | ------- | ------- | ----- |
-| `lockSrc` | 178,024 | 193,818 | 195,136 | 78    |
-| `lockDst` | 192,269 | 195,109 | 203,697 | 51    |
-| `redeem`  | 55,832  | 60,587  | 67,621  | 21    |
-| `refund`  | 44,746  | 45,259  | 47,246  | 11    |
+```solidity
+struct UserLockParams {
+    bytes32 hashlock;        // sha256(secret) - unique swap identifier
+    uint256 amount;          // Amount to lock
+    uint256 rewardAmount;    // Reward offered to solver (logged only)
+    uint48 timelockDelta;    // Seconds until timelock expires
+    uint48 rewardTimelockDelta; // Logged for solver reference
+    uint48 quoteExpiry;      // Quote validity timestamp
+    address sender;          // Refund recipient
+    address recipient;       // Receives funds on redeem
+    address token;           // Token address (0x0 for ETH)
+    string rewardToken;      // Reward token (logged only)
+    string rewardRecipient;  // Reward recipient (logged only)
+    string srcChain;         // Source chain identifier
+}
+```
 
-### `TrainERC20.sol`
+**Requirements:**
+- `amount > 0`
+- `timelockDelta > 0`
+- `block.timestamp < quoteExpiry`
+- Token must be valid (ETH or contract with code)
+- Hashlock must not already exist
 
-| Method    | Min     | Avg     | Max     | Calls |
-| --------- | ------- | ------- | ------- | ----- |
-| `lockSrc` | 217,326 | 247,501 | 251,526 | 17    |
-| `lockDst` | 214,503 | 216,957 | 229,333 | 14    |
-| `redeem`  | 59,219  | 66,642  | 72,383  | 6     |
-| `refund`  | 50,597  | 52,559  | 55,570  | 5     |
+#### `redeemUser(hashlock, secret)`
 
-_ERC20 flows cost more because every HTLC transfer moves `amount + reward` into the contract and back out with `safeTransfer` checks._
+Redeems a user lock with the secret preimage. Anyone can call this.
 
-## Usage Notes
+**Requirements:**
+- Lock must exist and be pending
+- `sha256(secret) == hashlock`
 
-- Hashlocks are computed as `sha256(abi.encodePacked(secret))`; tests use a `uint256` secret to avoid ABI ambiguity.
-- Timelocks: users must set at least 30 minutes in the future (`lockSrc`), solvers at least 15 minutes (`lockDst`). Solver reward timelocks must be `<= timelock` and strictly greater than `block.timestamp` when submitted.
-- Reward ratio: solver rewards must be at least 10% of the swap amount. Validation uses multiplication (e.g., `reward * 10 >= amount`) to avoid integer-division rounding.
-- ERC20 callers must approve **amount + reward** before calling `lockDst` (and at least **amount** for `lockSrc`); otherwise `NoAllowance` reverts.
-- `getUserSwaps(address)` returns only swaps opened through the rewardless path (slot `0`).
+#### `refundUser(hashlock)`
+
+Refunds a user lock back to the sender.
+
+**Access Control:**
+- `recipient` can refund **anytime**
+- Anyone else can refund **after timelock expires**
+
+### Solver Operations
+
+#### `solverLock(params, dst, data)`
+
+Creates a solver lock to fulfill a swap. Returns the lock index.
+
+```solidity
+struct SolverLockParams {
+    bytes32 hashlock;        // Must match user's hashlock
+    uint256 amount;          // Amount for recipient
+    uint256 reward;          // Solver incentive amount
+    uint48 timelockDelta;    // Seconds until timelock
+    uint48 rewardTimelockDelta; // Time before reward goes to redeemer
+    address sender;          // Refund recipient (solver)
+    address recipient;       // User receiving funds
+    address rewardRecipient; // Gets reward if redeemed early
+    address token;           // Main token (0x0 for ETH)
+    address rewardToken;     // Reward token (0x0 for ETH)
+    string srcChain;         // Source chain identifier
+}
+```
+
+**Token Combinations Supported:**
+| token | rewardToken | msg.value |
+|-------|-------------|-----------|
+| ETH | ETH | amount + reward |
+| ETH | ERC20 | amount |
+| ERC20 | ETH | reward |
+| ERC20 | ERC20 (same) | 0 |
+| ERC20 | ERC20 (different) | 0 |
+
+#### `redeemSolver(hashlock, index, secret)`
+
+Redeems a solver lock. Reward distribution depends on timing:
+
+```
+                    rewardTimelock              timelock
+Time: ──────────────────┼───────────────────────────┼──────────►
+                        │                           │
+      ◄─── Early ──────►│◄──── Late ───────────────►│◄── Expired
+                        │                           │
+      reward →          │  reward →                 │       Can redeem
+      rewardRecipient   │  msg.sender (redeemer)    │  (but should refund)
+```
+
+#### `refundSolver(hashlock, index)`
+
+Refunds a solver lock (amount + reward) to the sender. Only callable after timelock expires.
+
+## Storage Slot Optimization
+
+### UserLock (5 slots)
+
+```
+Slot 0: [────────────────── secret (256 bits) ──────────────────]
+Slot 1: [────────────────── amount (256 bits) ──────────────────]
+Slot 2: [─ sender (160) ─][─ timelock (48) ─][─ status (8) ─][39 free]
+Slot 3: [─────────────────── recipient (160 bits) ───────────────][96 free]
+Slot 4: [───────────────────── token (160 bits) ─────────────────][96 free]
+```
+
+### SolverLock (8 slots)
+
+```
+Slot 0: [────────────────── secret (256 bits) ──────────────────]
+Slot 1: [────────────────── amount (256 bits) ──────────────────]
+Slot 2: [────────────────── reward (256 bits) ──────────────────]
+Slot 3: [─ sender (160) ─][─ timelock (48) ─][─ rewardTimelock (48) ─]
+Slot 4: [─────── recipient (160) ───────][─ status (8) ─][88 free]
+Slot 5: [─────────────── rewardRecipient (160 bits) ─────────────][96 free]
+Slot 6: [───────────────────── token (160 bits) ─────────────────][96 free]
+Slot 7: [─────────────────── rewardToken (160 bits) ──────────────][96 free]
+```
+
+## Security Features
+
+### Reentrancy Protection
+
+All state-changing functions use OpenZeppelin's `ReentrancyGuard` with the `nonReentrant` modifier.
+
+### ETH Transfer Gas Stipend
+
+ETH transfers use a 10,000 gas stipend to prevent:
+- Griefing attacks via gas-expensive `receive()` functions
+- Reentrancy through ETH transfers
+
+```solidity
+(bool success,) = to.call{ value: amount, gas: GAS_STIPEND }('');
+if (!success) revert TransferFailed();
+```
+
+**Note:** Recipients with complex `receive()` functions (>10k gas) cannot receive ETH directly. Use a wrapper contract or ERC20 tokens instead.
+
+### Safe Token Transfers
+
+ERC20 transfers use OpenZeppelin's `SafeERC20` to handle:
+- Tokens that don't return booleans (USDT)
+- Tokens that revert on failure
+- Tokens with non-standard implementations
+
+### Hashlock Validation
+
+The hashlock uses SHA-256 for cross-chain compatibility:
+
+```solidity
+bytes32 hashlock = sha256(abi.encodePacked(secret));
+```
+
+Where `secret` is a `uint256` value.
+
+## Events
+
+### UserLocked
+
+Emitted when a user creates a lock. Contains all information needed for solvers to fulfill the swap.
+
+### SolverLocked
+
+Emitted when a solver creates a lock. Includes the index for multi-lock scenarios.
+
+### UserRedeemed / SolverRedeemed
+
+Emitted on successful redemption. Includes the revealed secret.
+
+### UserRefunded / SolverRefunded
+
+Emitted when a lock is refunded.
+
+## Error Codes
+
+| Error | Description |
+|-------|-------------|
+| `ZeroAmount` | Lock amount is zero |
+| `LockNotFound` | No lock exists for hashlock/index |
+| `HashlockMismatch` | Provided secret doesn't hash to hashlock |
+| `LockNotPending` | Lock already redeemed or refunded |
+| `InvalidTimelock` | Timelock delta is zero |
+| `InvalidRewardTimelock` | rewardTimelockDelta >= timelockDelta |
+| `SwapAlreadyExists` | User lock already exists for hashlock |
+| `TransferFailed` | ETH transfer failed |
+| `MsgValueMismatch` | msg.value doesn't match expected ETH |
+| `RefundNotAllowed` | Refund attempted too early |
+| `InvalidToken` | Token address has no code |
+| `QuoteExpired` | Quote expiry timestamp passed |
+
+## Usage Examples
+
+### User Initiating a Swap (ETH)
+
+```solidity
+Train train = Train(TRAIN_ADDRESS);
+
+// Generate secret and hashlock
+uint256 secret = uint256(keccak256(abi.encodePacked(block.timestamp, msg.sender)));
+bytes32 hashlock = sha256(abi.encodePacked(secret));
+
+// Create user lock
+Train.UserLockParams memory params = Train.UserLockParams({
+    hashlock: hashlock,
+    amount: 1 ether,
+    rewardAmount: 0.01 ether,
+    timelockDelta: 3600,  // 1 hour
+    rewardTimelockDelta: 1800,  // 30 minutes
+    quoteExpiry: uint48(block.timestamp + 300),  // 5 minutes
+    sender: msg.sender,
+    recipient: SOLVER_ADDRESS,
+    token: address(0),  // ETH
+    rewardToken: "ETH",
+    rewardRecipient: "0x...",
+    srcChain: "ethereum"
+});
+
+Train.DestinationInfo memory dst = Train.DestinationInfo({
+    dstChain: "arbitrum",
+    dstAddress: "0x...",
+    dstAmount: 1000e6,  // 1000 USDC
+    dstToken: "USDC"
+});
+
+train.userLock{value: 1 ether}(params, dst, "");
+
+// Store secret securely - needed to redeem on destination chain
+```
+
+### Solver Fulfilling a Swap (ERC20 with ETH Reward)
+
+```solidity
+IERC20(USDC).approve(address(train), amount);
+
+Train.SolverLockParams memory params = Train.SolverLockParams({
+    hashlock: hashlock,  // From user's lock event
+    amount: 1000e6,  // 1000 USDC
+    reward: 0.01 ether,
+    timelockDelta: 1800,  // 30 minutes
+    rewardTimelockDelta: 900,  // 15 minutes
+    sender: msg.sender,
+    recipient: USER_ADDRESS,
+    rewardRecipient: msg.sender,
+    token: USDC,
+    rewardToken: address(0),  // ETH reward
+    srcChain: "arbitrum"
+});
+
+uint256 index = train.solverLock{value: 0.01 ether}(params, dst, "");
+```
+
+### Redeeming with Secret
+
+```solidity
+// User redeems solver lock on destination
+train.redeemSolver(hashlock, index, secret);
+
+// Solver redeems user lock on source (after seeing secret from above)
+train.redeemUser(hashlock, secret);
+```
+
+## Build & Test
+
+```bash
+# Install dependencies
+forge install
+
+# Build
+forge build
+
+# Run tests
+forge test
+
+# Run tests with verbosity
+forge test -vvv
+
+# Run specific test
+forge test --match-test "testFunctionName"
+
+# Gas report
+forge test --gas-report
+
+# Coverage
+forge coverage
+```
+
+## Deployment
+
+### Prerequisites
+
+- [Foundry](https://book.getfoundry.sh/getting-started/installation) installed
+- RPC endpoint for target network
+- Deployer private key with sufficient ETH for gas
+
+### Deploy Script
+
+Create a deployment script at `script/Deploy.s.sol`:
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.30;
+
+import "forge-std/Script.sol";
+import "../src/Train.sol";
+
+contract DeployTrain is Script {
+    function run() external {
+        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+
+        vm.startBroadcast(deployerPrivateKey);
+
+        Train train = new Train();
+
+        vm.stopBroadcast();
+
+        console.log("Train deployed at:", address(train));
+    }
+}
+```
+
+### Deploy Commands
+
+```bash
+# Set environment variables
+export PRIVATE_KEY=<your-private-key>
+export RPC_URL=<network-rpc-url>
+
+# Deploy to network
+forge script script/Deploy.s.sol:DeployTrain --rpc-url $RPC_URL --broadcast
+
+# Deploy with verification (Etherscan)
+forge script script/Deploy.s.sol:DeployTrain \
+    --rpc-url $RPC_URL \
+    --broadcast \
+    --verify \
+    --etherscan-api-key <your-api-key>
+```
+
+### Supported Networks
+
+The contract targets **Cancun** EVM version. Ensure the target network supports Cancun opcodes (available on Ethereum mainnet, Arbitrum, Optimism, Base, etc. since March 2024).
+
+## Gas Costs
+
+### Deployment
+
+| Metric | Value |
+|--------|-------|
+| Deployment Cost | ~1,365,038 gas |
+| Contract Size | 6,023 bytes |
+
+### Function Costs
+
+Gas costs vary based on token type (ETH vs ERC20) and storage operations (cold vs warm slots).
+
+| Function | Min | Avg | Median | Max | Description |
+|----------|-----|-----|--------|-----|-------------|
+| **User Operations** |
+| `userLock` | 32,522 | 117,029 | 111,424 | 166,496 | Higher for ERC20 (transfer) |
+| `redeemUser` | 29,262 | 94,061 | 94,805 | 95,117 | Reveals secret, transfers out |
+| `refundUser` | 29,165 | 39,077 | 46,580 | 47,742 | Returns funds to sender |
+| **Solver Operations** |
+| `solverLock` | 31,677 | 187,185 | 179,182 | 289,428 | Higher for mixed token types |
+| `redeemSolver` | 29,412 | 112,897 | 107,029 | 136,942 | 2 transfers (amount + reward) |
+| `refundSolver` | 29,469 | 51,726 | 51,750 | 63,438 | Returns amount + reward |
+| **View Functions** |
+| `getUserLock` | 11,579 | 11,579 | 11,579 | 11,579 | Read 5 storage slots |
+| `getSolverLock` | 18,380 | 18,380 | 18,380 | 18,380 | Read 8 storage slots |
+| `getSolverLockCount` | 2,457 | 2,457 | 2,457 | 2,457 | Read 1 storage slot |
+
+### Gas Optimization Notes
+
+- **ETH transfers** are cheaper than ERC20 (~21k vs ~50k+ gas)
+- **Same token for amount and reward** saves one transfer (~30k gas)
+- **Recipient == RewardRecipient** enables combined transfer (~30k gas saved)
+- **Storage packing** minimizes slot usage (5 slots for UserLock, 8 for SolverLock)

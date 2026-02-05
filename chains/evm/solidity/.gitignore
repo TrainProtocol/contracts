@@ -1,14 +1,15 @@
-node_modules
+# Foundry
+out/
+cache/
+broadcast/
+
+# Dependencies
+lib/
+
+# IDE
+.idea/
+.vscode/
+
+# Environment
 .env
-coverage
-coverage.json
-typechain
-typechain-types
-ignition/deployments
-artifacts-zk
-cache-zk
-
-# Hardhat files
-cache
-artifacts
-
+.env.local
