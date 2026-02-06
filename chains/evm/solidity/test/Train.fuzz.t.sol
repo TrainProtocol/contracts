@@ -161,14 +161,7 @@ contract TrainFuzzTest is Test {
     uint256 secret = uint256(keccak256(abi.encodePacked(amount, timelockDelta, 'erc20')));
     bytes32 hashlock = sha256(abi.encodePacked(secret));
 
-    Train.UserLockParams memory params = _userParams(
-      hashlock,
-      amount,
-      address(token),
-      timelockDelta,
-      0,
-      quoteExpiry
-    );
+    Train.UserLockParams memory params = _userParams(hashlock, amount, address(token), timelockDelta, 0, quoteExpiry);
 
     uint256 senderBalanceBefore = token.balanceOf(initiator);
     uint256 contractBalanceBefore = token.balanceOf(address(train));
@@ -187,14 +180,7 @@ contract TrainFuzzTest is Test {
     uint48 quoteExpiry = uint48(block.timestamp + quoteDelay);
 
     bytes32 hashlock = sha256(abi.encodePacked(uint256(123)));
-    Train.UserLockParams memory params = _userParams(
-      hashlock,
-      amount,
-      NATIVE_ETH,
-      timelockDelta,
-      0,
-      quoteExpiry
-    );
+    Train.UserLockParams memory params = _userParams(hashlock, amount, NATIVE_ETH, timelockDelta, 0, quoteExpiry);
 
     vm.prank(initiator);
     if (quoteDelay == 0) {
@@ -525,5 +511,132 @@ contract TrainFuzzTest is Test {
     }
 
     assertEq(train.getSolverLockCount(hashlock), locks);
+  }
+
+  function testFuzz_getUserLockHashes_tracksMultipleLocks(uint8 numLocks) public {
+    numLocks = uint8(bound(numLocks, 1, 20));
+
+    bytes32[] memory expectedHashlocks = new bytes32[](numLocks);
+
+    for (uint256 i = 0; i < numLocks; i++) {
+      uint256 secret = 1000 + i;
+      bytes32 hashlock = sha256(abi.encodePacked(secret));
+      expectedHashlocks[i] = hashlock;
+
+      Train.UserLockParams memory params = _userParams(
+        hashlock,
+        (i + 1) * 0.1 ether,
+        NATIVE_ETH,
+        3600,
+        1800,
+        uint48(block.timestamp + 60)
+      );
+
+      vm.prank(initiator);
+      train.userLock{ value: (i + 1) * 0.1 ether }(params, _dst(), '');
+    }
+
+    bytes32[] memory hashes = train.getUserLockHashes(initiator);
+    assertEq(hashes.length, numLocks);
+
+    for (uint256 i = 0; i < numLocks; i++) {
+      assertEq(hashes[i], expectedHashlocks[i]);
+    }
+  }
+
+  function testFuzz_getUserLocks_returnsCorrectData(uint8 numLocks, uint256 baseAmount) public {
+    numLocks = uint8(bound(numLocks, 1, 10));
+    baseAmount = bound(baseAmount, 0.01 ether, 10 ether);
+
+    for (uint256 i = 0; i < numLocks; i++) {
+      uint256 secret = 2000 + i;
+      bytes32 hashlock = sha256(abi.encodePacked(secret));
+      uint256 amount = baseAmount + (i * 0.1 ether);
+
+      Train.UserLockParams memory params = _userParams(
+        hashlock,
+        amount,
+        NATIVE_ETH,
+        3600,
+        1800,
+        uint48(block.timestamp + 60)
+      );
+
+      vm.prank(initiator);
+      train.userLock{ value: amount }(params, _dst(), '');
+    }
+
+    Train.UserLock[] memory locks = train.getUserLocks(initiator);
+    assertEq(locks.length, numLocks);
+
+    for (uint256 i = 0; i < numLocks; i++) {
+      assertEq(locks[i].sender, initiator);
+      assertEq(locks[i].recipient, receiver);
+      assertEq(locks[i].token, NATIVE_ETH);
+      assertEq(locks[i].amount, baseAmount + (i * 0.1 ether));
+      assertEq(uint8(locks[i].status), uint8(Train.LockStatus.Pending));
+    }
+  }
+
+  function testFuzz_getUserLockHashes_persistsAfterRedeem(uint256 amount, uint256 secret) public {
+    amount = bound(amount, 0.01 ether, 100 ether);
+    secret = bound(secret, 1, type(uint256).max);
+    bytes32 hashlock = sha256(abi.encodePacked(secret));
+
+    Train.UserLockParams memory params = _userParams(
+      hashlock,
+      amount,
+      NATIVE_ETH,
+      3600,
+      1800,
+      uint48(block.timestamp + 60)
+    );
+
+    vm.prank(initiator);
+    train.userLock{ value: amount }(params, _dst(), '');
+
+    vm.prank(relayer);
+    train.redeemUser(hashlock, secret);
+
+    bytes32[] memory hashes = train.getUserLockHashes(initiator);
+    assertEq(hashes.length, 1);
+    assertEq(hashes[0], hashlock);
+
+    Train.UserLock[] memory locks = train.getUserLocks(initiator);
+    assertEq(locks.length, 1);
+    assertEq(uint8(locks[0].status), uint8(Train.LockStatus.Redeemed));
+    assertEq(locks[0].secret, secret);
+  }
+
+  function testFuzz_getUserLockHashes_persistsAfterRefund(uint256 amount, uint48 timelockFuzz) public {
+    amount = bound(amount, 0.01 ether, 100 ether);
+    timelockFuzz = uint48(bound(timelockFuzz, 60, 30 days));
+    uint256 secret = 54321;
+    bytes32 hashlock = sha256(abi.encodePacked(secret));
+
+    Train.UserLockParams memory params = _userParams(
+      hashlock,
+      amount,
+      NATIVE_ETH,
+      timelockFuzz,
+      1,
+      uint48(block.timestamp + 60)
+    );
+
+    vm.prank(initiator);
+    train.userLock{ value: amount }(params, _dst(), '');
+
+    vm.warp(block.timestamp + timelockFuzz + 1);
+
+    vm.prank(relayer);
+    train.refundUser(hashlock);
+
+    bytes32[] memory hashes = train.getUserLockHashes(initiator);
+    assertEq(hashes.length, 1);
+    assertEq(hashes[0], hashlock);
+
+    Train.UserLock[] memory locks = train.getUserLocks(initiator);
+    assertEq(locks.length, 1);
+    assertEq(uint8(locks[0].status), uint8(Train.LockStatus.Refunded));
   }
 }

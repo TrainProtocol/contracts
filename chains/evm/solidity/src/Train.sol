@@ -201,6 +201,9 @@ contract Train is ReentrancyGuard {
   /// @dev hashlock => count of solver locks
   mapping(bytes32 => uint256) private solverLockCount;
 
+  /// @dev Historical hashlocks per user address
+  mapping(address => bytes32[]) private userLockHashes;
+
   /// @notice Create a user lock to initiate a cross-chain swap
   /// @param params Lock parameters including hashlock, amount, addresses, and timelocks
   /// @param dst Destination chain details (logged only)
@@ -225,6 +228,9 @@ contract Train is ReentrancyGuard {
     lock.timelock = timelock;
     lock.status = LockStatus.Pending;
     lock.token = params.token;
+
+    // Track hashlock for this user
+    userLockHashes[params.sender].push(params.hashlock);
 
     _transferIn(params.token, params.amount);
     _emitUserLocked(params, dst, timelock, data);
@@ -331,7 +337,14 @@ contract Train is ReentrancyGuard {
     lock.secret = secret;
 
     address rewardTo = lock.rewardTimelock > block.timestamp ? lock.rewardRecipient : msg.sender;
-    _transferOutMixed(lock.token, lock.amount, payable(lock.recipient), lock.rewardToken, lock.reward, payable(rewardTo));
+    _transferOutMixed(
+      lock.token,
+      lock.amount,
+      payable(lock.recipient),
+      lock.rewardToken,
+      lock.reward,
+      payable(rewardTo)
+    );
     emit SolverRedeemed(hashlock, index, msg.sender, secret);
   }
 
@@ -355,6 +368,25 @@ contract Train is ReentrancyGuard {
   /// @return The count of solver locks
   function getSolverLockCount(bytes32 hashlock) external view returns (uint256) {
     return solverLockCount[hashlock];
+  }
+
+  /// @notice Get all hashlocks for user locks created by an address
+  /// @param user The address to query
+  /// @return Array of hashlocks
+  function getUserLockHashes(address user) external view returns (bytes32[] memory) {
+    return userLockHashes[user];
+  }
+
+  /// @notice Get all user lock details created by an address
+  /// @param user The address to query
+  /// @return Array of UserLock structs
+  function getUserLocks(address user) external view returns (UserLock[] memory) {
+    bytes32[] memory hashlocks = userLockHashes[user];
+    UserLock[] memory locks = new UserLock[](hashlocks.length);
+    for (uint256 i = 0; i < hashlocks.length; i++) {
+      locks[i] = userLocks[hashlocks[i]];
+    }
+    return locks;
   }
 
   /// @dev Transfer ETH or ERC20 into the contract
@@ -404,7 +436,7 @@ contract Train is ReentrancyGuard {
   /// @param amount Amount to transfer
   function _transferOut(address token, address payable to, uint256 amount) internal {
     if (token == NATIVE_ETH) {
-      (bool success,) = to.call{ value: amount, gas: GAS_STIPEND }('');
+      (bool success, ) = to.call{ value: amount, gas: GAS_STIPEND }('');
       if (!success) revert TransferFailed();
     } else {
       IERC20(token).safeTransfer(to, amount);

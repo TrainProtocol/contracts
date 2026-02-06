@@ -6,7 +6,6 @@ Trustless cross-chain bridge using Hashed Time-Locked Contracts (HTLC).
 
 Train Protocol enables permissionless cross-chain token swaps without trusted intermediaries. Users lock funds on the source chain, solvers fulfill the swap on the destination chain, and atomic reveals ensure either both sides complete or both refund.
 
-
 ## Contract Architecture
 
 ### Single Unified Contract
@@ -61,6 +60,7 @@ struct UserLockParams {
 ```
 
 **Requirements:**
+
 - `amount > 0`
 - `timelockDelta > 0`
 - `block.timestamp < quoteExpiry`
@@ -72,6 +72,7 @@ struct UserLockParams {
 Redeems a user lock with the secret preimage. Anyone can call this.
 
 **Requirements:**
+
 - Lock must exist and be pending
 - `sha256(secret) == hashlock`
 
@@ -80,6 +81,7 @@ Redeems a user lock with the secret preimage. Anyone can call this.
 Refunds a user lock back to the sender.
 
 **Access Control:**
+
 - `recipient` can refund **anytime**
 - Anyone else can refund **after timelock expires**
 
@@ -166,6 +168,7 @@ All state-changing functions use OpenZeppelin's `ReentrancyGuard` with the `nonR
 ### ETH Transfer Gas Stipend
 
 ETH transfers use a 10,000 gas stipend to prevent:
+
 - Griefing attacks via gas-expensive `receive()` functions
 - Reentrancy through ETH transfers
 
@@ -179,6 +182,7 @@ if (!success) revert TransferFailed();
 ### Safe Token Transfers
 
 ERC20 transfers use OpenZeppelin's `SafeERC20` to handle:
+
 - Tokens that don't return booleans (USDT)
 - Tokens that revert on failure
 - Tokens with non-standard implementations
@@ -213,20 +217,71 @@ Emitted when a lock is refunded.
 
 ## Error Codes
 
-| Error | Description |
-|-------|-------------|
-| `ZeroAmount` | Lock amount is zero |
-| `LockNotFound` | No lock exists for hashlock/index |
-| `HashlockMismatch` | Provided secret doesn't hash to hashlock |
-| `LockNotPending` | Lock already redeemed or refunded |
-| `InvalidTimelock` | Timelock delta is zero |
-| `InvalidRewardTimelock` | rewardTimelockDelta >= timelockDelta |
-| `SwapAlreadyExists` | User lock already exists for hashlock |
-| `TransferFailed` | ETH transfer failed |
-| `MsgValueMismatch` | msg.value doesn't match expected ETH |
-| `RefundNotAllowed` | Refund attempted too early |
-| `InvalidToken` | Token address has no code |
-| `QuoteExpired` | Quote expiry timestamp passed |
+| Error                   | Description                              |
+| ----------------------- | ---------------------------------------- |
+| `ZeroAmount`            | Lock amount is zero                      |
+| `LockNotFound`          | No lock exists for hashlock/index        |
+| `HashlockMismatch`      | Provided secret doesn't hash to hashlock |
+| `LockNotPending`        | Lock already redeemed or refunded        |
+| `InvalidTimelock`       | Timelock delta is zero                   |
+| `InvalidRewardTimelock` | rewardTimelockDelta >= timelockDelta     |
+| `SwapAlreadyExists`     | User lock already exists for hashlock    |
+| `TransferFailed`        | ETH transfer failed                      |
+| `MsgValueMismatch`      | msg.value doesn't match expected ETH     |
+| `RefundNotAllowed`      | Refund attempted too early               |
+| `InvalidToken`          | Token address has no code                |
+| `QuoteExpired`          | Quote expiry timestamp passed            |
+
+## Historical Swap Tracking
+
+The contract provides built-in historical swap tracking for user locks, allowing applications to query all swaps created by a specific address.
+
+### Storage Tracking
+
+```solidity
+mapping(address => bytes32[]) private userLockHashes;
+```
+
+Each time a user creates a lock via `userLock()`, the hashlock is automatically appended to their history array. This tracking:
+
+- **Persists forever** - Hashlocks remain in history even after redemption or refund
+- **Tracks initiators only** - Only the `sender` address is tracked, not recipients
+- **On-chain query support** - Enables frontend applications to display user swap history
+
+### Query Functions
+
+#### `getUserLockHashes(address user)`
+
+Returns an array of all hashlocks for swaps created by the user.
+
+```solidity
+bytes32[] memory hashlocks = train.getUserLockHashes(userAddress);
+// Returns: [hashlock1, hashlock2, hashlock3, ...]
+```
+
+**Use case:** Efficiently fetch all swap identifiers, then query individual lock details as needed.
+
+#### `getUserLocks(address user)`
+
+Returns an array of complete `UserLock` structs for all swaps created by the user.
+
+```solidity
+Train.UserLock[] memory locks = train.getUserLocks(userAddress);
+for (uint i = 0; i < locks.length; i++) {
+        // Access: locks[i].amount, locks[i].status, locks[i].secret, etc.
+}
+```
+
+**Use case:** Fetch full swap history with all details (amount, token, status, recipient, timelock).
+
+### Status Tracking
+
+The returned locks include real-time status:
+
+- `LockStatus.Pending` - Active swap awaiting redemption
+- `LockStatus.Redeemed` - Completed swap (includes revealed `secret`)
+- `LockStatus.Refunded` - Cancelled/expired swap
+
 
 ## Usage Examples
 
@@ -384,29 +439,31 @@ The contract targets **Cancun** EVM version. Ensure the target network supports 
 
 ### Deployment
 
-| Metric | Value |
-|--------|-------|
-| Deployment Cost | ~1,365,038 gas |
-| Contract Size | 6,023 bytes |
+| Metric          | Value         |
+| --------------- | ------------- |
+| Deployment Cost | 1,545,494 gas |
+| Contract Size   | 6,858 bytes   |
 
 ### Function Costs
 
 Gas costs vary based on token type (ETH vs ERC20) and storage operations (cold vs warm slots).
 
-| Function | Min | Avg | Median | Max | Description |
-|----------|-----|-----|--------|-----|-------------|
-| **User Operations** |
-| `userLock` | 32,522 | 117,029 | 111,424 | 166,496 | Higher for ERC20 (transfer) |
-| `redeemUser` | 29,262 | 94,061 | 94,805 | 95,117 | Reveals secret, transfers out |
-| `refundUser` | 29,165 | 39,077 | 46,580 | 47,742 | Returns funds to sender |
+| Function              | Min    | Avg     | Median  | Max     | Description                          |
+| --------------------- | ------ | ------- | ------- | ------- | ------------------------------------ |
+| **User Operations**   |
+| `userLock`            | 32,614 | 149,029 | 155,986 | 211,142 | Higher for ERC20 + hashlock tracking |
+| `redeemUser`          | 29,262 | 94,464  | 94,817  | 95,129  | Reveals secret, transfers out        |
+| `refundUser`          | 29,187 | 41,593  | 46,642  | 47,764  | Returns funds to sender              |
 | **Solver Operations** |
-| `solverLock` | 31,677 | 187,185 | 179,182 | 289,428 | Higher for mixed token types |
-| `redeemSolver` | 29,412 | 112,897 | 107,029 | 136,942 | 2 transfers (amount + reward) |
-| `refundSolver` | 29,469 | 51,726 | 51,750 | 63,438 | Returns amount + reward |
-| **View Functions** |
-| `getUserLock` | 11,579 | 11,579 | 11,579 | 11,579 | Read 5 storage slots |
-| `getSolverLock` | 18,380 | 18,380 | 18,380 | 18,380 | Read 8 storage slots |
-| `getSolverLockCount` | 2,457 | 2,457 | 2,457 | 2,457 | Read 1 storage slot |
+| `solverLock`          | 31,747 | 187,420 | 179,288 | 289,546 | Higher for mixed token types         |
+| `redeemSolver`        | 29,412 | 112,898 | 107,041 | 136,954 | 2 transfers (amount + reward)        |
+| `refundSolver`        | 29,513 | 51,771  | 51,794  | 63,482  | Returns amount + reward              |
+| **View Functions**    |
+| `getUserLock`         | 11,723 | 11,723  | 11,723  | 11,723  | Read 5 storage slots                 |
+| `getSolverLock`       | 18,426 | 18,426  | 18,426  | 18,426  | Read 8 storage slots                 |
+| `getSolverLockCount`  | 2,479  | 2,479   | 2,479   | 2,479   | Read 1 storage slot                  |
+| `getUserLockHashes`   | 2,869  | 9,553   | 5,140   | 48,294  | Scales with user's swap count        |
+| `getUserLocks`        | 3,101  | 32,140  | 17,234  | 144,525 | Fetches full history (expensive)     |
 
 ### Gas Optimization Notes
 
