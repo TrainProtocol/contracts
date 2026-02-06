@@ -255,7 +255,7 @@ contract Train is ReentrancyGuard {
       revert InvalidToken();
 
     uint48 timelock = uint48(block.timestamp) + params.timelockDelta;
-    uint48 rewardTimelock = timelock - params.rewardTimelockDelta;
+    uint48 rewardTimelock = uint48(block.timestamp) + params.rewardTimelockDelta;
 
     index = ++solverLockCount[params.hashlock];
     SolverLock storage lock = solverLocks[params.hashlock][index];
@@ -370,23 +370,118 @@ contract Train is ReentrancyGuard {
     return solverLockCount[hashlock];
   }
 
-  /// @notice Get all hashlocks for user locks created by an address
+  /// @notice Get all hashlocks for user locks created by an address with optional filtering and pagination
   /// @param user The address to query
-  /// @return Array of hashlocks
-  function getUserLockHashes(address user) external view returns (bytes32[] memory) {
-    return userLockHashes[user];
+  /// @param status Lock status filter (Empty = no filter, otherwise filter by specific status)
+  /// @param offset Starting index for pagination
+  /// @param limit Number of results to return
+  /// @return hashlocks Array of filtered hashlocks
+  /// @return total Total count of matching hashlocks
+  function getUserLockHashes(
+    address user,
+    LockStatus status,
+    uint256 offset,
+    uint256 limit
+  ) external view returns (bytes32[] memory hashlocks, uint256 total) {
+    bytes32[] memory allHashes = userLockHashes[user];
+
+    // If no pagination limit specified, return empty
+    if (limit == 0) {
+      return (new bytes32[](0), 0);
+    }
+
+    // Count matching entries
+    uint256 matchCount = 0;
+    for (uint256 i = 0; i < allHashes.length; i++) {
+      if (status == LockStatus.Empty || userLocks[allHashes[i]].status == status) {
+        matchCount++;
+      }
+    }
+
+    // Calculate pagination bounds
+    if (offset >= matchCount) {
+      return (new bytes32[](0), matchCount);
+    }
+
+    uint256 end = offset + limit;
+    if (end > matchCount) {
+      end = matchCount;
+    }
+    uint256 size = end - offset;
+
+    // Build filtered result
+    bytes32[] memory result = new bytes32[](size);
+    uint256 resultIndex = 0;
+    uint256 currentIndex = 0;
+
+    for (uint256 i = 0; i < allHashes.length && resultIndex < size; i++) {
+      if (status == LockStatus.Empty || userLocks[allHashes[i]].status == status) {
+        if (currentIndex >= offset) {
+          result[resultIndex] = allHashes[i];
+          resultIndex++;
+        }
+        currentIndex++;
+      }
+    }
+
+    return (result, matchCount);
   }
 
-  /// @notice Get all user lock details created by an address
+  /// @notice Get all user lock details created by an address with optional filtering and pagination
   /// @param user The address to query
-  /// @return Array of UserLock structs
-  function getUserLocks(address user) external view returns (UserLock[] memory) {
-    bytes32[] memory hashlocks = userLockHashes[user];
-    UserLock[] memory locks = new UserLock[](hashlocks.length);
-    for (uint256 i = 0; i < hashlocks.length; i++) {
-      locks[i] = userLocks[hashlocks[i]];
+  /// @param status Lock status filter (Empty = no filter, otherwise filter by specific status)
+  /// @param offset Starting index for pagination
+  /// @param limit Number of results to return
+  /// @return locks Array of filtered UserLock structs
+  /// @return total Total count of matching locks
+  function getUserLocks(
+    address user,
+    LockStatus status,
+    uint256 offset,
+    uint256 limit
+  ) external view returns (UserLock[] memory locks, uint256 total) {
+    bytes32[] memory allHashes = userLockHashes[user];
+
+    // If no pagination limit specified, return empty
+    if (limit == 0) {
+      return (new UserLock[](0), 0);
     }
-    return locks;
+
+    // Count matching entries
+    uint256 matchCount = 0;
+    for (uint256 i = 0; i < allHashes.length; i++) {
+      if (status == LockStatus.Empty || userLocks[allHashes[i]].status == status) {
+        matchCount++;
+      }
+    }
+
+    // Calculate pagination bounds
+    if (offset >= matchCount) {
+      return (new UserLock[](0), matchCount);
+    }
+
+    uint256 end = offset + limit;
+    if (end > matchCount) {
+      end = matchCount;
+    }
+    uint256 size = end - offset;
+
+    // Build filtered result
+    UserLock[] memory result = new UserLock[](size);
+    uint256 resultIndex = 0;
+    uint256 currentIndex = 0;
+
+    for (uint256 i = 0; i < allHashes.length && resultIndex < size; i++) {
+      if (status == LockStatus.Empty || userLocks[allHashes[i]].status == status) {
+        if (currentIndex >= offset) {
+          result[resultIndex] = userLocks[allHashes[i]];
+          resultIndex++;
+        }
+        currentIndex++;
+      }
+    }
+
+    return (result, matchCount);
   }
 
   /// @dev Transfer ETH or ERC20 into the contract

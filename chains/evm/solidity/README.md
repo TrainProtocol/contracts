@@ -48,7 +48,7 @@ struct UserLockParams {
     uint256 amount;          // Amount to lock
     uint256 rewardAmount;    // Reward offered to solver (logged only)
     uint48 timelockDelta;    // Seconds until timelock expires
-    uint48 rewardTimelockDelta; // Logged for solver reference
+    uint48 rewardTimelockDelta; // Seconds until reward goes to user
     uint48 quoteExpiry;      // Quote validity timestamp
     address sender;          // Refund recipient
     address recipient;       // Receives funds on redeem
@@ -97,7 +97,7 @@ struct SolverLockParams {
     uint256 amount;          // Amount for recipient
     uint256 reward;          // Solver incentive amount
     uint48 timelockDelta;    // Seconds until timelock
-    uint48 rewardTimelockDelta; // Time before reward goes to redeemer
+    uint48 rewardTimelockDelta; // Seconds until reward goes to redeemer
     address sender;          // Refund recipient (solver)
     address recipient;       // User receiving funds
     address rewardRecipient; // Gets reward if redeemed early
@@ -250,29 +250,90 @@ Each time a user creates a lock via `userLock()`, the hashlock is automatically 
 
 ### Query Functions
 
-#### `getUserLockHashes(address user)`
+#### `getUserLockHashes(address user, LockStatus status, uint256 offset, uint256 limit)`
 
-Returns an array of all hashlocks for swaps created by the user.
+Returns paginated and filtered hashlocks for swaps created by the user.
 
 ```solidity
-bytes32[] memory hashlocks = train.getUserLockHashes(userAddress);
-// Returns: [hashlock1, hashlock2, hashlock3, ...]
+// Get all hashlocks (no filtering)
+(bytes32[] memory hashlocks, uint256 total) = train.getUserLockHashes(
+    userAddress,
+    LockStatus.Empty,  // Empty = no status filter
+    0,                 // offset: start from index 0
+    10                 // limit: return max 10 results
+);
+// Returns: ([hashlock1, hashlock2, ...], totalCount)
+
+// Get only redeemed swaps
+(bytes32[] memory redeemedHashes, uint256 redeemedTotal) = train.getUserLockHashes(
+    userAddress,
+    LockStatus.Redeemed,
+    0,
+    10
+);
 ```
 
-**Use case:** Efficiently fetch all swap identifiers, then query individual lock details as needed.
+**Parameters:**
 
-#### `getUserLocks(address user)`
+- `user` - Address to query
+- `status` - Filter by status (`Empty` for no filter, or `Pending`/`Redeemed`/`Refunded`)
+- `offset` - Starting index for pagination
+- `limit` - Maximum results to return (0 returns empty array)
 
-Returns an array of complete `UserLock` structs for all swaps created by the user.
+**Returns:**
+
+- `hashlocks` - Array of filtered hashlocks
+- `total` - Total count of matching hashlocks (useful for calculating total pages)
+
+**Use case:** Efficiently fetch paginated list of swap identifiers with optional status filtering.
+
+#### `getUserLocks(address user, LockStatus status, uint256 offset, uint256 limit)`
+
+Returns paginated and filtered complete `UserLock` structs for swaps created by the user.
 
 ```solidity
-Train.UserLock[] memory locks = train.getUserLocks(userAddress);
-for (uint i = 0; i < locks.length; i++) {
-        // Access: locks[i].amount, locks[i].status, locks[i].secret, etc.
+// Get all locks with pagination
+(Train.UserLock[] memory locks, uint256 total) = train.getUserLocks(
+    userAddress,
+    LockStatus.Empty,  // Empty = no status filter
+    0,                 // Page 1: offset 0
+    5                  // 5 items per page
+);
+
+// Page 2 with same filter
+(Train.UserLock[] memory page2, uint256 total) = train.getUserLocks(
+    userAddress,
+    LockStatus.Empty,
+    5,                 // offset 5 = next 5 items
+    5
+);
+
+// Get only pending swaps
+(Train.UserLock[] memory pendingLocks, uint256 pendingTotal) = train.getUserLocks(
+    userAddress,
+    LockStatus.Pending,
+    0,
+    10
+);
+
+for (uint i = 0; i < pendingLocks.length; i++) {
+    // Access: pendingLocks[i].amount, pendingLocks[i].recipient, etc.
 }
 ```
 
-**Use case:** Fetch full swap history with all details (amount, token, status, recipient, timelock).
+**Parameters:**
+
+- `user` - Address to query
+- `status` - Filter by status (`Empty` for all, `Pending`/`Redeemed`/`Refunded` for specific)
+- `offset` - Starting index for pagination
+- `limit` - Maximum results to return
+
+**Returns:**
+
+- `locks` - Array of filtered UserLock structs
+- `total` - Total count of matching locks
+
+**Use case:** Fetch paginated full swap details with optional filtering by status.
 
 ### Status Tracking
 
@@ -281,7 +342,6 @@ The returned locks include real-time status:
 - `LockStatus.Pending` - Active swap awaiting redemption
 - `LockStatus.Redeemed` - Completed swap (includes revealed `secret`)
 - `LockStatus.Refunded` - Cancelled/expired swap
-
 
 ## Usage Examples
 

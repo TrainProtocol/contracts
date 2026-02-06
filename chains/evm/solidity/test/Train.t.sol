@@ -926,9 +926,10 @@ contract TrainTest is Test {
     vm.prank(initiator);
     train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
 
-    bytes32[] memory hashes = train.getUserLockHashes(initiator);
+    (bytes32[] memory hashes, uint256 total) = train.getUserLockHashes(initiator, Train.LockStatus.Empty, 0, 10);
 
     assertEq(hashes.length, 1);
+    assertEq(total, 1);
     assertEq(hashes[0], hashlock);
   }
 
@@ -953,9 +954,10 @@ contract TrainTest is Test {
     train.userLock(params3, _defaultDestination(), '');
     vm.stopPrank();
 
-    bytes32[] memory hashes = train.getUserLockHashes(initiator);
+    (bytes32[] memory hashes, uint256 total) = train.getUserLockHashes(initiator, Train.LockStatus.Empty, 0, 10);
 
     assertEq(hashes.length, 3);
+    assertEq(total, 3);
     assertEq(hashes[0], hashlock1);
     assertEq(hashes[1], hashlock2);
     assertEq(hashes[2], hashlock3);
@@ -963,9 +965,10 @@ contract TrainTest is Test {
 
   function test_getUserLockHashes_EmptyForNewUser() public {
     address newUser = makeAddr('newUser');
-    bytes32[] memory hashes = train.getUserLockHashes(newUser);
+    (bytes32[] memory hashes, uint256 total) = train.getUserLockHashes(newUser, Train.LockStatus.Empty, 0, 10);
 
     assertEq(hashes.length, 0);
+    assertEq(total, 0);
   }
 
   function test_getUserLockHashes_PersistsAfterRedemption() public {
@@ -977,9 +980,10 @@ contract TrainTest is Test {
     vm.prank(relayer);
     train.redeemUser(hashlock, SECRET);
 
-    bytes32[] memory hashes = train.getUserLockHashes(initiator);
+    (bytes32[] memory hashes, uint256 total) = train.getUserLockHashes(initiator, Train.LockStatus.Empty, 0, 10);
 
     assertEq(hashes.length, 1);
+    assertEq(total, 1);
     assertEq(hashes[0], hashlock);
   }
 
@@ -995,9 +999,10 @@ contract TrainTest is Test {
     vm.prank(relayer);
     train.refundUser(hashlock);
 
-    bytes32[] memory hashes = train.getUserLockHashes(initiator);
+    (bytes32[] memory hashes, uint256 total) = train.getUserLockHashes(initiator, Train.LockStatus.Empty, 0, 10);
 
     assertEq(hashes.length, 1);
+    assertEq(total, 1);
     assertEq(hashes[0], hashlock);
   }
 
@@ -1007,9 +1012,10 @@ contract TrainTest is Test {
     vm.prank(initiator);
     train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
 
-    Train.UserLock[] memory locks = train.getUserLocks(initiator);
+    (Train.UserLock[] memory locks, uint256 total) = train.getUserLocks(initiator, Train.LockStatus.Empty, 0, 10);
 
     assertEq(locks.length, 1);
+    assertEq(total, 1);
     assertEq(locks[0].amount, 1 ether);
     assertEq(locks[0].sender, initiator);
     assertEq(locks[0].recipient, receiver);
@@ -1033,9 +1039,10 @@ contract TrainTest is Test {
     train.userLock(params2, _defaultDestination(), '');
     vm.stopPrank();
 
-    Train.UserLock[] memory locks = train.getUserLocks(initiator);
+    (Train.UserLock[] memory locks, uint256 total) = train.getUserLocks(initiator, Train.LockStatus.Empty, 0, 10);
 
     assertEq(locks.length, 2);
+    assertEq(total, 2);
     assertEq(locks[0].amount, 1 ether);
     assertEq(locks[0].token, NATIVE_ETH);
     assertEq(locks[1].amount, 2 ether);
@@ -1044,9 +1051,10 @@ contract TrainTest is Test {
 
   function test_getUserLocks_EmptyForNewUser() public {
     address newUser = makeAddr('newUser');
-    Train.UserLock[] memory locks = train.getUserLocks(newUser);
+    (Train.UserLock[] memory locks, uint256 total) = train.getUserLocks(newUser, Train.LockStatus.Empty, 0, 10);
 
     assertEq(locks.length, 0);
+    assertEq(total, 0);
   }
 
   function test_getUserLocks_ReflectsRedeemedStatus() public {
@@ -1058,9 +1066,10 @@ contract TrainTest is Test {
     vm.prank(relayer);
     train.redeemUser(hashlock, SECRET);
 
-    Train.UserLock[] memory locks = train.getUserLocks(initiator);
+    (Train.UserLock[] memory locks, uint256 total) = train.getUserLocks(initiator, Train.LockStatus.Empty, 0, 10);
 
     assertEq(locks.length, 1);
+    assertEq(total, 1);
     assertEq(uint8(locks[0].status), uint8(Train.LockStatus.Redeemed));
     assertEq(locks[0].secret, SECRET);
   }
@@ -1077,9 +1086,10 @@ contract TrainTest is Test {
     vm.prank(relayer);
     train.refundUser(hashlock);
 
-    Train.UserLock[] memory locks = train.getUserLocks(initiator);
+    (Train.UserLock[] memory locks, uint256 total) = train.getUserLocks(initiator, Train.LockStatus.Empty, 0, 10);
 
     assertEq(locks.length, 1);
+    assertEq(total, 1);
     assertEq(uint8(locks[0].status), uint8(Train.LockStatus.Refunded));
   }
 
@@ -1102,18 +1112,167 @@ contract TrainTest is Test {
     train.userLock{ value: 2 ether }(params2, _defaultDestination(), '');
 
     // Check initiator's locks
-    Train.UserLock[] memory initiatorLocks = train.getUserLocks(initiator);
+    (Train.UserLock[] memory initiatorLocks, uint256 initiatorTotal) = train.getUserLocks(
+      initiator,
+      Train.LockStatus.Empty,
+      0,
+      10
+    );
     assertEq(initiatorLocks.length, 1);
+    assertEq(initiatorTotal, 1);
     assertEq(initiatorLocks[0].amount, 1 ether);
 
     // Check solver's locks
-    Train.UserLock[] memory solverLocks = train.getUserLocks(solver);
+    (Train.UserLock[] memory solverLocks, uint256 solverTotal) = train.getUserLocks(
+      solver,
+      Train.LockStatus.Empty,
+      0,
+      10
+    );
     assertEq(solverLocks.length, 1);
+    assertEq(solverTotal, 1);
     assertEq(solverLocks[0].amount, 2 ether);
 
     // Check receiver has no locks (they are only recipient, not sender)
-    Train.UserLock[] memory receiverLocks = train.getUserLocks(receiver);
+    (Train.UserLock[] memory receiverLocks, uint256 receiverTotal) = train.getUserLocks(
+      receiver,
+      Train.LockStatus.Empty,
+      0,
+      10
+    );
     assertEq(receiverLocks.length, 0);
+    assertEq(receiverTotal, 0);
+  }
+
+  function test_getUserLocks_WithStatusFilter_Redeemed() public {
+    uint256 secret1 = 111;
+    uint256 secret2 = 222;
+    uint256 secret3 = 333;
+    bytes32 hashlock1 = sha256(abi.encodePacked(secret1));
+    bytes32 hashlock2 = sha256(abi.encodePacked(secret2));
+    bytes32 hashlock3 = sha256(abi.encodePacked(secret3));
+
+    Train.UserLockParams memory params1 = _defaultUserParams(1 ether, NATIVE_ETH);
+    params1.hashlock = hashlock1;
+    Train.UserLockParams memory params2 = _defaultUserParams(2 ether, NATIVE_ETH);
+    params2.hashlock = hashlock2;
+    Train.UserLockParams memory params3 = _defaultUserParams(3 ether, NATIVE_ETH);
+    params3.hashlock = hashlock3;
+
+    vm.startPrank(initiator);
+    train.userLock{ value: 1 ether }(params1, _defaultDestination(), '');
+    train.userLock{ value: 2 ether }(params2, _defaultDestination(), '');
+    train.userLock{ value: 3 ether }(params3, _defaultDestination(), '');
+    vm.stopPrank();
+
+    // Redeem 2 of them
+    vm.prank(relayer);
+    train.redeemUser(hashlock1, secret1);
+
+    vm.prank(relayer);
+    train.redeemUser(hashlock2, secret2);
+
+    // Query only redeemed locks
+    (Train.UserLock[] memory redeemedLocks, uint256 redeemedTotal) = train.getUserLocks(
+      initiator,
+      Train.LockStatus.Redeemed,
+      0,
+      10
+    );
+
+    assertEq(redeemedLocks.length, 2);
+    assertEq(redeemedTotal, 2);
+    assertEq(uint8(redeemedLocks[0].status), uint8(Train.LockStatus.Redeemed));
+    assertEq(uint8(redeemedLocks[1].status), uint8(Train.LockStatus.Redeemed));
+
+    // Query only pending locks
+    (Train.UserLock[] memory pendingLocks, uint256 pendingTotal) = train.getUserLocks(
+      initiator,
+      Train.LockStatus.Pending,
+      0,
+      10
+    );
+
+    assertEq(pendingLocks.length, 1);
+    assertEq(pendingTotal, 1);
+    assertEq(uint8(pendingLocks[0].status), uint8(Train.LockStatus.Pending));
+  }
+
+  function test_getUserLocks_WithPagination() public {
+    // Create 5 locks
+    for (uint256 i = 1; i <= 5; i++) {
+      uint256 secret = 1000 + i;
+      bytes32 lockHashlock = sha256(abi.encodePacked(secret));
+
+      Train.UserLockParams memory params = _defaultUserParams(i * 1 ether, NATIVE_ETH);
+      params.hashlock = lockHashlock;
+
+      vm.prank(initiator);
+      train.userLock{ value: i * 1 ether }(params, _defaultDestination(), '');
+    }
+
+    // Page 1: Get first 2
+    (Train.UserLock[] memory page1, uint256 total1) = train.getUserLocks(initiator, Train.LockStatus.Empty, 0, 2);
+    assertEq(page1.length, 2);
+    assertEq(total1, 5);
+
+    // Page 2: Get next 2
+    (Train.UserLock[] memory page2, uint256 total2) = train.getUserLocks(initiator, Train.LockStatus.Empty, 2, 2);
+    assertEq(page2.length, 2);
+    assertEq(total2, 5);
+
+    // Page 3: Get last 1
+    (Train.UserLock[] memory page3, uint256 total3) = train.getUserLocks(initiator, Train.LockStatus.Empty, 4, 2);
+    assertEq(page3.length, 1);
+    assertEq(total3, 5);
+
+    // Out of range
+    (Train.UserLock[] memory page4, uint256 total4) = train.getUserLocks(initiator, Train.LockStatus.Empty, 10, 2);
+    assertEq(page4.length, 0);
+    assertEq(total4, 5);
+  }
+
+  function test_getUserLockHashes_WithStatusFilter() public {
+    uint256 secret1 = 111;
+    uint256 secret2 = 222;
+    bytes32 hashlock1 = sha256(abi.encodePacked(secret1));
+    bytes32 hashlock2 = sha256(abi.encodePacked(secret2));
+
+    Train.UserLockParams memory params1 = _defaultUserParams(1 ether, NATIVE_ETH);
+    params1.hashlock = hashlock1;
+    Train.UserLockParams memory params2 = _defaultUserParams(2 ether, NATIVE_ETH);
+    params2.hashlock = hashlock2;
+
+    vm.startPrank(initiator);
+    train.userLock{ value: 1 ether }(params1, _defaultDestination(), '');
+    train.userLock{ value: 2 ether }(params2, _defaultDestination(), '');
+    vm.stopPrank();
+
+    // Redeem one
+    vm.prank(relayer);
+    train.redeemUser(hashlock1, secret1);
+
+    // Get only redeemed
+    (bytes32[] memory redeemedHashes, uint256 redeemedTotal) = train.getUserLockHashes(
+      initiator,
+      Train.LockStatus.Redeemed,
+      0,
+      10
+    );
+    assertEq(redeemedHashes.length, 1);
+    assertEq(redeemedTotal, 1);
+    assertEq(redeemedHashes[0], hashlock1);
+
+    // Get only pending
+    (bytes32[] memory pendingHashes, uint256 pendingTotal) = train.getUserLockHashes(
+      initiator,
+      Train.LockStatus.Pending,
+      0,
+      10
+    );
+    assertEq(pendingHashes.length, 1);
+    assertEq(pendingTotal, 1);
+    assertEq(pendingHashes[0], hashlock2);
   }
 
   // ============ Additional Event Tests ============

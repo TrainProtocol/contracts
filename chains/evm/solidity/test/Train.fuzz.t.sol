@@ -339,9 +339,9 @@ contract TrainFuzzTest is Test {
     vm.prank(solver);
     uint256 index = train.solverLock{ value: amount + reward }(params, _dst(), '');
 
-    // rewardTimelock = (block.timestamp + timelockDelta) - rewardTimelockDelta
+    // rewardTimelock = block.timestamp + rewardTimelockDelta
     // Warp past the rewardTimelock
-    vm.warp(block.timestamp + timelockDelta - rewardTimelockDelta + 1);
+    vm.warp(block.timestamp + rewardTimelockDelta + 1);
 
     uint256 receiverBalanceBefore = receiver.balance;
     uint256 relayerBalanceBefore = relayer.balance;
@@ -536,8 +536,9 @@ contract TrainFuzzTest is Test {
       train.userLock{ value: (i + 1) * 0.1 ether }(params, _dst(), '');
     }
 
-    bytes32[] memory hashes = train.getUserLockHashes(initiator);
+    (bytes32[] memory hashes, uint256 total) = train.getUserLockHashes(initiator, Train.LockStatus.Empty, 0, 100);
     assertEq(hashes.length, numLocks);
+    assertEq(total, numLocks);
 
     for (uint256 i = 0; i < numLocks; i++) {
       assertEq(hashes[i], expectedHashlocks[i]);
@@ -566,8 +567,9 @@ contract TrainFuzzTest is Test {
       train.userLock{ value: amount }(params, _dst(), '');
     }
 
-    Train.UserLock[] memory locks = train.getUserLocks(initiator);
+    (Train.UserLock[] memory locks, uint256 total) = train.getUserLocks(initiator, Train.LockStatus.Empty, 0, 100);
     assertEq(locks.length, numLocks);
+    assertEq(total, numLocks);
 
     for (uint256 i = 0; i < numLocks; i++) {
       assertEq(locks[i].sender, initiator);
@@ -598,12 +600,14 @@ contract TrainFuzzTest is Test {
     vm.prank(relayer);
     train.redeemUser(hashlock, secret);
 
-    bytes32[] memory hashes = train.getUserLockHashes(initiator);
+    (bytes32[] memory hashes, uint256 totalHashes) = train.getUserLockHashes(initiator, Train.LockStatus.Empty, 0, 100);
     assertEq(hashes.length, 1);
+    assertEq(totalHashes, 1);
     assertEq(hashes[0], hashlock);
 
-    Train.UserLock[] memory locks = train.getUserLocks(initiator);
+    (Train.UserLock[] memory locks, uint256 totalLocks) = train.getUserLocks(initiator, Train.LockStatus.Empty, 0, 100);
     assertEq(locks.length, 1);
+    assertEq(totalLocks, 1);
     assertEq(uint8(locks[0].status), uint8(Train.LockStatus.Redeemed));
     assertEq(locks[0].secret, secret);
   }
@@ -631,12 +635,14 @@ contract TrainFuzzTest is Test {
     vm.prank(relayer);
     train.refundUser(hashlock);
 
-    bytes32[] memory hashes = train.getUserLockHashes(initiator);
+    (bytes32[] memory hashes, uint256 totalHashes) = train.getUserLockHashes(initiator, Train.LockStatus.Empty, 0, 100);
     assertEq(hashes.length, 1);
+    assertEq(totalHashes, 1);
     assertEq(hashes[0], hashlock);
 
-    Train.UserLock[] memory locks = train.getUserLocks(initiator);
+    (Train.UserLock[] memory locks, uint256 totalLocks) = train.getUserLocks(initiator, Train.LockStatus.Empty, 0, 100);
     assertEq(locks.length, 1);
+    assertEq(totalLocks, 1);
     assertEq(uint8(locks[0].status), uint8(Train.LockStatus.Refunded));
   }
 }
