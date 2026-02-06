@@ -93,19 +93,13 @@ async function main(): Promise<void> {
     })
     .deployed();
 
-  await walletDeployer.registerContract(token.instance, TokenContract.artifact);
-  await walletUser.registerContract(token.instance, TokenContract.artifact);
-  await walletSolver.registerContract(token.instance, TokenContract.artifact);
   await walletUser.registerSender(deployerAccount.address);
   await walletSolver.registerSender(deployerAccount.address);
 
   const amount = 2000n;
-  const tokenForUser = await TokenContract.at(token.address, walletUser);
-  const tokenForSolver = await TokenContract.at(token.address, walletSolver);
-  const tokenForDeployer = await TokenContract.at(
-    token.address,
-    walletDeployer,
-  );
+  const tokenForUser = TokenContract.at(token.address, walletUser);
+  const tokenForSolver = TokenContract.at(token.address, walletSolver);
+  const tokenForDeployer = TokenContract.at(token.address, walletDeployer);
 
   const mintTx = await tokenForDeployer.methods
     .mint_to_public(deployerAccount.address, amount)
@@ -116,7 +110,12 @@ async function main(): Promise<void> {
     .wait({ timeout: 1_200_000 });
 
   await tokenForDeployer.methods
-    .transfer_to_private(userAccount.address, amount / 2n)
+    .transfer_in_public(
+      deployerAccount.address,
+      userAccount.address,
+      amount / 2n,
+      0,
+    )
     .send({
       from: deployerAccount.address,
       fee: { paymentMethod: payDeployer },
@@ -124,25 +123,30 @@ async function main(): Promise<void> {
     .wait({ timeout: 1_200_000 });
 
   await tokenForDeployer.methods
-    .transfer_to_private(solverAccount.address, amount / 2n)
+    .transfer_in_public(
+      deployerAccount.address,
+      solverAccount.address,
+      amount / 2n,
+      0,
+    )
     .send({
       from: deployerAccount.address,
       fee: { paymentMethod: payDeployer },
     })
     .wait({ timeout: 1_200_000 });
 
-  const userPrivBal = await tokenForUser.methods
-    .balance_of_private(userAccount.address)
+  const userPubBal = await tokenForUser.methods
+    .balance_of_public(userAccount.address)
     .simulate({ from: userAccount.address });
 
-  const solverPrivBal = await tokenForSolver.methods
-    .balance_of_private(solverAccount.address)
+  const solverPubBal = await tokenForSolver.methods
+    .balance_of_public(solverAccount.address)
     .simulate({ from: solverAccount.address });
 
   console.log(`Token deployed at ${token.address.toString()}`);
   console.log(`Public mint tx block: ${mintTx.blockNumber}`);
-  console.log(`User private balance: ${userPrivBal}`);
-  console.log(`Solver private balance: ${solverPrivBal}`);
+  console.log(`User public balance: ${userPubBal}`);
+  console.log(`Solver public balance: ${solverPubBal}`);
 
   updateData({
     userSecretKey: userSecretKey.toString(),

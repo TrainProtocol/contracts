@@ -50,14 +50,14 @@ async function main(): Promise<void> {
     })
     .deployed({ timeout: 1200000 });
 
-  const inst = contract.instance;
+  console.log(`Contract deployed at: ${contract.address.toString()}`);
+
   updateData({
-    salt: inst.salt.toString(),
-    deployer: inst.deployer.toString(),
-    currentContractClassId: inst.currentContractClassId.toString(),
-    originalContractClassId: inst.originalContractClassId.toString(),
-    initializationHash: inst.initializationHash.toString(),
-    address: inst.address.toString(),
+    address: contract.address.toString(),
+    deployerSecretKey: secretKey.toString(),
+    deployerSalt: salt.toString(),
+    deployerSigningKey: signingPrivateKey.toString(),
+    deployerAddress: deployerAccount.address.toString(),
   });
 }
 

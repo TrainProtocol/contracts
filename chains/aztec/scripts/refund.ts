@@ -47,10 +47,6 @@ async function main(): Promise<void> {
   );
   const tokenAddress = AztecAddress.fromString(data.tokenAddress);
 
-  const trainInstance = await node.getContract(trainAddress);
-  await wallet.registerContract(trainInstance, TrainContract.artifact);
-  const tokenInstance = await node.getContract(tokenAddress);
-  await wallet.registerContract(tokenInstance, TokenContract.artifact);
   await wallet.registerSender(trainAddress);
 
   const secretKeyHex =
@@ -72,15 +68,19 @@ async function main(): Promise<void> {
 
   const paymentMethod = await getSponsoredPaymentMethod(wallet);
 
-  const train = await TrainContract.at(trainAddress, wallet);
-  const token = await TokenContract.at(tokenAddress, wallet);
+  const train = TrainContract.at(trainAddress, wallet);
+  const token = TokenContract.at(tokenAddress, wallet);
 
-  const id = Fr.fromString(role === 'user' ? data.commitId : data.lockId);
+  // User refunds their own lock_src (htlc_id=0), Solver refunds their own lock_dst (htlc_id=1)
+  const swap_id = Fr.fromString(
+    role === 'user' ? data.userSwapId : data.solverSwapId,
+  );
+  const htlc_id = role === 'user' ? 0 : 1;
 
   console.log(
-    `[${role}] private balance (before):`,
+    `[${role}] public balance (before):`,
     await token.methods
-      .balance_of_private(account.address)
+      .balance_of_public(account.address)
       .simulate({ from: account.address }),
   );
   console.log(
@@ -91,21 +91,21 @@ async function main(): Promise<void> {
   );
 
   const exists = await train.methods
-    .is_contract_initialized(id)
+    .has_htlc(swap_id, htlc_id)
     .simulate({ from: account.address });
   if (!exists) throw new Error('HTLC Does Not Exist');
 
   const tx = await train.methods
-    .refund_private(id)
+    .refund(swap_id, htlc_id)
     .send({ from: account.address, fee: { paymentMethod } })
     .wait({ timeout: 120000 });
 
   console.log(`[${role}] refund tx:`, tx);
 
   console.log(
-    `[${role}] private balance (after):`,
+    `[${role}] public balance (after):`,
     await token.methods
-      .balance_of_private(account.address)
+      .balance_of_public(account.address)
       .simulate({ from: account.address }),
   );
   console.log(
@@ -116,7 +116,7 @@ async function main(): Promise<void> {
   );
 
   console.log('Public logs:', await publicLogs(node, { txHash: tx.txHash }));
-  await getHTLCDetails(account.address, train, id);
+  await getHTLCDetails(account.address, train, swap_id);
 }
 
 main().catch((err) => {

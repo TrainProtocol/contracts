@@ -47,22 +47,13 @@ async function main(): Promise<void> {
   );
   const tokenAddress = AztecAddress.fromString(data.tokenAddress);
 
-  const trainInstance = await node.getContract(trainAddress);
-  await wallet.registerContract(trainInstance, TrainContract.artifact);
   await wallet.registerSender(trainAddress);
-  const tokenInstance = await node.getContract(tokenAddress);
-  await wallet.registerContract(tokenInstance, TokenContract.artifact);
 
   const secretKeyHex =
-    role === 'user'
-      ? data.userSecretKey
-      : (data.solverSecretKey );
-  const saltHex =
-    role === 'user' ? data.userSalt : (data.solverSalt );
+    role === 'user' ? data.userSecretKey : data.solverSecretKey;
+  const saltHex = role === 'user' ? data.userSalt : data.solverSalt;
   const signingKeyHex =
-    role === 'user'
-      ? data.userSigningKey
-      : (data.solverSigningKey );
+    role === 'user' ? data.userSigningKey : data.solverSigningKey;
 
   const secretKey = Fr.fromString(secretKeyHex);
   const salt = Fr.fromString(saltHex);
@@ -77,22 +68,22 @@ async function main(): Promise<void> {
 
   const paymentMethod = await getSponsoredPaymentMethod(wallet);
 
-  const train = await TrainContract.at(trainAddress, wallet);
-  const token = await TokenContract.at(tokenAddress, wallet);
+  const train = TrainContract.at(trainAddress, wallet);
+  const token = TokenContract.at(tokenAddress, wallet);
 
   const isUserFlow = role === 'user';
-  const id = Fr.fromString(isUserFlow ? data.lockId : data.commitId);
+  // User redeems from solver's lock_dst (htlc_id=1), Solver redeems from user's lock_src (htlc_id=0)
+  const swap_id = Fr.fromString(
+    isUserFlow ? data.solverSwapId : data.userSwapId,
+  );
+  const htlc_id = isUserFlow ? 1 : 0;
 
-  const secretHigh = isUserFlow ? data.secretHigh2 : data.secretHigh;
-  const secretLow = isUserFlow ? data.secretLow2 : data.secretLow;
-
-  const ownershipKeyHigh = isUserFlow ? data.ownershipKeyHigh : 0n;
-  const ownershipKeyLow = isUserFlow ? data.ownershipKeyLow : 0n;
+  const secret = isUserFlow ? data.solverSecret : data.userSecret;
 
   console.log(
-    `[${role}] private balance (before):`,
+    `[${role}] public balance (before):`,
     await token.methods
-      .balance_of_private(account.address)
+      .balance_of_public(account.address)
       .simulate({ from: account.address }),
   );
   console.log(
@@ -103,26 +94,20 @@ async function main(): Promise<void> {
   );
 
   const exists = await train.methods
-    .is_contract_initialized(id)
+    .has_htlc(swap_id, htlc_id)
     .simulate({ from: account.address });
   if (!exists) throw new Error('HTLC Does Not Exist');
 
   const tx = await train.methods
-    .redeem_private(
-      id,
-      secretHigh,
-      secretLow,
-      ownershipKeyHigh,
-      ownershipKeyLow,
-    )
+    .redeem(swap_id, htlc_id, secret)
     .send({ from: account.address, fee: { paymentMethod } })
     .wait({ timeout: 120000 });
 
   console.log(`[${role}] redeem tx:`, tx);
   console.log(
-    `[${role}] private balance (after):`,
+    `[${role}] public balance (after):`,
     await token.methods
-      .balance_of_private(account.address)
+      .balance_of_public(account.address)
       .simulate({ from: account.address }),
   );
   console.log(
@@ -133,7 +118,16 @@ async function main(): Promise<void> {
   );
 
   console.log('Public logs:', await publicLogs(node, { txHash: tx.txHash }));
-  await getHTLCDetails(account.address, train, id);
+
+  // Verify HTLC state after redeem
+  console.log('\n=== HTLC State After Redeem ===');
+  const htlcAfter = await train.methods
+    .get_htlc(swap_id, htlc_id)
+    .simulate({ from: account.address });
+  console.log('Claimed status:', htlcAfter.claimed, '(3 = redeemed)');
+  console.log('Secret revealed:', htlcAfter.secret);
+
+  await getHTLCDetails(account.address, train, swap_id);
 }
 
 main().catch((err) => {

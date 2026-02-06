@@ -60,11 +60,6 @@ export async function getSponsoredPaymentMethod(wallet: TestWallet) {
     { salt: new Fr(0) },
   );
 
-  await wallet.registerContract(
-    sponsoredFPCInstance,
-    SponsoredFPCContract.artifact,
-  );
-
   return new SponsoredFeePaymentMethod(sponsoredFPCInstance.address);
 }
 
@@ -109,32 +104,18 @@ export function readData(): Record<string, any> {
   }
 }
 
-function uint8ArrayToBigInt(uint8Array: Uint8Array): bigint {
-  let result = 0n;
-  for (let i = 0; i < uint8Array.length; i++) {
-    result = (result << 8n) | BigInt(uint8Array[i]);
-  }
-  return result;
-}
-
 /**
- * Generates a secret and its SHA-256 hash lock, split into high and low halves.
- * @returns A tuple with [secretHigh, secretLow, hashlockHigh, hashlockLow] as u128 bigint numbers.
+ * Generates a secret and its SHA-256 hash lock as [u8; 32] arrays.
+ * @returns A tuple with [secret, hashlock] as arrays of bytes.
  */
-export function generateSecretAndHashlock(): [bigint, bigint, bigint, bigint] {
+export function generateSecretAndHashlock(): [number[], number[]] {
   const secret = crypto.randomBytes(32);
   const hashlock = crypto.createHash('sha256').update(secret).digest();
 
-  const secretUint8 = new Uint8Array(secret);
-  const hashlockUint8 = new Uint8Array(hashlock);
+  const secretArray = Array.from(secret);
+  const hashlockArray = Array.from(hashlock);
 
-  const secretHigh = uint8ArrayToBigInt(secretUint8.slice(0, 16));
-  const secretLow = uint8ArrayToBigInt(secretUint8.slice(16, 32));
-
-  const hashlockHigh = uint8ArrayToBigInt(hashlockUint8.slice(0, 16));
-  const hashlockLow = uint8ArrayToBigInt(hashlockUint8.slice(16, 32));
-
-  return [secretHigh, secretLow, hashlockHigh, hashlockLow];
+  return [secretArray, hashlockArray];
 }
 
 /**
@@ -165,23 +146,52 @@ export function stringToUint8Array(str: string): Uint8Array {
 }
 
 /**
- * Fetches and logs HTLC details for a given Id.
+ * Fetches and logs HTLC details for a given swap_id (checks both htlc_id 0 and 1).
  * @param contract - A contract instance with HTLC methods.
- * @param Id - The identifier for the HTLC.
+ * @param swap_id - The swap identifier for the HTLC.
  */
 export async function getHTLCDetails(
   caller: AztecAddress,
   contract: TrainContract,
-  id: Fr,
+  swap_id: Fr,
 ): Promise<void> {
   try {
-    const details = await contract.methods
-      .get_htlc_public(id)
+    // Check htlc_id 0 (lock_src)
+    const hasHtlc0 = await contract.methods
+      .has_htlc(swap_id, 0)
       .simulate({ from: caller });
-    console.log(`HTLC Details for Id ${id.toString()}:`, details);
+
+    if (hasHtlc0) {
+      const details0 = await contract.methods
+        .get_htlc(swap_id, 0)
+        .simulate({ from: caller });
+      console.log(
+        `HTLC Details for swap_id ${swap_id.toString()} htlc_id 0 (lock_src):`,
+        details0,
+      );
+    }
+
+    // Check htlc_id 1 (lock_dst)
+    const hasHtlc1 = await contract.methods
+      .has_htlc(swap_id, 1)
+      .simulate({ from: caller });
+
+    if (hasHtlc1) {
+      const details1 = await contract.methods
+        .get_htlc(swap_id, 1)
+        .simulate({ from: caller });
+      console.log(
+        `HTLC Details for swap_id ${swap_id.toString()} htlc_id 1 (lock_dst):`,
+        details1,
+      );
+    }
+
+    if (!hasHtlc0 && !hasHtlc1) {
+      console.log(`No HTLCs found for swap_id ${swap_id.toString()}`);
+    }
   } catch (error) {
     console.error(
-      `Failed to fetch HTLC details for Id ${id.toString()}:`,
+      `Failed to fetch HTLC details for swap_id ${swap_id.toString()}:`,
       error,
     );
   }

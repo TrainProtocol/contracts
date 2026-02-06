@@ -15,11 +15,8 @@ import {
   readData,
   getHTLCDetails,
   publicLogs,
+  generateSecretAndHashlock,
 } from './utils.ts';
-import {
-  ContractFunctionInteractionCallIntent,
-  lookupValidity,
-} from '@aztec/aztec.js/authorization';
 
 async function main(): Promise<void> {
   const data = readData();
@@ -36,10 +33,6 @@ async function main(): Promise<void> {
     dataStoreMapSizeKb: 1e6,
   });
   const wallet = await TestWallet.create(node, fullConfig, { store });
-  const trainInstance = await node.getContract(trainAddress);
-  await wallet.registerContract(trainInstance, TrainContract.artifact);
-  const tokenInstance = await node.getContract(tokenAddress);
-  await wallet.registerContract(tokenInstance, TokenContract.artifact);
 
   const secretKey = Fr.fromString(data.userSecretKey);
   const salt = Fr.fromString(data.userSalt);
@@ -53,73 +46,89 @@ async function main(): Promise<void> {
   );
   const paymentMethod = await getSponsoredPaymentMethod(wallet);
 
-  const token = await TokenContract.at(tokenAddress, wallet);
-  const train = await TrainContract.at(trainAddress, wallet);
+  const token = TokenContract.at(tokenAddress, wallet);
+  const train = TrainContract.at(trainAddress, wallet);
 
-  const id = Fr.random();
+  const swap_id = Fr.random();
+  const htlc_id = 0; // Source chain lock uses htlc_id = 0 (user)
   const now = Math.floor(Date.now() / 1000);
-  const timelock = now + 1100;
-  const amount = 23n;
+  const timelock = now + 1900;
+  const amount = 20n;
   const src_asset = 'USDC.e'.padStart(30, ' ');
-  const dst_chain = 'USDC.e'.padStart(30, ' ');
-  const dst_asset = 'PROOFOFPLAYAPEX_MAINNET'.padStart(30, ' ');
+  const dst_chain = 'PROOFOFPLAYAPEX_MAINNET'.padStart(30, ' ');
+  const dst_asset = 'USDC.e'.padStart(30, ' ');
   const dst_address =
     '0x01ba575951852339bfe8787463503081ea0da04448b2efc58798705c27cdb3fb'.padStart(
       90,
       ' ',
     );
-  const randomness = Fr.random();
 
-  const transfer = token.methods.transfer_to_public(
-    account.address,
-    trainAddress,
-    amount,
-    randomness,
-  );
-  const intent: ContractFunctionInteractionCallIntent = {
-    caller: trainAddress,
-    action: transfer,
-  };
-
-  const witness = await wallet.createAuthWit(account.address, intent);
-
-  console.log(
-    'check validity of witness: ',
-    await lookupValidity(wallet, account.address, intent, witness),
-  );
+  const [secret, hashlock] = generateSecretAndHashlock();
 
   const exists = await train.methods
-    .is_contract_initialized(id)
+    .has_htlc(swap_id, htlc_id)
     .simulate({ from: account.address });
   if (exists) throw new Error('HTLC Exists');
 
   const tx = await train.methods
-    .commit_private_user(
-      id,
-      solverAddress,
+    .lock_src(
+      swap_id,
+      hashlock,
       timelock,
+      solverAddress, // src_receiver (solver receives on source chain)
       tokenAddress,
       amount,
       src_asset,
       dst_chain,
       dst_asset,
       dst_address,
-      randomness,
     )
     .send({
       from: account.address,
-      authWitnesses: [witness],
       fee: { paymentMethod },
     })
     .wait({ timeout: 120000 });
 
-  await getHTLCDetails(account.address, train, id);
   console.log('Public logs: ', await publicLogs(node, { txHash: tx.txHash }));
 
+  console.log(
+    'Public balance of Train:',
+    await token.methods
+      .balance_of_public(trainAddress)
+      .simulate({ from: account.address }),
+  );
+
+  // Test getters
+  console.log('\n=== Testing Getters ===');
+  const htlcExists = await train.methods
+    .has_htlc(swap_id, htlc_id)
+    .simulate({ from: account.address });
+  console.log(
+    `HTLC exists (swap_id=${swap_id}, htlc_id=${htlc_id}):`,
+    htlcExists,
+  );
+
+  if (htlcExists) {
+    const htlcDetails = await train.methods
+      .get_htlc(swap_id, htlc_id)
+      .simulate({ from: account.address });
+    console.log('HTLC Details:', htlcDetails);
+  }
+
+  const userSwapsCount = await train.methods
+    .get_user_swaps_count(account.address)
+    .simulate({ from: account.address });
+  console.log(`User swaps count for ${account.address}:`, userSwapsCount);
+
   updateData({
-    commitId: id.toString(),
-    commitTxHash: tx.txHash?.toString?.() ?? String(tx),
+    userSwapId: swap_id.toString(),
+    userHtlcId: htlc_id.toString(),
+    userTx: tx.txHash?.toString?.() ?? String(tx),
+    userSecret: secret,
+    userHashlock: hashlock,
   });
+
+  await getHTLCDetails(account.address, train, swap_id);
 }
 
 main().catch((err) => {
