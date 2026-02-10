@@ -9,7 +9,8 @@
 //       @@@@@  @@@           @@@@@@@@@ @@@  @@@   @@@          @@@
 
 mod types;
-use dep::aztec::macros::aztec;
+mod lib;
+use aztec::macros::aztec;
 
 #[aztec]
 pub contract Train {
@@ -17,28 +18,46 @@ pub contract Train {
 
     use aztec::macros::{functions::{external, initializer, view}, storage::storage};
 
-    use dep::aztec::{
-        protocol_types::{address::AztecAddress, traits::{Deserialize, Packable, Serialize}},
-        state_vars::{map::Map, PublicMutable},
+    use aztec::{
+        protocol::{address::AztecAddress, traits::{Deserialize, Packable, Serialize}},
+        state_vars::{Map, PublicMutable},
     };
-    use dep::sha256;
-    use dep::token::Token;
-    use std::collections::bounded_vec::BoundedVec;
+    use sha256;
+    use token::Token;
 
-    use crate::types::events::{DstLocked, SrcLocked, TokenRedeemed, TokenRefunded};
+    use crate::lib::hashlock_to_fields;
+    use crate::types::events::{
+        SolverLocked, SolverRedeemed, SolverRefunded, UserLocked, UserRedeemed, UserRefunded,
+    };
+
+    global STATUS_EMPTY: u8 = 0;
+    global STATUS_PENDING: u8 = 1;
+    global STATUS_REFUNDED: u8 = 2;
+    global STATUS_REDEEMED: u8 = 3;
+    #[derive(Eq, Packable, Serialize, Deserialize)]
+    pub struct UserLock {
+        secret: [u8; 32],
+        amount: u128,
+        sender: AztecAddress,
+        timelock: u64,
+        status: u8,
+        recipient: AztecAddress,
+        token: AztecAddress,
+    }
 
     #[derive(Eq, Packable, Serialize, Deserialize)]
-    pub struct HTLC_Public {
-        amount: u128,
-        token: AztecAddress,
-        hashlock: [u8; 32],
+    pub struct SolverLock {
         secret: [u8; 32],
-        sender: AztecAddress,
-        src_receiver: AztecAddress,
-        timelock: u64,
-        claimed: u8,
+        amount: u128,
         reward: u128,
+        sender: AztecAddress,
+        timelock: u64,
         reward_timelock: u64,
+        recipient: AztecAddress,
+        status: u8,
+        reward_recipient: AztecAddress,
+        token: AztecAddress,
+        reward_token: AztecAddress,
     }
 
     #[external("public")]
@@ -47,304 +66,377 @@ pub contract Train {
 
     #[storage]
     struct Storage<Context> {
-        contracts: Map<Field, Map<Field, PublicMutable<HTLC_Public, Context>, Context>, Context>,
-        user_swaps_count: Map<AztecAddress, PublicMutable<Field, Context>, Context>,
-        user_swaps: Map<AztecAddress, Map<Field, PublicMutable<Field, Context>, Context>, Context>,
+        user_locks: Map<Field, Map<Field, PublicMutable<UserLock, Context>, Context>, Context>,
+        solver_locks: Map<Field, Map<Field, Map<Field, PublicMutable<SolverLock, Context>, Context>, Context>, Context>,
+        solver_lock_count: Map<Field, Map<Field, PublicMutable<Field, Context>, Context>, Context>,
     }
 
     #[external("public")]
-    fn lock_src(
-        swap_id: Field,
+    fn user_lock(
         hashlock: [u8; 32],
-        timelock: u64,
-        src_receiver: AztecAddress,
-        token: AztecAddress,
         amount: u128,
-        src_asset: str<30>,
-        dst_chain: str<30>,
-        dst_asset: str<30>,
-        dst_address: str<90>,
+        reward_amount: u128,
+        timelock_delta: u64,
+        reward_timelock_delta: u64,
+        quote_expiry: u64,
+        sender: AztecAddress,
+        recipient: AztecAddress,
+        token: AztecAddress,
+        reward_token: AztecAddress,
+        reward_recipient: [u8; 90],
+        src_chain: [u8; 30],
+        dst_chain: [u8; 30],
+        dst_address: [u8; 90],
+        dst_amount: u128,
+        dst_token: [u8; 90],
+        data: [u8; 256],
     ) {
-        assert(amount > 0, "FundsNotSent");
+        assert(amount > 0, "ZeroAmount");
+        assert(timelock_delta > 0, "InvalidTimelock");
+        assert(self.context.timestamp() < quote_expiry, "QuoteExpired");
 
-        let htlc_public_current = self.storage.contracts.at(swap_id).at(0).read();
-        assert(htlc_public_current.sender == AztecAddress::zero(), "SwapAlreadyInitialized");
-        assert(self.context.timestamp() + 1800 < timelock, "InvalidTimelock");
+        let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
+        let existing = self.storage.user_locks.at(hashlock_high).at(hashlock_low).read();
+        assert(existing.status == STATUS_EMPTY, "SwapAlreadyExists");
 
-        let sender = self.msg_sender().expect(f"Sender must not be none!");
-        let htlc_public = HTLC_Public {
-            amount: amount,
-            token: token,
-            hashlock: hashlock,
+        let timelock = self.context.timestamp() + timelock_delta;
+        let lock = UserLock {
             secret: [0u8; 32],
-            sender: sender,
-            src_receiver: src_receiver,
-            timelock: timelock,
-            claimed: 1 as u8,
-            reward: 0 as u128,
-            reward_timelock: 0 as u64,
+            amount,
+            sender,
+            timelock,
+            status: STATUS_PENDING,
+            recipient,
+            token,
         };
-        self.storage.contracts.at(swap_id).at(0).write(htlc_public);
+        self.storage.user_locks.at(hashlock_high).at(hashlock_low).write(lock);
 
         self.call(Token::at(token).transfer_in_public(sender, self.address, amount, 0));
 
-        let sender = self.msg_sender().expect(f"Sender must not be none!");
-        let current_count = self.storage.user_swaps_count.at(sender).read();
-        self.storage.user_swaps.at(sender).at(current_count).write(swap_id);
-        self.storage.user_swaps_count.at(sender).write(current_count + 1);
-
-        // Emit SrcLocked log
         self.context.emit_public_log(
-            SrcLocked {
-                swap_id,
+            UserLocked {
                 hashlock,
-                dst_chain,
-                dst_address,
-                dst_asset,
                 sender,
-                src_receiver,
-                src_asset,
+                recipient,
+                src_chain,
+                token,
                 amount,
                 timelock,
-            },
-        );
-    }
-
-    #[external("public")]
-    fn refund(swap_id: Field, htlc_id: Field) {
-        let htlc_public = self.storage.contracts.at(swap_id).at(htlc_id).read();
-        assert(htlc_public.claimed == 1, "AlreadyClaimed");
-        assert(htlc_public.timelock < self.context.timestamp(), "NotPassedTimelock");
-
-        let refund_amount = if htlc_public.reward != 0 {
-            htlc_public.amount + htlc_public.reward
-        } else {
-            htlc_public.amount
-        };
-
-        self.call(Token::at(htlc_public.token).transfer_in_public(
-            self.address,
-            htlc_public.sender,
-            refund_amount,
-            0,
-        ));
-
-        let modified_htlc_public = HTLC_Public {
-            amount: htlc_public.amount,
-            token: htlc_public.token,
-            hashlock: htlc_public.hashlock,
-            secret: htlc_public.secret,
-            sender: htlc_public.sender,
-            src_receiver: htlc_public.src_receiver,
-            timelock: htlc_public.timelock,
-            claimed: 2 as u8,
-            reward: htlc_public.reward,
-            reward_timelock: htlc_public.reward_timelock,
-        };
-
-        self.storage.contracts.at(swap_id).at(htlc_id).write(modified_htlc_public);
-
-        // Emit TokenRefunded log
-        self.context.emit_public_log(TokenRefunded { swap_id, htlc_id });
-    }
-
-    #[external("public")]
-    fn lock_dst(
-        swap_id: Field,
-        hashlock: [u8; 32],
-        reward: u128,
-        reward_timelock: u64,
-        timelock: u64,
-        src_receiver: AztecAddress,
-        token: AztecAddress,
-        total_amount: u128,
-        src_asset: str<30>,
-        dst_chain: str<30>,
-        dst_asset: str<30>,
-        dst_address: str<90>,
-    ) {
-        assert(total_amount > 0, "FundsNotSent");
-        assert(reward > 0, "InvalidRewardAmount");
-
-        let amount = total_amount - reward;
-        assert(amount > 0, "InvalidRewardAmount");
-        assert(reward * 10 >= amount, "InvalidRewardAmount");
-
-        assert(self.context.timestamp() + 900 < timelock, "InvalidTimelock");
-        assert(reward_timelock <= timelock, "InvalidRewardTimelock");
-        assert(reward_timelock > self.context.timestamp(), "InvalidRewardTimelock");
-
-        // Determine htlc_id automatically based on swap state
-        // If slot 0 is empty, solver is first to open the swap (htlc_id=0)
-        // Otherwise, find the next free slot starting from 1
-        let htlc_id: Field = if self.storage.contracts.at(swap_id).at(0).read().sender
-            == AztecAddress::zero() {
-            0 // Solver is first, occupies slot 0
-        } else {
-            // Find next free slot for additional solver HTLCs
-            // Start from 1 and increment until we find an empty slot
-            let mut slot: Field = 1;
-            let mut found = false;
-            while !found {
-                if self.storage.contracts.at(swap_id).at(slot).read().sender == AztecAddress::zero()
-                     {
-                        found = true;
-                    } else {
-                        slot = slot + 1;
-                    }
-            }
-            slot
-        };
-
-        let sender = self.msg_sender().expect(f"Sender must not be none!");
-        let htlc_public = HTLC_Public {
-            amount: amount,
-            token: token,
-            hashlock: hashlock,
-            secret: [0u8; 32],
-            sender: sender,
-            src_receiver: src_receiver,
-            timelock: timelock,
-            claimed: 1 as u8,
-            reward: reward,
-            reward_timelock: reward_timelock,
-        };
-        self.storage.contracts.at(swap_id).at(htlc_id).write(htlc_public);
-
-        self.call(Token::at(token).transfer_in_public(sender, self.address, total_amount, 0));
-
-        // Emit DstLocked log
-        self.context.emit_public_log(
-            DstLocked {
-                swap_id,
-                htlc_id,
-                hashlock,
                 dst_chain,
                 dst_address,
-                dst_asset,
-                sender,
-                src_receiver,
-                src_asset,
-                amount: amount,
-                reward,
-                reward_timelock,
-                timelock,
+                dst_amount,
+                dst_token,
+                reward_amount,
+                reward_token,
+                reward_recipient,
+                reward_timelock_delta,
+                data,
             },
         );
     }
 
     #[external("public")]
-    fn redeem(swap_id: Field, htlc_id: Field, secret: [u8; 32]) {
-        let caller = self.msg_sender().expect(f"Sender must not be none!");
+    fn solver_lock(
+        hashlock: [u8; 32],
+        amount: u128,
+        reward: u128,
+        timelock_delta: u64,
+        reward_timelock_delta: u64,
+        sender: AztecAddress,
+        recipient: AztecAddress,
+        reward_recipient: AztecAddress,
+        token: AztecAddress,
+        reward_token: AztecAddress,
+        src_chain: [u8; 30],
+        dst_chain: [u8; 30],
+        dst_address: [u8; 90],
+        dst_amount: u128,
+        dst_token: [u8; 90],
+        data: [u8; 256],
+    ) -> pub Field {
+        assert(amount > 0, "ZeroAmount");
+        assert(timelock_delta > 0, "InvalidTimelock");
+        if reward > 0 {
+            assert(reward_timelock_delta < timelock_delta, "InvalidRewardTimelock");
+        }
 
-        let mut htlc_public = self.storage.contracts.at(swap_id).at(htlc_id).read();
-        assert(htlc_public.amount > 0, "HTLCNotExists");
-        let hashed_secret = sha256::sha256_var(secret, secret.len() as u64);
-        assert(htlc_public.hashlock == hashed_secret, "HashlockNotMatch");
-        assert(htlc_public.claimed == 1, "AlreadyClaimed");
+        let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
+        let timelock = self.context.timestamp() + timelock_delta;
+        let reward_timelock = self.context.timestamp() + reward_timelock_delta;
 
-        let modified_htlc_public = HTLC_Public {
-            amount: htlc_public.amount,
-            token: htlc_public.token,
-            hashlock: htlc_public.hashlock,
-            secret: secret,
-            sender: htlc_public.sender,
-            src_receiver: htlc_public.src_receiver,
-            timelock: htlc_public.timelock,
-            claimed: 3 as u8,
-            reward: htlc_public.reward,
-            reward_timelock: htlc_public.reward_timelock,
+        // Auto-increment index
+        let current_count =
+            self.storage.solver_lock_count.at(hashlock_high).at(hashlock_low).read();
+        let index = current_count + 1;
+        self.storage.solver_lock_count.at(hashlock_high).at(hashlock_low).write(index);
+
+        let lock = SolverLock {
+            secret: [0u8; 32],
+            amount,
+            reward,
+            sender,
+            timelock,
+            reward_timelock,
+            recipient,
+            status: STATUS_PENDING,
+            reward_recipient,
+            token,
+            reward_token,
         };
+        self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(index).write(lock);
 
-        self.storage.contracts.at(swap_id).at(htlc_id).write(modified_htlc_public);
-
-        // Emit TokenRedeemed log
-        self.context.emit_public_log(
-            TokenRedeemed {
-                swap_id,
-                htlc_id,
-                redeem_address: caller,
-                secret,
-                hashlock: htlc_public.hashlock,
-            },
-        );
-
-        if htlc_public.reward == 0 {
-            self.call(Token::at(htlc_public.token).transfer_in_public(
-                self.address,
-                htlc_public.src_receiver,
-                htlc_public.amount,
-                0,
-            ));
-        } else if htlc_public.reward_timelock > self.context.timestamp() {
-            self.call(Token::at(htlc_public.token).transfer_in_public(
-                self.address,
-                htlc_public.src_receiver,
-                htlc_public.amount,
-                0,
-            ));
-            self.call(Token::at(htlc_public.token).transfer_in_public(
-                self.address,
-                htlc_public.sender,
-                htlc_public.reward,
-                0,
-            ));
-        } else {
-            if caller == htlc_public.src_receiver {
-                self.call(Token::at(htlc_public.token).transfer_in_public(
+        // Transfer tokens
+        if reward > 0 {
+            if token == reward_token {
+                // Same token: single transfer for amount + reward
+                self.call(Token::at(token).transfer_in_public(
+                    sender,
                     self.address,
-                    htlc_public.src_receiver,
-                    htlc_public.amount + htlc_public.reward,
+                    amount + reward,
                     0,
                 ));
             } else {
-                self.call(Token::at(htlc_public.token).transfer_in_public(
+                // Different tokens: two transfers
+                self.call(Token::at(token).transfer_in_public(sender, self.address, amount, 0));
+                self.call(Token::at(reward_token).transfer_in_public(
+                    sender,
                     self.address,
-                    htlc_public.src_receiver,
-                    htlc_public.amount,
+                    reward,
                     0,
                 ));
-                self.call(Token::at(htlc_public.token).transfer_in_public(
+            }
+        } else {
+            self.call(Token::at(token).transfer_in_public(sender, self.address, amount, 0));
+        }
+
+        self.context.emit_public_log(
+            SolverLocked {
+                hashlock,
+                sender,
+                recipient,
+                index,
+                src_chain,
+                token,
+                amount,
+                reward,
+                reward_token,
+                reward_recipient,
+                timelock,
+                reward_timelock,
+                dst_chain,
+                dst_address,
+                dst_amount,
+                dst_token,
+                data,
+            },
+        );
+
+        index
+    }
+
+    #[external("public")]
+    fn redeem_user(hashlock: [u8; 32], secret: [u8; 32]) {
+        let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
+        let lock = self.storage.user_locks.at(hashlock_high).at(hashlock_low).read();
+
+        assert(lock.sender != AztecAddress::zero(), "LockNotFound");
+        let hashed_secret = sha256::sha256_var(secret, secret.len() as u64);
+        assert(hashlock == hashed_secret, "HashlockMismatch");
+        assert(lock.status == STATUS_PENDING, "LockNotPending");
+
+        let redeemed_lock = UserLock {
+            secret,
+            amount: lock.amount,
+            sender: lock.sender,
+            timelock: lock.timelock,
+            status: STATUS_REDEEMED,
+            recipient: lock.recipient,
+            token: lock.token,
+        };
+        self.storage.user_locks.at(hashlock_high).at(hashlock_low).write(redeemed_lock);
+
+        self.call(Token::at(lock.token).transfer_in_public(
+            self.address,
+            lock.recipient,
+            lock.amount,
+            0,
+        ));
+
+        let redeemer = self.msg_sender();
+        self.context.emit_public_log(UserRedeemed { hashlock, redeemer, secret });
+    }
+
+    #[external("public")]
+    fn redeem_solver(hashlock: [u8; 32], index: Field, secret: [u8; 32]) {
+        let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
+        let lock = self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(index).read();
+
+        assert(lock.sender != AztecAddress::zero(), "LockNotFound");
+        let hashed_secret = sha256::sha256_var(secret, secret.len() as u64);
+        assert(hashlock == hashed_secret, "HashlockMismatch");
+        assert(lock.status == STATUS_PENDING, "LockNotPending");
+
+        let redeemed_lock = SolverLock {
+            secret,
+            amount: lock.amount,
+            reward: lock.reward,
+            sender: lock.sender,
+            timelock: lock.timelock,
+            reward_timelock: lock.reward_timelock,
+            recipient: lock.recipient,
+            status: STATUS_REDEEMED,
+            reward_recipient: lock.reward_recipient,
+            token: lock.token,
+            reward_token: lock.reward_token,
+        };
+        self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(index).write(redeemed_lock);
+
+        let redeemer = self.msg_sender();
+
+        // Reward routing: before rewardTimelock -> rewardRecipient, after -> redeemer
+        let reward_to = if lock.reward_timelock > self.context.timestamp() {
+            lock.reward_recipient
+        } else {
+            redeemer
+        };
+
+        // Transfer amount to recipient, reward to reward_to
+        if (lock.reward > 0) & (lock.token == lock.reward_token) & (lock.recipient == reward_to) {
+            // Same token and same destination: combine transfers
+            self.call(Token::at(lock.token).transfer_in_public(
+                self.address,
+                lock.recipient,
+                lock.amount + lock.reward,
+                0,
+            ));
+        } else {
+            self.call(Token::at(lock.token).transfer_in_public(
+                self.address,
+                lock.recipient,
+                lock.amount,
+                0,
+            ));
+            if lock.reward > 0 {
+                self.call(Token::at(lock.reward_token).transfer_in_public(
                     self.address,
-                    caller,
-                    htlc_public.reward,
+                    reward_to,
+                    lock.reward,
                     0,
                 ));
             }
         }
+
+        self.context.emit_public_log(SolverRedeemed { hashlock, index, redeemer, secret });
     }
 
     #[external("public")]
-    #[view]
-    fn has_htlc(swap_id: Field, htlc_id: Field) -> pub bool {
-        let htlc = self.storage.contracts.at(swap_id).at(htlc_id).read();
-        htlc.sender != AztecAddress::zero()
+    fn refund_user(hashlock: [u8; 32]) {
+        let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
+        let lock = self.storage.user_locks.at(hashlock_high).at(hashlock_low).read();
+
+        assert(lock.sender != AztecAddress::zero(), "LockNotFound");
+        assert(lock.status == STATUS_PENDING, "LockNotPending");
+
+        let caller = self.msg_sender();
+        // Recipient can refund anytime; others only after timelock
+        if caller != lock.recipient {
+            assert(self.context.timestamp() >= lock.timelock, "RefundNotAllowed");
+        }
+
+        let refunded_lock = UserLock {
+            secret: lock.secret,
+            amount: lock.amount,
+            sender: lock.sender,
+            timelock: lock.timelock,
+            status: STATUS_REFUNDED,
+            recipient: lock.recipient,
+            token: lock.token,
+        };
+        self.storage.user_locks.at(hashlock_high).at(hashlock_low).write(refunded_lock);
+
+        self.call(Token::at(lock.token).transfer_in_public(
+            self.address,
+            lock.sender,
+            lock.amount,
+            0,
+        ));
+
+        self.context.emit_public_log(UserRefunded { hashlock });
     }
 
     #[external("public")]
-    #[view]
-    fn get_htlc(swap_id: Field, htlc_id: Field) -> pub HTLC_Public {
-        self.storage.contracts.at(swap_id).at(htlc_id).read()
-    }
+    fn refund_solver(hashlock: [u8; 32], index: Field) {
+        let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
+        let lock = self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(index).read();
 
-    #[external("public")]
-    #[view]
-    fn get_user_swaps_count(user: AztecAddress) -> pub Field {
-        self.storage.user_swaps_count.at(user).read()
-    }
+        assert(lock.sender != AztecAddress::zero(), "LockNotFound");
+        assert(lock.status == STATUS_PENDING, "LockNotPending");
+        assert(self.context.timestamp() >= lock.timelock, "RefundNotAllowed");
 
-    #[external("public")]
-    #[view]
-    fn get_user_swaps(user: AztecAddress) -> pub BoundedVec<Field, 100> {
-        let count = self.storage.user_swaps_count.at(user).read();
-        let mut swaps = BoundedVec::new();
-        let count_u32 = count as u32;
-        for i in 0..100 {
-            if i < count_u32 {
-                let swap_id = self.storage.user_swaps.at(user).at(i as Field).read();
-                swaps.push(swap_id);
+        let refunded_lock = SolverLock {
+            secret: lock.secret,
+            amount: lock.amount,
+            reward: lock.reward,
+            sender: lock.sender,
+            timelock: lock.timelock,
+            reward_timelock: lock.reward_timelock,
+            recipient: lock.recipient,
+            status: STATUS_REFUNDED,
+            reward_recipient: lock.reward_recipient,
+            token: lock.token,
+            reward_token: lock.reward_token,
+        };
+        self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(index).write(refunded_lock);
+
+        // Return amount + reward to sender
+        if (lock.reward > 0) & (lock.token == lock.reward_token) {
+            self.call(Token::at(lock.token).transfer_in_public(
+                self.address,
+                lock.sender,
+                lock.amount + lock.reward,
+                0,
+            ));
+        } else {
+            self.call(Token::at(lock.token).transfer_in_public(
+                self.address,
+                lock.sender,
+                lock.amount,
+                0,
+            ));
+            if lock.reward > 0 {
+                self.call(Token::at(lock.reward_token).transfer_in_public(
+                    self.address,
+                    lock.sender,
+                    lock.reward,
+                    0,
+                ));
             }
         }
-        swaps
+
+        self.context.emit_public_log(SolverRefunded { hashlock, index });
     }
+
+    // ============ View Functions ============
+
+    #[external("public")]
+    #[view]
+    fn get_user_lock(hashlock: [u8; 32]) -> pub UserLock {
+        let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
+        self.storage.user_locks.at(hashlock_high).at(hashlock_low).read()
+    }
+
+    #[external("public")]
+    #[view]
+    fn get_solver_lock(hashlock: [u8; 32], index: Field) -> pub SolverLock {
+        let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
+        self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(index).read()
+    }
+
+    #[external("public")]
+    #[view]
+    fn get_solver_lock_count(hashlock: [u8; 32]) -> pub Field {
+        let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
+        self.storage.solver_lock_count.at(hashlock_high).at(hashlock_low).read()
+    }
+
 }

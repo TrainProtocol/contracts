@@ -1,3 +1,5 @@
+use aztec::protocol::traits::ToField;
+
 pub fn bytes_to_u128_limbs(bytes: [u8; 32]) -> (u128, u128) {
     let mut high: u128 = 0;
     let mut low: u128 = 0;
@@ -26,4 +28,13 @@ pub fn u128_limbs_to_bytes(high: u128, low: u128) -> [u8; 32] {
     }
 
     bytes
+}
+
+pub fn hashlock_to_fields(hashlock: [u8; 32]) -> (Field, Field) {
+    let (high, low) = bytes_to_u128_limbs(hashlock);
+    (high.to_field(), low.to_field())
+}
+
+pub fn fields_to_hashlock(high: Field, low: Field) -> [u8; 32] {
+    u128_limbs_to_bytes(high as u128, low as u128)
 }
