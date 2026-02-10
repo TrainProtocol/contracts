@@ -90,44 +90,53 @@ export class TrainContract extends ContractBase {
   }
   
 
-  public static get storage(): ContractStorageLayout<'contracts' | 'user_swaps_count' | 'user_swaps'> {
+  public static get storage(): ContractStorageLayout<'user_locks' | 'solver_locks' | 'solver_lock_count'> {
       return {
-        contracts: {
+        user_locks: {
       slot: new Fr(1n),
     },
-user_swaps_count: {
+solver_locks: {
       slot: new Fr(2n),
     },
-user_swaps: {
+solver_lock_count: {
       slot: new Fr(3n),
     }
-      } as ContractStorageLayout<'contracts' | 'user_swaps_count' | 'user_swaps'>;
+      } as ContractStorageLayout<'user_locks' | 'solver_locks' | 'solver_lock_count'>;
     }
     
 
   /** Type-safe wrappers for the public methods exposed by the contract. */
   public declare methods: {
     
-    /** constructor() */
-    constructor: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** __aztec_nr_internals__constructor() */
+    __aztec_nr_internals__constructor: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** get_htlc(swap_id: field, htlc_id: field) */
-    get_htlc: ((swap_id: FieldLike, htlc_id: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** __aztec_nr_internals__get_solver_lock(hashlock: array, index: field) */
+    __aztec_nr_internals__get_solver_lock: ((hashlock: (bigint | number)[], index: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** get_user_swaps(user: struct) */
-    get_user_swaps: ((user: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** __aztec_nr_internals__get_solver_lock_count(hashlock: array) */
+    __aztec_nr_internals__get_solver_lock_count: ((hashlock: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** get_user_swaps_count(user: struct) */
-    get_user_swaps_count: ((user: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** __aztec_nr_internals__get_user_lock(hashlock: array) */
+    __aztec_nr_internals__get_user_lock: ((hashlock: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** has_htlc(swap_id: field, htlc_id: field) */
-    has_htlc: ((swap_id: FieldLike, htlc_id: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** __aztec_nr_internals__redeem_solver(hashlock: array, index: field, secret: array) */
+    __aztec_nr_internals__redeem_solver: ((hashlock: (bigint | number)[], index: FieldLike, secret: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** lock_dst(swap_id: field, hashlock: array, reward: integer, reward_timelock: integer, timelock: integer, src_receiver: struct, token: struct, total_amount: integer, src_asset: string, dst_chain: string, dst_asset: string, dst_address: string) */
-    lock_dst: ((swap_id: FieldLike, hashlock: (bigint | number)[], reward: (bigint | number), reward_timelock: (bigint | number), timelock: (bigint | number), src_receiver: AztecAddressLike, token: AztecAddressLike, total_amount: (bigint | number), src_asset: string, dst_chain: string, dst_asset: string, dst_address: string) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** __aztec_nr_internals__redeem_user(hashlock: array, secret: array) */
+    __aztec_nr_internals__redeem_user: ((hashlock: (bigint | number)[], secret: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** lock_src(swap_id: field, hashlock: array, timelock: integer, src_receiver: struct, token: struct, amount: integer, src_asset: string, dst_chain: string, dst_asset: string, dst_address: string) */
-    lock_src: ((swap_id: FieldLike, hashlock: (bigint | number)[], timelock: (bigint | number), src_receiver: AztecAddressLike, token: AztecAddressLike, amount: (bigint | number), src_asset: string, dst_chain: string, dst_asset: string, dst_address: string) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** __aztec_nr_internals__refund_solver(hashlock: array, index: field) */
+    __aztec_nr_internals__refund_solver: ((hashlock: (bigint | number)[], index: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** __aztec_nr_internals__refund_user(hashlock: array) */
+    __aztec_nr_internals__refund_user: ((hashlock: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** __aztec_nr_internals__solver_lock(hashlock: array, amount: integer, reward: integer, timelock_delta: integer, reward_timelock_delta: integer, sender: struct, recipient: struct, reward_recipient: struct, token: struct, reward_token: struct, src_chain: array, dst_chain: array, dst_address: array, dst_amount: integer, dst_token: array, data: array) */
+    __aztec_nr_internals__solver_lock: ((hashlock: (bigint | number)[], amount: (bigint | number), reward: (bigint | number), timelock_delta: (bigint | number), reward_timelock_delta: (bigint | number), sender: AztecAddressLike, recipient: AztecAddressLike, reward_recipient: AztecAddressLike, token: AztecAddressLike, reward_token: AztecAddressLike, src_chain: (bigint | number)[], dst_chain: (bigint | number)[], dst_address: (bigint | number)[], dst_amount: (bigint | number), dst_token: (bigint | number)[], data: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** __aztec_nr_internals__user_lock(hashlock: array, amount: integer, reward_amount: integer, timelock_delta: integer, reward_timelock_delta: integer, quote_expiry: integer, sender: struct, recipient: struct, token: struct, reward_token: struct, reward_recipient: array, src_chain: array, dst_chain: array, dst_address: array, dst_amount: integer, dst_token: array, data: array) */
+    __aztec_nr_internals__user_lock: ((hashlock: (bigint | number)[], amount: (bigint | number), reward_amount: (bigint | number), timelock_delta: (bigint | number), reward_timelock_delta: (bigint | number), quote_expiry: (bigint | number), sender: AztecAddressLike, recipient: AztecAddressLike, token: AztecAddressLike, reward_token: AztecAddressLike, reward_recipient: (bigint | number)[], src_chain: (bigint | number)[], dst_chain: (bigint | number)[], dst_address: (bigint | number)[], dst_amount: (bigint | number), dst_token: (bigint | number)[], data: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** process_message(message_ciphertext: struct, message_context: struct) */
     process_message: ((message_ciphertext: FieldLike[], message_context: { tx_hash: FieldLike, unique_note_hashes_in_tx: FieldLike[], first_nullifier_in_tx: FieldLike, recipient: AztecAddressLike }) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
@@ -135,14 +144,8 @@ user_swaps: {
     /** public_dispatch(selector: field) */
     public_dispatch: ((selector: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** redeem(swap_id: field, htlc_id: field, secret: array) */
-    redeem: ((swap_id: FieldLike, htlc_id: FieldLike, secret: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** refund(swap_id: field, htlc_id: field) */
-    refund: ((swap_id: FieldLike, htlc_id: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** sync_private_state() */
-    sync_private_state: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** sync_state() */
+    sync_state: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
   };
 
   
