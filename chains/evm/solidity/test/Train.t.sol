@@ -112,7 +112,7 @@ contract TrainTest is Test {
     Train.UserLockParams memory params = _defaultUserParams(amount, NATIVE_ETH);
 
     vm.prank(initiator);
-    train.userLock{ value: amount }(params, _defaultDestination(), '');
+    train.userLock{ value: amount }(params, _defaultDestination(), '', '');
 
     Train.UserLock memory lock = train.getUserLock(hashlock);
     assertEq(lock.amount, amount);
@@ -130,7 +130,7 @@ contract TrainTest is Test {
     uint256 initiatorBalanceBefore = token.balanceOf(initiator);
 
     vm.prank(initiator);
-    train.userLock(params, _defaultDestination(), '');
+    train.userLock(params, _defaultDestination(), '', '');
 
     assertEq(token.balanceOf(initiator), initiatorBalanceBefore - amount);
     Train.UserLock memory lock = train.getUserLock(hashlock);
@@ -144,7 +144,7 @@ contract TrainTest is Test {
 
     vm.prank(initiator);
     vm.expectRevert(Train.QuoteExpired.selector);
-    train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
   }
 
   function test_userLock_RevertsOnQuoteExpiryBoundary() public {
@@ -153,7 +153,7 @@ contract TrainTest is Test {
 
     vm.prank(initiator);
     vm.expectRevert(Train.QuoteExpired.selector);
-    train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
   }
 
   function test_userLock_RevertsOnMsgValueMismatch_ETH() public {
@@ -161,7 +161,7 @@ contract TrainTest is Test {
 
     vm.prank(initiator);
     vm.expectRevert(Train.MsgValueMismatch.selector);
-    train.userLock{ value: 0.5 ether }(params, _defaultDestination(), '');
+    train.userLock{ value: 0.5 ether }(params, _defaultDestination(), '', '');
   }
 
   function test_userLock_RevertsOnMsgValueMismatch_ERC20() public {
@@ -169,7 +169,7 @@ contract TrainTest is Test {
 
     vm.prank(initiator);
     vm.expectRevert(Train.MsgValueMismatch.selector);
-    train.userLock{ value: 1 }(params, _defaultDestination(), '');
+    train.userLock{ value: 1 }(params, _defaultDestination(), '', '');
   }
 
   function test_userLock_RevertsOnInvalidToken() public {
@@ -178,7 +178,7 @@ contract TrainTest is Test {
 
     vm.prank(initiator);
     vm.expectRevert(Train.InvalidToken.selector);
-    train.userLock(params, _defaultDestination(), '');
+    train.userLock(params, _defaultDestination(), '', '');
   }
 
   function test_userLock_RevertsOnZeroAmount() public {
@@ -186,7 +186,7 @@ contract TrainTest is Test {
 
     vm.prank(initiator);
     vm.expectRevert(Train.ZeroAmount.selector);
-    train.userLock(params, _defaultDestination(), '');
+    train.userLock(params, _defaultDestination(), '', '');
   }
 
   function test_userLock_RevertsOnInvalidTimelock() public {
@@ -195,18 +195,18 @@ contract TrainTest is Test {
 
     vm.prank(initiator);
     vm.expectRevert(Train.InvalidTimelock.selector);
-    train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
   }
 
   function test_userLock_RevertsOnDuplicateHashlock() public {
     Train.UserLockParams memory params = _defaultUserParams(1 ether, NATIVE_ETH);
 
     vm.prank(initiator);
-    train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
 
     vm.prank(initiator);
     vm.expectRevert(Train.SwapAlreadyExists.selector);
-    train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
   }
 
   // ============ Redeem / Refund User Tests ============
@@ -215,7 +215,7 @@ contract TrainTest is Test {
     Train.UserLockParams memory params = _defaultUserParams(1 ether, NATIVE_ETH);
 
     vm.prank(initiator);
-    train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
 
     uint256 receiverBalanceBefore = receiver.balance;
 
@@ -232,7 +232,7 @@ contract TrainTest is Test {
     Train.UserLockParams memory params = _defaultUserParams(1 ether, NATIVE_ETH);
 
     vm.prank(initiator);
-    train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
 
     vm.expectRevert(Train.HashlockMismatch.selector);
     train.redeemUser(hashlock, 99999);
@@ -247,7 +247,7 @@ contract TrainTest is Test {
     Train.UserLockParams memory params = _defaultUserParams(1 ether, NATIVE_ETH);
 
     vm.prank(initiator);
-    train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
 
     uint256 initiatorBalanceBefore = initiator.balance;
 
@@ -262,7 +262,7 @@ contract TrainTest is Test {
     Train.UserLockParams memory params = _defaultUserParams(1 ether, NATIVE_ETH);
 
     vm.prank(initiator);
-    train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
 
     vm.warp(block.timestamp + timelockDelta + 1);
 
@@ -278,7 +278,7 @@ contract TrainTest is Test {
     Train.UserLockParams memory params = _defaultUserParams(1 ether, NATIVE_ETH);
 
     vm.prank(initiator);
-    train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
 
     vm.prank(relayer);
     vm.expectRevert(Train.RefundNotAllowed.selector);
@@ -294,7 +294,7 @@ contract TrainTest is Test {
     Train.UserLockParams memory params = _defaultUserParams(1 ether, NATIVE_ETH);
 
     vm.prank(initiator);
-    train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
 
     vm.prank(receiver);
     train.refundUser(hashlock);
@@ -307,7 +307,7 @@ contract TrainTest is Test {
     Train.UserLockParams memory params = _defaultUserParams(1 ether, NATIVE_ETH);
 
     vm.prank(initiator);
-    train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
 
     vm.prank(relayer);
     train.redeemUser(hashlock, SECRET);
@@ -625,11 +625,12 @@ contract TrainTest is Test {
       'ETH',
       'rewardRecipient',
       rewardTimelockDelta,
+      '',
       ''
     );
 
     vm.prank(initiator);
-    train.userLock{ value: amount }(params, _defaultDestination(), '');
+    train.userLock{ value: amount }(params, _defaultDestination(), '', '');
   }
 
   function test_solverLock_EmitsSolverLockedEvent() public {
@@ -672,7 +673,7 @@ contract TrainTest is Test {
     Train.UserLockParams memory params = _defaultUserParams(1 ether, NATIVE_ETH);
 
     vm.prank(initiator);
-    train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
 
     vm.warp(block.timestamp + timelockDelta);
 
@@ -729,7 +730,7 @@ contract TrainTest is Test {
     Train.UserLockParams memory params = _defaultUserParams(amount, address(token));
 
     vm.prank(initiator);
-    train.userLock(params, _defaultDestination(), '');
+    train.userLock(params, _defaultDestination(), '', '');
 
     uint256 receiverBalanceBefore = token.balanceOf(receiver);
 
@@ -747,7 +748,7 @@ contract TrainTest is Test {
     Train.UserLockParams memory params = _defaultUserParams(amount, address(token));
 
     vm.prank(initiator);
-    train.userLock(params, _defaultDestination(), '');
+    train.userLock(params, _defaultDestination(), '', '');
 
     uint256 initiatorBalanceBefore = token.balanceOf(initiator);
 
@@ -924,7 +925,7 @@ contract TrainTest is Test {
     Train.UserLockParams memory params = _defaultUserParams(1 ether, NATIVE_ETH);
 
     vm.prank(initiator);
-    train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
 
     (bytes32[] memory hashes, uint256 total) = train.getUserLockHashes(initiator, Train.LockStatus.Empty, 0, 10);
 
@@ -949,9 +950,9 @@ contract TrainTest is Test {
     params3.hashlock = hashlock3;
 
     vm.startPrank(initiator);
-    train.userLock{ value: 1 ether }(params1, _defaultDestination(), '');
-    train.userLock{ value: 2 ether }(params2, _defaultDestination(), '');
-    train.userLock(params3, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params1, _defaultDestination(), '', '');
+    train.userLock{ value: 2 ether }(params2, _defaultDestination(), '', '');
+    train.userLock(params3, _defaultDestination(), '', '');
     vm.stopPrank();
 
     (bytes32[] memory hashes, uint256 total) = train.getUserLockHashes(initiator, Train.LockStatus.Empty, 0, 10);
@@ -975,7 +976,7 @@ contract TrainTest is Test {
     Train.UserLockParams memory params = _defaultUserParams(1 ether, NATIVE_ETH);
 
     vm.prank(initiator);
-    train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
 
     vm.prank(relayer);
     train.redeemUser(hashlock, SECRET);
@@ -992,7 +993,7 @@ contract TrainTest is Test {
     Train.UserLockParams memory params = _defaultUserParams(1 ether, NATIVE_ETH);
 
     vm.prank(initiator);
-    train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
 
     vm.warp(block.timestamp + timelockDelta + 1);
 
@@ -1010,7 +1011,7 @@ contract TrainTest is Test {
     Train.UserLockParams memory params = _defaultUserParams(1 ether, NATIVE_ETH);
 
     vm.prank(initiator);
-    train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
 
     (Train.UserLock[] memory locks, uint256 total) = train.getUserLocks(initiator, Train.LockStatus.Empty, 0, 10);
 
@@ -1035,8 +1036,8 @@ contract TrainTest is Test {
     params2.hashlock = hashlock2;
 
     vm.startPrank(initiator);
-    train.userLock{ value: 1 ether }(params1, _defaultDestination(), '');
-    train.userLock(params2, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params1, _defaultDestination(), '', '');
+    train.userLock(params2, _defaultDestination(), '', '');
     vm.stopPrank();
 
     (Train.UserLock[] memory locks, uint256 total) = train.getUserLocks(initiator, Train.LockStatus.Empty, 0, 10);
@@ -1061,7 +1062,7 @@ contract TrainTest is Test {
     Train.UserLockParams memory params = _defaultUserParams(1 ether, NATIVE_ETH);
 
     vm.prank(initiator);
-    train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
 
     vm.prank(relayer);
     train.redeemUser(hashlock, SECRET);
@@ -1079,7 +1080,7 @@ contract TrainTest is Test {
     Train.UserLockParams memory params = _defaultUserParams(1 ether, NATIVE_ETH);
 
     vm.prank(initiator);
-    train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
 
     vm.warp(block.timestamp + timelockDelta + 1);
 
@@ -1102,14 +1103,14 @@ contract TrainTest is Test {
     params1.hashlock = hashlock1;
 
     vm.prank(initiator);
-    train.userLock{ value: 1 ether }(params1, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params1, _defaultDestination(), '', '');
 
     // solver creates a different lock
     Train.UserLockParams memory params2 = _defaultUserParams(2 ether, NATIVE_ETH);
     params2.sender = solver;
 
     vm.prank(solver);
-    train.userLock{ value: 2 ether }(params2, _defaultDestination(), '');
+    train.userLock{ value: 2 ether }(params2, _defaultDestination(), '', '');
 
     // Check initiator's locks
     (Train.UserLock[] memory initiatorLocks, uint256 initiatorTotal) = train.getUserLocks(
@@ -1160,9 +1161,9 @@ contract TrainTest is Test {
     params3.hashlock = hashlock3;
 
     vm.startPrank(initiator);
-    train.userLock{ value: 1 ether }(params1, _defaultDestination(), '');
-    train.userLock{ value: 2 ether }(params2, _defaultDestination(), '');
-    train.userLock{ value: 3 ether }(params3, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params1, _defaultDestination(), '', '');
+    train.userLock{ value: 2 ether }(params2, _defaultDestination(), '', '');
+    train.userLock{ value: 3 ether }(params3, _defaultDestination(), '', '');
     vm.stopPrank();
 
     // Redeem 2 of them
@@ -1208,7 +1209,7 @@ contract TrainTest is Test {
       params.hashlock = lockHashlock;
 
       vm.prank(initiator);
-      train.userLock{ value: i * 1 ether }(params, _defaultDestination(), '');
+      train.userLock{ value: i * 1 ether }(params, _defaultDestination(), '', '');
     }
 
     // Page 1: Get first 2
@@ -1244,8 +1245,8 @@ contract TrainTest is Test {
     params2.hashlock = hashlock2;
 
     vm.startPrank(initiator);
-    train.userLock{ value: 1 ether }(params1, _defaultDestination(), '');
-    train.userLock{ value: 2 ether }(params2, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params1, _defaultDestination(), '', '');
+    train.userLock{ value: 2 ether }(params2, _defaultDestination(), '', '');
     vm.stopPrank();
 
     // Redeem one
@@ -1281,7 +1282,7 @@ contract TrainTest is Test {
     Train.UserLockParams memory params = _defaultUserParams(1 ether, NATIVE_ETH);
 
     vm.prank(initiator);
-    train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
 
     vm.expectEmit(true, false, false, false);
     emit Train.UserRefunded(hashlock);
@@ -1310,7 +1311,7 @@ contract TrainTest is Test {
     Train.UserLockParams memory params = _defaultUserParams(1 ether, NATIVE_ETH);
 
     vm.prank(initiator);
-    train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
 
     vm.expectEmit(true, false, false, true);
     emit Train.UserRedeemed(hashlock, relayer, SECRET);
@@ -1341,7 +1342,7 @@ contract TrainTest is Test {
     uint256 contractBalanceBefore = address(train).balance;
 
     vm.prank(initiator);
-    train.userLock{ value: amount }(params, _defaultDestination(), '');
+    train.userLock{ value: amount }(params, _defaultDestination(), '', '');
 
     assertEq(address(train).balance, contractBalanceBefore + amount);
   }
@@ -1353,7 +1354,7 @@ contract TrainTest is Test {
     uint256 contractBalanceBefore = token.balanceOf(address(train));
 
     vm.prank(initiator);
-    train.userLock(params, _defaultDestination(), '');
+    train.userLock(params, _defaultDestination(), '', '');
 
     assertEq(token.balanceOf(address(train)), contractBalanceBefore + amount);
   }
@@ -1376,7 +1377,7 @@ contract TrainTest is Test {
     Train.UserLockParams memory params = _defaultUserParams(amount, NATIVE_ETH);
 
     vm.prank(initiator);
-    train.userLock{ value: amount }(params, _defaultDestination(), '');
+    train.userLock{ value: amount }(params, _defaultDestination(), '', '');
 
     uint256 contractBalanceBefore = address(train).balance;
 
@@ -1391,7 +1392,7 @@ contract TrainTest is Test {
     Train.UserLockParams memory params = _defaultUserParams(amount, NATIVE_ETH);
 
     vm.prank(initiator);
-    train.userLock{ value: amount }(params, _defaultDestination(), '');
+    train.userLock{ value: amount }(params, _defaultDestination(), '', '');
 
     uint256 contractBalanceBefore = address(train).balance;
 
@@ -1414,14 +1415,14 @@ contract TrainTest is Test {
     params1.hashlock = hashlock1;
 
     vm.prank(initiator);
-    train.userLock{ value: 1 ether }(params1, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params1, _defaultDestination(), '', '');
 
     // Create second lock
     Train.UserLockParams memory params2 = _defaultUserParams(2 ether, NATIVE_ETH);
     params2.hashlock = hashlock2;
 
     vm.prank(initiator);
-    train.userLock{ value: 2 ether }(params2, _defaultDestination(), '');
+    train.userLock{ value: 2 ether }(params2, _defaultDestination(), '', '');
 
     // Verify locks are separate
     Train.UserLock memory lock1 = train.getUserLock(hashlock1);
@@ -1496,11 +1497,12 @@ contract TrainTest is Test {
       'ETH',
       'rewardRecipient',
       rewardTimelockDelta,
+      data,
       data
     );
 
     vm.prank(initiator);
-    train.userLock{ value: amount }(params, _defaultDestination(), data);
+    train.userLock{ value: amount }(params, _defaultDestination(), data, data);
   }
 
   function test_solverLock_WithData_EmitsCorrectly() public {
@@ -1547,7 +1549,7 @@ contract TrainTest is Test {
     params.recipient = address(gasConsumer);
 
     vm.prank(initiator);
-    train.userLock{ value: 1 ether }(params, _defaultDestination(), '');
+    train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
 
     vm.expectRevert(Train.TransferFailed.selector);
     vm.prank(relayer);

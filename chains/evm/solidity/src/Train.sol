@@ -117,7 +117,8 @@ contract Train is ReentrancyGuard {
     string rewardToken,
     string rewardRecipient,
     uint48 rewardTimelockDelta,
-    bytes data
+    bytes userData,
+    bytes solverData
   );
 
   /// @notice Emitted when solver creates a lock
@@ -207,11 +208,13 @@ contract Train is ReentrancyGuard {
   /// @notice Create a user lock to initiate a cross-chain swap
   /// @param params Lock parameters including hashlock, amount, addresses, and timelocks
   /// @param dst Destination chain details (logged only)
-  /// @param data Arbitrary data for cross-chain coordination
+  /// @param userData Arbitrary user data for cross-chain coordination
+  /// @param solverData Arbitrary solver data for cross-chain coordination
   function userLock(
     UserLockParams calldata params,
     DestinationInfo calldata dst,
-    bytes calldata data
+    bytes calldata userData,
+    bytes calldata solverData
   ) external payable nonReentrant {
     if (params.amount == 0) revert ZeroAmount();
     if (params.timelockDelta == 0) revert InvalidTimelock();
@@ -233,7 +236,7 @@ contract Train is ReentrancyGuard {
     userLockHashes[params.sender].push(params.hashlock);
 
     _transferIn(params.token, params.amount);
-    _emitUserLocked(params, dst, timelock, data);
+    _emitUserLocked(params, dst, timelock, userData, solverData);
   }
 
   /// @notice Create a solver lock to fulfill a swap
@@ -568,7 +571,8 @@ contract Train is ReentrancyGuard {
     UserLockParams calldata params,
     DestinationInfo calldata dst,
     uint48 timelock,
-    bytes calldata data
+    bytes calldata userData,
+    bytes calldata solverData
   ) internal {
     emit UserLocked(
       params.hashlock,
@@ -586,7 +590,8 @@ contract Train is ReentrancyGuard {
       params.rewardToken,
       params.rewardRecipient,
       params.rewardTimelockDelta,
-      data
+      userData,
+      solverData
     );
   }
 

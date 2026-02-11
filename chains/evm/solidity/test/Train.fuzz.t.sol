@@ -142,7 +142,7 @@ contract TrainFuzzTest is Test {
     );
 
     vm.prank(initiator);
-    train.userLock{ value: amount }(params, _dst(), '');
+    train.userLock{ value: amount }(params, _dst(), '', '');
 
     Train.UserLock memory lock = train.getUserLock(hashlock);
     assertEq(lock.amount, amount);
@@ -167,7 +167,7 @@ contract TrainFuzzTest is Test {
     uint256 contractBalanceBefore = token.balanceOf(address(train));
 
     vm.prank(initiator);
-    train.userLock(params, _dst(), '');
+    train.userLock(params, _dst(), '', '');
 
     assertEq(token.balanceOf(initiator), senderBalanceBefore - amount);
     assertEq(token.balanceOf(address(train)), contractBalanceBefore + amount);
@@ -185,9 +185,9 @@ contract TrainFuzzTest is Test {
     vm.prank(initiator);
     if (quoteDelay == 0) {
       vm.expectRevert(Train.QuoteExpired.selector);
-      train.userLock{ value: amount }(params, _dst(), '');
+      train.userLock{ value: amount }(params, _dst(), '', '');
     } else {
-      train.userLock{ value: amount }(params, _dst(), '');
+      train.userLock{ value: amount }(params, _dst(), '', '');
     }
   }
 
@@ -207,7 +207,7 @@ contract TrainFuzzTest is Test {
     );
 
     vm.prank(initiator);
-    train.userLock{ value: amount }(params, _dst(), '');
+    train.userLock{ value: amount }(params, _dst(), '', '');
 
     uint256 receiverBalanceBefore = receiver.balance;
 
@@ -235,7 +235,7 @@ contract TrainFuzzTest is Test {
     );
 
     vm.prank(initiator);
-    train.userLock{ value: amount }(params, _dst(), '');
+    train.userLock{ value: amount }(params, _dst(), '', '');
 
     vm.warp(block.timestamp + timelockDelta + 1);
 
@@ -262,7 +262,7 @@ contract TrainFuzzTest is Test {
     );
 
     vm.prank(initiator);
-    train.userLock{ value: amount }(params, _dst(), '');
+    train.userLock{ value: amount }(params, _dst(), '', '');
 
     vm.prank(relayer);
     vm.expectRevert(Train.RefundNotAllowed.selector);
@@ -533,7 +533,7 @@ contract TrainFuzzTest is Test {
       );
 
       vm.prank(initiator);
-      train.userLock{ value: (i + 1) * 0.1 ether }(params, _dst(), '');
+      train.userLock{ value: (i + 1) * 0.1 ether }(params, _dst(), '', '');
     }
 
     (bytes32[] memory hashes, uint256 total) = train.getUserLockHashes(initiator, Train.LockStatus.Empty, 0, 100);
@@ -564,7 +564,7 @@ contract TrainFuzzTest is Test {
       );
 
       vm.prank(initiator);
-      train.userLock{ value: amount }(params, _dst(), '');
+      train.userLock{ value: amount }(params, _dst(), '', '');
     }
 
     (Train.UserLock[] memory locks, uint256 total) = train.getUserLocks(initiator, Train.LockStatus.Empty, 0, 100);
@@ -595,7 +595,7 @@ contract TrainFuzzTest is Test {
     );
 
     vm.prank(initiator);
-    train.userLock{ value: amount }(params, _dst(), '');
+    train.userLock{ value: amount }(params, _dst(), '', '');
 
     vm.prank(relayer);
     train.redeemUser(hashlock, secret);
@@ -628,7 +628,7 @@ contract TrainFuzzTest is Test {
     );
 
     vm.prank(initiator);
-    train.userLock{ value: amount }(params, _dst(), '');
+    train.userLock{ value: amount }(params, _dst(), '', '');
 
     vm.warp(block.timestamp + timelockFuzz + 1);
 
