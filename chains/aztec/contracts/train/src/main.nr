@@ -255,11 +255,7 @@ pub contract Train {
     }
 
     #[external("public")]
-    fn redeem_user(
-        hashlock: [u8; 32],
-        secret: [u8; 32],
-        transfer_nonce: Field,
-    ) {
+    fn redeem_user(hashlock: [u8; 32], secret: [u8; 32]) {
         let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
         let lock = self.storage.user_locks.at(hashlock_high).at(hashlock_low).read();
 
@@ -283,7 +279,7 @@ pub contract Train {
             self.address,
             lock.recipient,
             lock.amount,
-            transfer_nonce,
+            0,
         ));
 
         let redeemer = self.msg_sender();
@@ -295,8 +291,6 @@ pub contract Train {
         hashlock: [u8; 32],
         index: Field,
         secret: [u8; 32],
-        transfer_nonce: Field,
-        reward_transfer_nonce: Field,
     ) {
         let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
         let lock = self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(index).read();
@@ -337,21 +331,21 @@ pub contract Train {
                 self.address,
                 lock.recipient,
                 lock.amount + lock.reward,
-                transfer_nonce,
+                0,
             ));
         } else {
             self.call(Token::at(lock.token).transfer_in_public(
                 self.address,
                 lock.recipient,
                 lock.amount,
-                transfer_nonce,
+                0,
             ));
             if lock.reward > 0 {
                 self.call(Token::at(lock.reward_token).transfer_in_public(
                     self.address,
                     reward_to,
                     lock.reward,
-                    reward_transfer_nonce,
+                    0,
                 ));
             }
         }
@@ -360,7 +354,7 @@ pub contract Train {
     }
 
     #[external("public")]
-    fn refund_user(hashlock: [u8; 32], transfer_nonce: Field) {
+    fn refund_user(hashlock: [u8; 32]) {
         let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
         let lock = self.storage.user_locks.at(hashlock_high).at(hashlock_low).read();
 
@@ -388,7 +382,7 @@ pub contract Train {
             self.address,
             lock.sender,
             lock.amount,
-            transfer_nonce,
+            0,
         ));
 
         self.context.emit_public_log(UserRefunded { hashlock });
@@ -398,8 +392,6 @@ pub contract Train {
     fn refund_solver(
         hashlock: [u8; 32],
         index: Field,
-        transfer_nonce: Field,
-        reward_transfer_nonce: Field,
     ) {
         let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
         let lock = self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(index).read();
@@ -429,21 +421,21 @@ pub contract Train {
                 self.address,
                 lock.sender,
                 lock.amount + lock.reward,
-                transfer_nonce,
+                0,
             ));
         } else {
             self.call(Token::at(lock.token).transfer_in_public(
                 self.address,
                 lock.sender,
                 lock.amount,
-                transfer_nonce,
+                0,
             ));
             if lock.reward > 0 {
                 self.call(Token::at(lock.reward_token).transfer_in_public(
                     self.address,
                     lock.sender,
                     lock.reward,
-                    reward_transfer_nonce,
+                    0,
                 ));
             }
         }

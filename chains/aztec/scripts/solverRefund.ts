@@ -76,15 +76,11 @@ async function main(): Promise<void> {
   console.log(`Solver token balance before: ${solverBalBefore}`);
   console.log(`Train token balance before: ${trainBalBefore}`);
 
-  const transferNonce = Fr.random();
-  const rewardTransferNonce = Fr.random();
-  const tx = await train.methods
-    .refund_solver(hashlock, solverIndex, transferNonce, rewardTransferNonce)
-    .send({
-      from: solverAccount.address,
-      fee: { paymentMethod },
-      wait: { timeout: timeouts.txTimeout, dontThrowOnRevert: true },
-    });
+  const tx = await train.methods.refund_solver(hashlock, solverIndex).send({
+    from: solverAccount.address,
+    fee: { paymentMethod },
+    wait: { timeout: timeouts.txTimeout, dontThrowOnRevert: true },
+  });
 
   if (tx.hasExecutionReverted()) {
     throw new Error(

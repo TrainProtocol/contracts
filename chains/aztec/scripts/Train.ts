@@ -126,17 +126,17 @@ solver_lock_count: {
     /** public_dispatch(selector: field) */
     public_dispatch: ((selector: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** redeem_solver(hashlock: array, index: field, secret: array, transfer_nonce: field, reward_transfer_nonce: field) */
-    redeem_solver: ((hashlock: (bigint | number)[], index: FieldLike, secret: (bigint | number)[], transfer_nonce: FieldLike, reward_transfer_nonce: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** redeem_solver(hashlock: array, index: field, secret: array) */
+    redeem_solver: ((hashlock: (bigint | number)[], index: FieldLike, secret: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** redeem_user(hashlock: array, secret: array, transfer_nonce: field) */
-    redeem_user: ((hashlock: (bigint | number)[], secret: (bigint | number)[], transfer_nonce: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** redeem_user(hashlock: array, secret: array) */
+    redeem_user: ((hashlock: (bigint | number)[], secret: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** refund_solver(hashlock: array, index: field, transfer_nonce: field, reward_transfer_nonce: field) */
-    refund_solver: ((hashlock: (bigint | number)[], index: FieldLike, transfer_nonce: FieldLike, reward_transfer_nonce: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** refund_solver(hashlock: array, index: field) */
+    refund_solver: ((hashlock: (bigint | number)[], index: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** refund_user(hashlock: array, transfer_nonce: field) */
-    refund_user: ((hashlock: (bigint | number)[], transfer_nonce: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** refund_user(hashlock: array) */
+    refund_user: ((hashlock: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** solver_lock(hashlock: array, amount: integer, transfer_nonce: field, reward: integer, reward_transfer_nonce: field, timelock_delta: integer, reward_timelock_delta: integer, sender: struct, recipient: struct, reward_recipient: struct, token: struct, reward_token: struct, src_chain: array, dst_chain: array, dst_address: array, dst_amount: integer, dst_token: array, data: array) */
     solver_lock: ((hashlock: (bigint | number)[], amount: (bigint | number), transfer_nonce: FieldLike, reward: (bigint | number), reward_transfer_nonce: FieldLike, timelock_delta: (bigint | number), reward_timelock_delta: (bigint | number), sender: AztecAddressLike, recipient: AztecAddressLike, reward_recipient: AztecAddressLike, token: AztecAddressLike, reward_token: AztecAddressLike, src_chain: (bigint | number)[], dst_chain: (bigint | number)[], dst_address: (bigint | number)[], dst_amount: (bigint | number), dst_token: (bigint | number)[], data: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
