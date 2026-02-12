@@ -1,20 +1,43 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-import { Fr, GrumpkinScalar } from '@aztec/foundation/fields';
+import { rmSync } from 'node:fs';
+import path from 'node:path';
+import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
 import { TestWallet } from '@aztec/test-wallet/server';
 import { AztecNode, createAztecNodeClient } from '@aztec/aztec.js/node';
 import { getPXEConfig } from '@aztec/pxe/config';
 import { createStore } from '@aztec/kv-store/lmdb';
 import { AztecAddress } from '@aztec/aztec.js/addresses';
+import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee';
 import { TokenContract } from '@aztec/noir-contracts.js/Token';
-import { getSponsoredPaymentMethod, updateData } from './utils.ts';
+import { SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/SponsoredFPC';
+import { updateEnvFile } from './utils/utils.ts';
+import { getAztecNodeUrl, getEnv } from './utils/config.ts';
+import { getSponsoredFPCInstance } from './utils/sponsoredFpc.ts';
+
+async function getSponsoredPaymentMethod(walletUser: TestWallet) {
+  const sponsoredFPC = await getSponsoredFPCInstance();
+  await walletUser.registerContract(sponsoredFPC, SponsoredFPCContractArtifact);
+  return new SponsoredFeePaymentMethod(sponsoredFPC.address);
+}
+
+function resetLocalPxeStores() {
+  const baseDir = path.resolve(process.cwd(), 'store');
+  for (const name of ['userEnv', 'solverEnv', 'deployerEnv']) {
+    rmSync(path.join(baseDir, name), { recursive: true, force: true });
+  }
+}
 
 async function main(): Promise<void> {
-  const url = process.env.PXE_URL ?? 'http://localhost:8080';
+  // Avoid stale PXE state when local-network restarts or reorgs.
+  resetLocalPxeStores();
+
+  const url = getAztecNodeUrl();
   const node: AztecNode = createAztecNodeClient(url);
   const l1Contracts = await node.getL1ContractAddresses();
-  const fullConfig = { ...getPXEConfig(), l1Contracts, proverEnabled: true };
+  const proverEnabled = getEnv() !== 'local-network';
+  const fullConfig = { ...getPXEConfig(), l1Contracts, proverEnabled };
 
   const storeUser = await createStore('userEnv', {
     dataDirectory: 'store',
@@ -71,14 +94,23 @@ async function main(): Promise<void> {
   );
 
   await (await userAccount.getDeployMethod())
-    .send({ from: AztecAddress.ZERO, fee: { paymentMethod: payUser } })
-    .wait();
+    .send({
+      from: AztecAddress.ZERO,
+      fee: { paymentMethod: payUser },
+      wait: { timeout: 120000 },
+    });
   await (await solverAccount.getDeployMethod())
-    .send({ from: AztecAddress.ZERO, fee: { paymentMethod: paySolver } })
-    .wait();
+    .send({
+      from: AztecAddress.ZERO,
+      fee: { paymentMethod: paySolver },
+      wait: { timeout: 120000 },
+    });
   await (await deployerAccount.getDeployMethod())
-    .send({ from: AztecAddress.ZERO, fee: { paymentMethod: payDeployer } })
-    .wait();
+    .send({
+      from: AztecAddress.ZERO,
+      fee: { paymentMethod: payDeployer },
+      wait: { timeout: 120000 },
+    });
 
   const token = await TokenContract.deploy(
     walletDeployer,
@@ -90,8 +122,8 @@ async function main(): Promise<void> {
     .send({
       from: deployerAccount.address,
       fee: { paymentMethod: payDeployer },
-    })
-    .deployed();
+      wait: { timeout: 1_200_000 },
+    });
 
   await walletUser.registerSender(deployerAccount.address);
   await walletSolver.registerSender(deployerAccount.address);
@@ -106,8 +138,8 @@ async function main(): Promise<void> {
     .send({
       from: deployerAccount.address,
       fee: { paymentMethod: payDeployer },
-    })
-    .wait({ timeout: 1_200_000 });
+      wait: { timeout: 1_200_000 },
+    });
 
   await tokenForDeployer.methods
     .transfer_in_public(
@@ -119,8 +151,8 @@ async function main(): Promise<void> {
     .send({
       from: deployerAccount.address,
       fee: { paymentMethod: payDeployer },
-    })
-    .wait({ timeout: 1_200_000 });
+      wait: { timeout: 1_200_000 },
+    });
 
   await tokenForDeployer.methods
     .transfer_in_public(
@@ -132,8 +164,8 @@ async function main(): Promise<void> {
     .send({
       from: deployerAccount.address,
       fee: { paymentMethod: payDeployer },
-    })
-    .wait({ timeout: 1_200_000 });
+      wait: { timeout: 1_200_000 },
+    });
 
   const userPubBal = await tokenForUser.methods
     .balance_of_public(userAccount.address)
@@ -143,28 +175,36 @@ async function main(): Promise<void> {
     .balance_of_public(solverAccount.address)
     .simulate({ from: solverAccount.address });
 
-  console.log(`Token deployed at ${token.address.toString()}`);
+  const tokenAddress = token.address.toString();
+  console.log(`Token deployed at ${tokenAddress}`);
   console.log(`Public mint tx block: ${mintTx.blockNumber}`);
   console.log(`User public balance: ${userPubBal}`);
   console.log(`Solver public balance: ${solverPubBal}`);
 
-  updateData({
-    userSecretKey: userSecretKey.toString(),
-    userSalt: userSalt.toString(),
-    userSigningKey: userSigningKey.toString(),
-    userAddress: userAccount.address.toString(),
+  const userSecretKeyStr = userSecretKey.toString();
+  const userSaltStr = userSalt.toString();
+  const userSigningKeyStr = userSigningKey.toString();
+  const solverSecretKeyStr = solverSecretKey.toString();
+  const solverSaltStr = solverSalt.toString();
+  const solverSigningKeyStr = solverSigningKey.toString();
+  const deployerSecretKeyStr = deployerSecretKey.toString();
+  const deployerSaltStr = deployerSalt.toString();
+  const deployerSigningKeyStr = deployerSigningKey.toString();
 
-    solverSecretKey: solverSecretKey.toString(),
-    solverSalt: solverSalt.toString(),
-    solverSigningKey: solverSigningKey.toString(),
-    solverAddress: solverAccount.address.toString(),
-
-    deployerSecretKey: deployerSecretKey.toString(),
-    deployerSalt: deployerSalt.toString(),
-    deployerSigningKey: deployerSigningKey.toString(),
-    deployerAddress: deployerAccount.address.toString(),
-
-    tokenAddress: token.address.toString(),
+  updateEnvFile('.env', {
+    TOKEN_ADDRESS: tokenAddress,
+    USER_SECRET: userSecretKeyStr,
+    USER_SALT: userSaltStr,
+    USER_SIGNING_KEY: userSigningKeyStr,
+    USER_ADDRESS: userAccount.address.toString(),
+    SOLVER_SECRET: solverSecretKeyStr,
+    SOLVER_SALT: solverSaltStr,
+    SOLVER_SIGNING_KEY: solverSigningKeyStr,
+    SOLVER_ADDRESS: solverAccount.address.toString(),
+    DEPLOYER_SECRET: deployerSecretKeyStr,
+    DEPLOYER_SALT: deployerSaltStr,
+    DEPLOYER_SIGNING_KEY: deployerSigningKeyStr,
+    DEPLOYER_ADDRESS: deployerAccount.address.toString(),
   });
 }
 

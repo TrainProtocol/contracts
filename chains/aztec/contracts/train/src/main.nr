@@ -89,7 +89,8 @@ pub contract Train {
         dst_address: [u8; 90],
         dst_amount: u128,
         dst_token: [u8; 90],
-        data: [u8; 256],
+        user_data: [u8; 256],
+        solver_data: [u8; 256],
     ) {
         assert(amount > 0, "ZeroAmount");
         assert(timelock_delta > 0, "InvalidTimelock");
@@ -130,7 +131,8 @@ pub contract Train {
                 reward_token,
                 reward_recipient,
                 reward_timelock_delta,
-                data,
+                userData: user_data,
+                solverData: solver_data,
             },
         );
     }

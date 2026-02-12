@@ -14,17 +14,17 @@ export async function deploySchnorrAccount(
 ): Promise<AccountManager> {
   let logger: Logger;
   logger = createLogger('aztec:aztec-starter');
-  logger.info('👤 Starting Schnorr account deployment...');
+  logger.info('Starting Schnorr account deployment...');
 
   // Generate account keys
-  logger.info('🔐 Generating account keys...');
+  logger.info('Generating account keys...');
   let secretKey = Fr.random();
   let signingKey = GrumpkinScalar.random();
   let salt = Fr.random();
   logger.info(`Save the following SECRET and SALT in .env for future use.`);
-  logger.info(`🔑 Secret key generated: ${secretKey.toString()}`);
-  logger.info(`🖊️ Signing key generated: ${signingKey.toString()}`);
-  logger.info(`🧂 Salt generated: ${salt.toString()}`);
+  logger.info(`Secret key generated: ${secretKey.toString()}`);
+  logger.info(`Signing key generated: ${signingKey.toString()}`);
+  logger.info(`Salt generated: ${salt.toString()}`);
 
   const activeWallet = wallet ?? (await setupWallet());
   const account = await activeWallet.createSchnorrAccount(
@@ -32,16 +32,16 @@ export async function deploySchnorrAccount(
     salt,
     signingKey,
   );
-  logger.info(`📍 Account address will be: ${account.address}`);
+  logger.info(`Account address will be: ${account.address}`);
 
   const deployMethod = await account.getDeployMethod();
 
   // Setup sponsored FPC
-  logger.info('💰 Setting up sponsored fee payment for account deployment...');
+  logger.info('Setting up sponsored fee payment for account deployment...');
   const sponsoredFPC = await getSponsoredFPCInstance();
-  logger.info(`💰 Sponsored FPC instance obtained at: ${sponsoredFPC.address}`);
+  logger.info(`Sponsored FPC instance obtained at: ${sponsoredFPC.address}`);
 
-  logger.info('📝 Registering sponsored FPC contract with PXE...');
+  logger.info('Registering sponsored FPC contract with PXE...');
   await activeWallet.registerContract(
     sponsoredFPC,
     SponsoredFPCContractArtifact,
@@ -50,7 +50,7 @@ export async function deploySchnorrAccount(
     sponsoredFPC.address,
   );
   logger.info(
-    '✅ Sponsored fee payment method configured for account deployment',
+    'Sponsored fee payment method configured for account deployment',
   );
 
   // Deploy account
@@ -60,7 +60,7 @@ export async function deploySchnorrAccount(
     wait: { timeout: 120000 },
   });
 
-  logger.info(`✅ Account deployment transaction successful!`);
+  logger.info(`Account deployment transaction successful!`);
 
   return account;
 }

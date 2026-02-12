@@ -43,7 +43,8 @@ async function main(): Promise<void> {
       ? AztecAddress.ZERO
       : AztecAddress.fromString(rewardTokenRaw);
   const rewardRecipient = stringToBytes(requireEnv('REWARD_RECIPIENT'), 90);
-  const data = new Array(256).fill(0);
+  const solverData = new Array(256).fill(0);
+  const userData = new Array(256).fill(0);
 
   const wallet = await setupWallet();
   const sponsoredFPC = await getSponsoredFPCInstance();
@@ -122,7 +123,6 @@ async function main(): Promise<void> {
   );
   console.log('Sending authwit tx...');
   await authwit.send({
-    from: account.address,
     fee: { paymentMethod },
     wait: { timeout: timeouts.txTimeout },
   });
@@ -148,7 +148,8 @@ async function main(): Promise<void> {
     dstAddress,
     dstAmount,
     dstToken,
-    data,
+    solverData,
+    userData,
   );
   const tx = await lockCall.send({
     from: account.address,
