@@ -68,6 +68,8 @@ async function main(): Promise<void> {
 
   const train = TrainContract.at(trainAddress, wallet);
   const token = TokenContract.at(tokenAddress, wallet);
+  const transferNonce = Fr.random();
+  const rewardTransferNonce = Fr.random();
 
   const solverBalBefore = await token.methods
     .balance_of_public(solverAccount.address)
@@ -84,7 +86,7 @@ async function main(): Promise<void> {
   console.log(`Solver token balance before: ${solverBalBefore}`);
   console.log(`Train token balance before: ${trainBalBefore}`);
 
-  // Train.solver_lock internally pulls tokens using transfer_in_public(..., nonce = 0),
+  // Train.solver_lock pulls tokens with the provided transfer nonce(s),
   // so the solver must set matching public authwit(s) in advance.
   if (reward > 0n && rewardTokenAddress.equals(tokenAddress)) {
     await authorizePublicTransfer(
@@ -95,7 +97,7 @@ async function main(): Promise<void> {
         solverAccount.address,
         trainAddress,
         amount + reward,
-        new Fr(0n),
+        transferNonce,
       ),
       paymentMethod,
       timeouts.txTimeout,
@@ -109,7 +111,7 @@ async function main(): Promise<void> {
         solverAccount.address,
         trainAddress,
         amount,
-        new Fr(0n),
+        transferNonce,
       ),
       paymentMethod,
       timeouts.txTimeout,
@@ -125,7 +127,7 @@ async function main(): Promise<void> {
           solverAccount.address,
           trainAddress,
           reward,
-          new Fr(0n),
+          rewardTransferNonce,
         ),
         paymentMethod,
         timeouts.txTimeout,
@@ -137,7 +139,9 @@ async function main(): Promise<void> {
     .solver_lock(
       hashlock,
       amount,
+      transferNonce,
       reward,
+      rewardTransferNonce,
       timelockDelta,
       rewardTimelockDelta,
       solverAccount.address,

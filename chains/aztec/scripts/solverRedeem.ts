@@ -62,8 +62,16 @@ async function main(): Promise<void> {
   console.log(`User token balance before: ${userBalBefore}`);
   console.log(`Train token balance before: ${trainBalBefore}`);
 
+  const transferNonce = Fr.random();
+  const rewardTransferNonce = Fr.random();
   const tx = await train.methods
-    .redeem_solver(hashlock, solverIndex, secret)
+    .redeem_solver(
+      hashlock,
+      solverIndex,
+      secret,
+      transferNonce,
+      rewardTransferNonce,
+    )
     .send({
       from: userAccount.address,
       fee: { paymentMethod },

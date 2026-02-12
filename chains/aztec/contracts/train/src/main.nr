@@ -75,6 +75,7 @@ pub contract Train {
     fn user_lock(
         hashlock: [u8; 32],
         amount: u128,
+        transfer_nonce: Field,
         reward_amount: u128,
         timelock_delta: u64,
         reward_timelock_delta: u64,
@@ -112,7 +113,12 @@ pub contract Train {
         };
         self.storage.user_locks.at(hashlock_high).at(hashlock_low).write(lock);
 
-        self.call(Token::at(token).transfer_in_public(sender, self.address, amount, 0));
+        self.call(Token::at(token).transfer_in_public(
+            sender,
+            self.address,
+            amount,
+            transfer_nonce,
+        ));
 
         self.context.emit_public_log(
             UserLocked {
@@ -141,7 +147,9 @@ pub contract Train {
     fn solver_lock(
         hashlock: [u8; 32],
         amount: u128,
+        transfer_nonce: Field,
         reward: u128,
+        reward_transfer_nonce: Field,
         timelock_delta: u64,
         reward_timelock_delta: u64,
         sender: AztecAddress,
@@ -195,20 +203,30 @@ pub contract Train {
                     sender,
                     self.address,
                     amount + reward,
-                    0,
+                    transfer_nonce,
                 ));
             } else {
                 // Different tokens: two transfers
-                self.call(Token::at(token).transfer_in_public(sender, self.address, amount, 0));
+                self.call(Token::at(token).transfer_in_public(
+                    sender,
+                    self.address,
+                    amount,
+                    transfer_nonce,
+                ));
                 self.call(Token::at(reward_token).transfer_in_public(
                     sender,
                     self.address,
                     reward,
-                    0,
+                    reward_transfer_nonce,
                 ));
             }
         } else {
-            self.call(Token::at(token).transfer_in_public(sender, self.address, amount, 0));
+            self.call(Token::at(token).transfer_in_public(
+                sender,
+                self.address,
+                amount,
+                transfer_nonce,
+            ));
         }
 
         self.context.emit_public_log(
@@ -237,7 +255,11 @@ pub contract Train {
     }
 
     #[external("public")]
-    fn redeem_user(hashlock: [u8; 32], secret: [u8; 32]) {
+    fn redeem_user(
+        hashlock: [u8; 32],
+        secret: [u8; 32],
+        transfer_nonce: Field,
+    ) {
         let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
         let lock = self.storage.user_locks.at(hashlock_high).at(hashlock_low).read();
 
@@ -261,7 +283,7 @@ pub contract Train {
             self.address,
             lock.recipient,
             lock.amount,
-            0,
+            transfer_nonce,
         ));
 
         let redeemer = self.msg_sender();
@@ -269,7 +291,13 @@ pub contract Train {
     }
 
     #[external("public")]
-    fn redeem_solver(hashlock: [u8; 32], index: Field, secret: [u8; 32]) {
+    fn redeem_solver(
+        hashlock: [u8; 32],
+        index: Field,
+        secret: [u8; 32],
+        transfer_nonce: Field,
+        reward_transfer_nonce: Field,
+    ) {
         let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
         let lock = self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(index).read();
 
@@ -309,21 +337,21 @@ pub contract Train {
                 self.address,
                 lock.recipient,
                 lock.amount + lock.reward,
-                0,
+                transfer_nonce,
             ));
         } else {
             self.call(Token::at(lock.token).transfer_in_public(
                 self.address,
                 lock.recipient,
                 lock.amount,
-                0,
+                transfer_nonce,
             ));
             if lock.reward > 0 {
                 self.call(Token::at(lock.reward_token).transfer_in_public(
                     self.address,
                     reward_to,
                     lock.reward,
-                    0,
+                    reward_transfer_nonce,
                 ));
             }
         }
@@ -332,7 +360,7 @@ pub contract Train {
     }
 
     #[external("public")]
-    fn refund_user(hashlock: [u8; 32]) {
+    fn refund_user(hashlock: [u8; 32], transfer_nonce: Field) {
         let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
         let lock = self.storage.user_locks.at(hashlock_high).at(hashlock_low).read();
 
@@ -360,14 +388,19 @@ pub contract Train {
             self.address,
             lock.sender,
             lock.amount,
-            0,
+            transfer_nonce,
         ));
 
         self.context.emit_public_log(UserRefunded { hashlock });
     }
 
     #[external("public")]
-    fn refund_solver(hashlock: [u8; 32], index: Field) {
+    fn refund_solver(
+        hashlock: [u8; 32],
+        index: Field,
+        transfer_nonce: Field,
+        reward_transfer_nonce: Field,
+    ) {
         let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
         let lock = self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(index).read();
 
@@ -396,21 +429,21 @@ pub contract Train {
                 self.address,
                 lock.sender,
                 lock.amount + lock.reward,
-                0,
+                transfer_nonce,
             ));
         } else {
             self.call(Token::at(lock.token).transfer_in_public(
                 self.address,
                 lock.sender,
                 lock.amount,
-                0,
+                transfer_nonce,
             ));
             if lock.reward > 0 {
                 self.call(Token::at(lock.reward_token).transfer_in_public(
                     self.address,
                     lock.sender,
                     lock.reward,
-                    0,
+                    reward_transfer_nonce,
                 ));
             }
         }

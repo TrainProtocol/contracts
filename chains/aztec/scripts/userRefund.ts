@@ -79,7 +79,8 @@ async function main(): Promise<void> {
   console.log(`User token balance before: ${userBalBefore}`);
   console.log(`Train token balance before: ${trainBalBefore}`);
 
-  const tx = await train.methods.refund_user(hashlock).send({
+  const transferNonce = Fr.random();
+  const tx = await train.methods.refund_user(hashlock, transferNonce).send({
     from: userAccount.address,
     fee: { paymentMethod },
     wait: { timeout: timeouts.txTimeout, dontThrowOnRevert: true },

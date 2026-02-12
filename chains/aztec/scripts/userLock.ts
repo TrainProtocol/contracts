@@ -103,14 +103,14 @@ async function main(): Promise<void> {
     `Quote expiry: ${quoteExpiry} (in ${quoteExpiry - now}s from current block)`,
   );
 
-  // Must match Train.user_lock, which currently calls transfer_in_public(..., nonce = 0).
-  const publicNonce = new Fr(0n);
+  // Must match the transfer_nonce passed to Train.user_lock.
+  const transferNonce = Fr.random();
 
   const publicAction = token.methods.transfer_in_public(
     account.address,
     trainAddress,
     amount,
-    publicNonce,
+    transferNonce,
   );
 
   const authwit = await wallet.setPublicAuthWit(
@@ -128,12 +128,11 @@ async function main(): Promise<void> {
   });
   console.log('Authwit tx confirmed.');
 
-  // `authwit.send({ wait })` already waits for inclusion, so no extra block wait is needed.
-
   console.log('Sending user_lock tx...');
   const lockCall = train.methods.user_lock(
     hashlockBytes,
     amount,
+    transferNonce,
     rewardAmount,
     timelockDelta,
     rewardTimelockDelta,
