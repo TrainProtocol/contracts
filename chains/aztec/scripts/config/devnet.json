@@ -1,0 +1,18 @@
+{
+  "name": "devnet",
+  "environment": "devnet",
+  "network": {
+    "nodeUrl": "https://devnet-6.aztec-labs.com",
+    "l1RpcUrl": "",
+    "l1ChainId": 1
+  },
+  "settings": {
+    "skipLocalNetwork": true,
+    "version": "4.0.0-nightly.20260209"
+  },
+  "timeouts": {
+    "deployTimeout": 1200000,
+    "txTimeout": 180000,
+    "waitTimeout": 60000
+  }
+}

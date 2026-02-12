@@ -5,6 +5,7 @@ import { getSponsoredFPCInstance } from './utils/sponsoredFpc.ts';
 import { SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/SponsoredFPC';
 import { deploySchnorrAccount } from './utils/deployAccount.ts';
 import { getTimeouts } from './utils/config.ts';
+import { updateEnvFile } from './utils/utils.ts';
 
 async function main() {
   const timeouts = getTimeouts();
@@ -25,16 +26,27 @@ async function main() {
   const address = accountManager.address;
 
   // Deploy Train contract
-
-  const { contract: trainContract, instance } = await TrainContract.deploy(
-    wallet,
-  ).send({
+  const receipt = await TrainContract.deploy(wallet).send({
     from: address,
     fee: { paymentMethod: sponsoredPaymentMethod },
-    wait: { timeout: timeouts.deployTimeout, returnReceipt: true },
+    skipInitialization: false,
+    wait: {
+      timeout: timeouts.deployTimeout,
+      returnReceipt: true,
+      dontThrowOnRevert: true,
+    },
   });
-  void instance;
-  void trainContract;
+
+  const deployedAddress =
+    (receipt as any)?.contract?.address?.toString?.() ??
+    (receipt as any)?.instance?.address?.toString?.() ??
+    (receipt as any)?.address?.toString?.();
+  if (deployedAddress) {
+    console.log(`Train deployed at: ${deployedAddress}`);
+    updateEnvFile('.env', { TRAIN_ADDRESS: deployedAddress });
+  } else {
+    console.log('Deployment finished, but address not found on receipt.');
+  }
 }
 
 main()
