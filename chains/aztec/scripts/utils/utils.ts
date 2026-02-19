@@ -1,3 +1,5 @@
+import { SetPublicAuthwitContractInteraction } from '@aztec/aztec.js/authorization';
+
 export function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
@@ -57,8 +59,13 @@ export async function authorizePublicTransfer(
   paymentMethod: any,
   timeout: number,
 ): Promise<void> {
-  const authwit = await wallet.setPublicAuthWit(owner, { caller, action }, true);
-  await authwit.send({
+  const setPublicAuthwit = await SetPublicAuthwitContractInteraction.create(
+    wallet,
+    owner,
+    { caller, action },
+    true,
+  );
+  await setPublicAuthwit.send({
     fee: { paymentMethod },
     wait: { timeout },
   });

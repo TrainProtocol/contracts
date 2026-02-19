@@ -4,7 +4,7 @@ dotenv.config();
 import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee';
 import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
-import { TokenContract } from '@aztec/noir-contracts.js/Token';
+import { TokenContract } from './Token.ts';
 import { SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/SponsoredFPC';
 import { TrainContract } from './Train.ts';
 import { setupWallet } from './utils/setupWallet.ts';
@@ -93,7 +93,7 @@ async function main(): Promise<void> {
       wallet,
       solverAccount.address,
       trainAddress,
-      token.methods.transfer_in_public(
+      token.methods.transfer_public_to_public(
         solverAccount.address,
         trainAddress,
         amount + reward,
@@ -107,7 +107,7 @@ async function main(): Promise<void> {
       wallet,
       solverAccount.address,
       trainAddress,
-      token.methods.transfer_in_public(
+      token.methods.transfer_public_to_public(
         solverAccount.address,
         trainAddress,
         amount,
@@ -123,7 +123,7 @@ async function main(): Promise<void> {
         wallet,
         solverAccount.address,
         trainAddress,
-        rewardToken.methods.transfer_in_public(
+        rewardToken.methods.transfer_public_to_public(
           solverAccount.address,
           trainAddress,
           reward,

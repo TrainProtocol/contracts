@@ -2,7 +2,7 @@
 
 HTLC (Hash Time Locked Contract) implementation for cross-chain atomic swaps on Aztec Network.
 
-Built with Aztec Noir contracts and Aztec.js SDK `v4.0.0-nightly.20260209`.
+Built with Aztec Noir contracts and Aztec.js SDK `v4.0.0-devnet.2-patch.0` (`v4-devnet-2`).
 
 ## Project Structure
 
@@ -40,7 +40,9 @@ aztec/
 
 ## Prerequisites
 
-- [Aztec CLI](https://docs.aztec.network/) `v4.0.0-nightly.20260209`
+- [Aztec CLI](https://docs.aztec.network/) `4.0.0-devnet.2-patch.0`
+- Install command:
+  `VERSION=4.0.0-devnet.2-patch.0 bash -i <(curl -sL https://install.aztec.network/4.0.0-devnet.2-patch.0)`
 - Node.js >= 18
 - For local development: a running Aztec sandbox (`aztec start --sandbox`)
 
@@ -174,7 +176,7 @@ Key variables:
 
 Environment-specific configs live in `scripts/config/`:
 - `local-network.json` - Local sandbox (localhost:8080)
-- `devnet.json` - Aztec devnet (devnet-6.aztec-labs.com, extended timeouts)
+- `devnet.json` - Aztec devnet (`https://v4-devnet-2.aztec-labs.com`, extended timeouts)
 
 ## Cross-Chain Swap Flow
 

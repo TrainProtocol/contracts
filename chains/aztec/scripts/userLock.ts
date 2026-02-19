@@ -6,12 +6,13 @@ import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { createAztecNodeClient } from '@aztec/aztec.js/node';
 import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee';
 import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
-import { TokenContract } from '@aztec/noir-contracts.js/Token';
+import { TokenContract } from './Token.ts';
 import { SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/SponsoredFPC';
 import { TrainContract } from './Train.ts';
 import { setupWallet } from './utils/setupWallet.ts';
 import { getSponsoredFPCInstance } from './utils/sponsoredFpc.ts';
 import {
+  authorizePublicTransfer,
   bytesToHex,
   requireEnv,
   stringToBytes,
@@ -74,7 +75,6 @@ async function main(): Promise<void> {
 
   const secret = crypto.randomBytes(32);
   const hashlock = crypto.createHash('sha256').update(secret).digest();
-  const secretBytes = Array.from(secret);
   const hashlockBytes = Array.from(hashlock);
 
   const node = createAztecNodeClient(getAztecNodeUrl());
@@ -106,26 +106,21 @@ async function main(): Promise<void> {
   // Must match the transfer_nonce passed to Train.user_lock.
   const transferNonce = Fr.random();
 
-  const publicAction = token.methods.transfer_in_public(
+  const publicAction = token.methods.transfer_public_to_public(
     account.address,
     trainAddress,
     amount,
     transferNonce,
   );
 
-  const authwit = await wallet.setPublicAuthWit(
+  await authorizePublicTransfer(
+    wallet,
     account.address,
-    {
-      caller: trainAddress,
-      action: publicAction,
-    },
-    true,
+    trainAddress,
+    publicAction,
+    paymentMethod,
+    timeouts.txTimeout,
   );
-  console.log('Sending authwit tx...');
-  await authwit.send({
-    fee: { paymentMethod },
-    wait: { timeout: timeouts.txTimeout },
-  });
   console.log('Authwit tx confirmed.');
 
   console.log('Sending user_lock tx...');

@@ -1,66 +1,35 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-import { rmSync } from 'node:fs';
-import path from 'node:path';
 import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
-import { TestWallet } from '@aztec/test-wallet/server';
-import { AztecNode, createAztecNodeClient } from '@aztec/aztec.js/node';
-import { getPXEConfig } from '@aztec/pxe/config';
-import { createStore } from '@aztec/kv-store/lmdb';
+import { createAztecNodeClient } from '@aztec/aztec.js/node';
 import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee';
-import { TokenContract } from '@aztec/noir-contracts.js/Token';
+import { EmbeddedWallet } from '@aztec/wallets/embedded';
+import { TokenContract } from './Token.ts';
 import { SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/SponsoredFPC';
 import { updateEnvFile } from './utils/utils.ts';
 import { getAztecNodeUrl, getEnv } from './utils/config.ts';
 import { getSponsoredFPCInstance } from './utils/sponsoredFpc.ts';
 
-async function getSponsoredPaymentMethod(walletUser: TestWallet) {
+async function getSponsoredPaymentMethod(walletUser: EmbeddedWallet) {
   const sponsoredFPC = await getSponsoredFPCInstance();
   await walletUser.registerContract(sponsoredFPC, SponsoredFPCContractArtifact);
   return new SponsoredFeePaymentMethod(sponsoredFPC.address);
 }
 
-function resetLocalPxeStores() {
-  const baseDir = path.resolve(process.cwd(), 'store');
-  for (const name of ['userEnv', 'solverEnv', 'deployerEnv']) {
-    rmSync(path.join(baseDir, name), { recursive: true, force: true });
-  }
+async function createWallet(proverEnabled: boolean): Promise<EmbeddedWallet> {
+  return EmbeddedWallet.create(createAztecNodeClient(getAztecNodeUrl()), {
+    ephemeral: true,
+    pxeConfig: { proverEnabled },
+  });
 }
 
 async function main(): Promise<void> {
-  // Avoid stale PXE state when local-network restarts or reorgs.
-  resetLocalPxeStores();
-
-  const url = getAztecNodeUrl();
-  const node: AztecNode = createAztecNodeClient(url);
-  const l1Contracts = await node.getL1ContractAddresses();
   const proverEnabled = getEnv() !== 'local-network';
-  const fullConfig = { ...getPXEConfig(), l1Contracts, proverEnabled };
-
-  const storeUser = await createStore('userEnv', {
-    dataDirectory: 'store',
-    dataStoreMapSizeKb: 1e6,
-  });
-  const storeSolver = await createStore('solverEnv', {
-    dataDirectory: 'store',
-    dataStoreMapSizeKb: 1e6,
-  });
-  const storeDeployer = await createStore('deployerEnv', {
-    dataDirectory: 'store',
-    dataStoreMapSizeKb: 1e6,
-  });
-
-  const walletUser = await TestWallet.create(node, fullConfig, {
-    store: storeUser,
-  });
-  const walletSolver = await TestWallet.create(node, fullConfig, {
-    store: storeSolver,
-  });
-  const walletDeployer = await TestWallet.create(node, fullConfig, {
-    store: storeDeployer,
-  });
+  const walletUser = await createWallet(proverEnabled);
+  const walletSolver = await createWallet(proverEnabled);
+  const walletDeployer = await createWallet(proverEnabled);
 
   const payUser = await getSponsoredPaymentMethod(walletUser);
   const paySolver = await getSponsoredPaymentMethod(walletSolver);
@@ -115,9 +84,6 @@ async function main(): Promise<void> {
   const token = await TokenContract.deploy(
     walletDeployer,
     deployerAccount.address,
-    'TRAIN',
-    'TRN',
-    18,
   )
     .send({
       from: deployerAccount.address,
@@ -125,8 +91,8 @@ async function main(): Promise<void> {
       wait: { timeout: 1_200_000 },
     });
 
-  await walletUser.registerSender(deployerAccount.address);
-  await walletSolver.registerSender(deployerAccount.address);
+  await walletUser.registerSender(deployerAccount.address,"faucet");
+  await walletSolver.registerSender(deployerAccount.address,"faucet");
 
   const amount = 2000n;
   const tokenForUser = TokenContract.at(token.address, walletUser);
@@ -142,7 +108,7 @@ async function main(): Promise<void> {
     });
 
   await tokenForDeployer.methods
-    .transfer_in_public(
+    .transfer_public_to_public(
       deployerAccount.address,
       userAccount.address,
       amount / 2n,
@@ -155,7 +121,7 @@ async function main(): Promise<void> {
     });
 
   await tokenForDeployer.methods
-    .transfer_in_public(
+    .transfer_public_to_public(
       deployerAccount.address,
       solverAccount.address,
       amount / 2n,

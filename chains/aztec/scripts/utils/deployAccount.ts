@@ -7,10 +7,10 @@ import { type Logger, createLogger } from '@aztec/foundation/log';
 import { setupWallet } from './setupWallet.ts';
 import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { AccountManager } from '@aztec/aztec.js/wallet';
-import { TestWallet } from '@aztec/test-wallet/server';
+import { EmbeddedWallet } from '@aztec/wallets/embedded';
 
 export async function deploySchnorrAccount(
-  wallet?: TestWallet,
+  wallet?: EmbeddedWallet,
 ): Promise<AccountManager> {
   let logger: Logger;
   logger = createLogger('aztec:aztec-starter');

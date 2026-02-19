@@ -11,10 +11,10 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@aztec/accounts": "4.0.0-nightly.20260209",
-    "@aztec/aztec.js": "4.0.0-nightly.20260209",
-    "@aztec/noir-contracts.js": "4.0.0-nightly.20260209",
-    "@aztec/test-wallet": "^4.0.0-nightly.20260209",
+    "@aztec/accounts": "4.0.0-devnet.2-patch.0",
+    "@aztec/aztec.js": "4.0.0-devnet.2-patch.0",
+    "@aztec/noir-contracts.js": "4.0.0-devnet.2-patch.0",
+    "@aztec/wallets": "4.0.0-devnet.2-patch.0",
     "dotenv": "^16.5.0"
   },
   "devDependencies": {

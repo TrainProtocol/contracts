@@ -113,7 +113,7 @@ pub contract Train {
         };
         self.storage.user_locks.at(hashlock_high).at(hashlock_low).write(lock);
 
-        self.call(Token::at(token).transfer_in_public(
+        self.call(Token::at(token).transfer_public_to_public(
             sender,
             self.address,
             amount,
@@ -199,7 +199,7 @@ pub contract Train {
         if reward > 0 {
             if token == reward_token {
                 // Same token: single transfer for amount + reward
-                self.call(Token::at(token).transfer_in_public(
+                self.call(Token::at(token).transfer_public_to_public(
                     sender,
                     self.address,
                     amount + reward,
@@ -207,13 +207,13 @@ pub contract Train {
                 ));
             } else {
                 // Different tokens: two transfers
-                self.call(Token::at(token).transfer_in_public(
+                self.call(Token::at(token).transfer_public_to_public(
                     sender,
                     self.address,
                     amount,
                     transfer_nonce,
                 ));
-                self.call(Token::at(reward_token).transfer_in_public(
+                self.call(Token::at(reward_token).transfer_public_to_public(
                     sender,
                     self.address,
                     reward,
@@ -221,7 +221,7 @@ pub contract Train {
                 ));
             }
         } else {
-            self.call(Token::at(token).transfer_in_public(
+            self.call(Token::at(token).transfer_public_to_public(
                 sender,
                 self.address,
                 amount,
@@ -275,7 +275,7 @@ pub contract Train {
         };
         self.storage.user_locks.at(hashlock_high).at(hashlock_low).write(redeemed_lock);
 
-        self.call(Token::at(lock.token).transfer_in_public(
+        self.call(Token::at(lock.token).transfer_public_to_public(
             self.address,
             lock.recipient,
             lock.amount,
@@ -327,21 +327,21 @@ pub contract Train {
         // Transfer amount to recipient, reward to reward_to
         if (lock.reward > 0) & (lock.token == lock.reward_token) & (lock.recipient == reward_to) {
             // Same token and same destination: combine transfers
-            self.call(Token::at(lock.token).transfer_in_public(
+            self.call(Token::at(lock.token).transfer_public_to_public(
                 self.address,
                 lock.recipient,
                 lock.amount + lock.reward,
                 0,
             ));
         } else {
-            self.call(Token::at(lock.token).transfer_in_public(
+            self.call(Token::at(lock.token).transfer_public_to_public(
                 self.address,
                 lock.recipient,
                 lock.amount,
                 0,
             ));
             if lock.reward > 0 {
-                self.call(Token::at(lock.reward_token).transfer_in_public(
+                self.call(Token::at(lock.reward_token).transfer_public_to_public(
                     self.address,
                     reward_to,
                     lock.reward,
@@ -378,7 +378,7 @@ pub contract Train {
         };
         self.storage.user_locks.at(hashlock_high).at(hashlock_low).write(refunded_lock);
 
-        self.call(Token::at(lock.token).transfer_in_public(
+        self.call(Token::at(lock.token).transfer_public_to_public(
             self.address,
             lock.sender,
             lock.amount,
@@ -417,21 +417,21 @@ pub contract Train {
 
         // Return amount + reward to sender
         if (lock.reward > 0) & (lock.token == lock.reward_token) {
-            self.call(Token::at(lock.token).transfer_in_public(
+            self.call(Token::at(lock.token).transfer_public_to_public(
                 self.address,
                 lock.sender,
                 lock.amount + lock.reward,
                 0,
             ));
         } else {
-            self.call(Token::at(lock.token).transfer_in_public(
+            self.call(Token::at(lock.token).transfer_public_to_public(
                 self.address,
                 lock.sender,
                 lock.amount,
                 0,
             ));
             if lock.reward > 0 {
-                self.call(Token::at(lock.reward_token).transfer_in_public(
+                self.call(Token::at(lock.reward_token).transfer_public_to_public(
                     self.address,
                     lock.sender,
                     lock.reward,
