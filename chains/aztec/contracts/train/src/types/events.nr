@@ -18,6 +18,7 @@ pub struct UserLocked {
     pub reward_token: AztecAddress,
     pub reward_recipient: [u8; 90],
     pub reward_timelock_delta: u64,
+    pub quote_expiry: u64,
     pub userData: [u8; 256],
     pub solverData: [u8; 256],
 }

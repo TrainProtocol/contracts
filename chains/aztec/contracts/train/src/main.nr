@@ -137,6 +137,7 @@ pub contract Train {
                 reward_token,
                 reward_recipient,
                 reward_timelock_delta,
+                quote_expiry,
                 userData: user_data,
                 solverData: solver_data,
             },
