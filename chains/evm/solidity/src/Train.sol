@@ -117,6 +117,7 @@ contract Train is ReentrancyGuard {
     string rewardToken,
     string rewardRecipient,
     uint48 rewardTimelockDelta,
+    uint48 quoteExpiry,
     bytes userData,
     bytes solverData
   );
@@ -590,6 +591,7 @@ contract Train is ReentrancyGuard {
       params.rewardToken,
       params.rewardRecipient,
       params.rewardTimelockDelta,
+      params.quoteExpiry,
       userData,
       solverData
     );

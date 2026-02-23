@@ -625,6 +625,7 @@ contract TrainTest is Test {
       'ETH',
       'rewardRecipient',
       rewardTimelockDelta,
+      params.quoteExpiry,
       '',
       ''
     );
@@ -1497,6 +1498,7 @@ contract TrainTest is Test {
       'ETH',
       'rewardRecipient',
       rewardTimelockDelta,
+      params.quoteExpiry,
       data,
       data
     );
