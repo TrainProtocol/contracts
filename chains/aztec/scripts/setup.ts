@@ -6,7 +6,7 @@ import { createAztecNodeClient } from '@aztec/aztec.js/node';
 import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee';
 import { EmbeddedWallet } from '@aztec/wallets/embedded';
-import { TokenContract } from './Token.ts';
+import { TokenContract } from './Token.js';
 import { SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/SponsoredFPC';
 import { updateEnvFile } from './utils/utils.ts';
 import { getAztecNodeUrl, getEnv } from './utils/config.ts';
@@ -62,39 +62,48 @@ async function main(): Promise<void> {
     deployerSigningKey,
   );
 
-  await (await userAccount.getDeployMethod())
-    .send({
-      from: AztecAddress.ZERO,
-      fee: { paymentMethod: payUser },
-      wait: { timeout: 120000 },
-    });
-  await (await solverAccount.getDeployMethod())
-    .send({
-      from: AztecAddress.ZERO,
-      fee: { paymentMethod: paySolver },
-      wait: { timeout: 120000 },
-    });
-  await (await deployerAccount.getDeployMethod())
-    .send({
-      from: AztecAddress.ZERO,
-      fee: { paymentMethod: payDeployer },
-      wait: { timeout: 120000 },
-    });
+  await (
+    await userAccount.getDeployMethod()
+  ).send({
+    from: AztecAddress.ZERO,
+    fee: { paymentMethod: payUser },
+    wait: { timeout: 120000 },
+  });
+  await (
+    await solverAccount.getDeployMethod()
+  ).send({
+    from: AztecAddress.ZERO,
+    fee: { paymentMethod: paySolver },
+    wait: { timeout: 120000 },
+  });
+  await (
+    await deployerAccount.getDeployMethod()
+  ).send({
+    from: AztecAddress.ZERO,
+    fee: { paymentMethod: payDeployer },
+    wait: { timeout: 120000 },
+  });
 
-  const token = await TokenContract.deploy(
-    walletDeployer,
+  const token = await TokenContract.deployWithOpts(
+    {
+      wallet: walletDeployer,
+      method: 'constructor_with_minter',
+    },
+    'ETH',
+    'ETH',
+    18,
     deployerAccount.address,
-  )
-    .send({
-      from: deployerAccount.address,
-      fee: { paymentMethod: payDeployer },
-      wait: { timeout: 1_200_000 },
-    });
+    deployerAccount.address,
+  ).send({
+    from: deployerAccount.address,
+    fee: { paymentMethod: payDeployer },
+    wait: { timeout: 1_200_000 },
+  });
 
-  await walletUser.registerSender(deployerAccount.address,"faucet");
-  await walletSolver.registerSender(deployerAccount.address,"faucet");
+  await walletUser.registerSender(deployerAccount.address, 'faucet');
+  await walletSolver.registerSender(deployerAccount.address, 'faucet');
 
-  const amount = 2000n;
+  const amount = 2000000n;
   const tokenForUser = TokenContract.at(token.address, walletUser);
   const tokenForSolver = TokenContract.at(token.address, walletSolver);
   const tokenForDeployer = TokenContract.at(token.address, walletDeployer);
