@@ -1,3 +1,4 @@
+#![allow(unexpected_cfgs, deprecated)]
 //     @@                                    @@@
 //    @@@
 //    @@@        @@   @@@@      @@@@@         @     @    @@@@@
@@ -9,638 +10,1839 @@
 //       @@@@@  @@@           @@@@@@@@@ @@@  @@@   @@@          @@@
 
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::ed25519_program::ID as ED25519_ID;
-use anchor_lang::solana_program::instruction::Instruction;
-use anchor_lang::solana_program::sysvar::instructions::{load_instruction_at_checked, ID as IX_ID};
 use anchor_lang::system_program;
+use anchor_spl::{
+    associated_token::AssociatedToken,
+    token::{self, CloseAccount, Mint, Token, TokenAccount, Transfer},
+};
 use sha2::{Digest, Sha256};
-use std::convert::TryInto;
-use std::mem::size_of;
 
-declare_id!("M4q843mQwjoTn52Ks5HsmZV8bq8ZtA2XgAWW5pHhwdM");
-/// @title Pre Hashed Timelock Contracts (PHTLCs) on Solana.
-///
-/// This contract provides a way to create and keep PHTLCs for Solana.
-///
-/// Protocol:
-///
-///  1) commit(src_receiver, timelock, amount) - a
-///      sender calls this to create a new HTLC
-///      for a given amount. A [u8; 32] Id is returned.
-///  2) lock(src_receiver, hashlock, timelock, amount) - a
-///      sender calls this to create a new HTLC
-///      for a given amount. A [u8; 32] Id is returned.
-///  3) addLock(Id, hashlock, timelock) - the sender calls this function
-///      to add the hashlock to HTLC.
-///  4) redeem(Id, secret) - once the src_receiver knows the secret of
-///      the hashlock hash they can claim the sol with this function
-///  5) refund(Id) - after timelock has expired and if the src_receiver did not
-///      redeem the sol the sender / creator of the HTLC can get their sol
-///      back with this function.
+declare_id!("9VJp7ChvYWG2H4d5QY3JK3R8yt2bi3RdFazxZh68XYwN");
 
-pub fn check_ed25519_data(data: &[u8], pubkey: &[u8], msg: &[u8], sig: &[u8]) -> Result<()> {
-    // According to this layout used by the Ed25519Program
-    // https://github.com/solana-labs/solana-web3.js/blob/master/src/ed25519-program.ts#L33
+// ─── Space constants ───────────────────────────────────────────────────────────
+// UserLock: 8 disc + 32 + 8 + 32 + 8 + 1 + 32 + 32 = 153
+const USER_LOCK_SPACE: usize = 8 + 32 + 8 + 32 + 8 + 1 + 32 + 32;
+// SolverLock: 8 disc + 32 + 8 + 8 + 32 + 8 + 8 + 32 + 1 + 32 + 32 + 32 = 201
+const SOLVER_LOCK_SPACE: usize = 8 + 32 + 8 + 8 + 32 + 8 + 8 + 32 + 1 + 32 + 32 + 32;
+// SolverLockCounter: 8 disc + 8 = 16
+const SOLVER_COUNTER_SPACE: usize = 8 + 8;
 
-    // "Deserializing" byte slices
+// Status constants (mirrors Solidity LockStatus enum)
+const STATUS_PENDING: u8 = 0;
+const STATUS_REFUNDED: u8 = 1;
+const STATUS_REDEEMED: u8 = 2;
 
-    let num_signatures = &[data[0]]; // Byte  0
-    let padding = &[data[1]]; // Byte  1
-    let signature_offset = &data[2..=3]; // Bytes 2,3
-    let signature_instruction_index = &data[4..=5]; // Bytes 4,5
-    let public_key_offset = &data[6..=7]; // Bytes 6,7
-    let public_key_instruction_index = &data[8..=9]; // Bytes 8,9
-    let message_data_offset = &data[10..=11]; // Bytes 10,11
-    let message_data_size = &data[12..=13]; // Bytes 12,13
-    let message_instruction_index = &data[14..=15]; // Bytes 14,15
+// ─── Helper functions ──────────────────────────────────────────────────────────
 
-    let data_pubkey = &data[16..16 + 32]; // Bytes 16..16+32
-    let data_sig = &data[48..48 + 64]; // Bytes 48..48+64
-    let data_msg = &data[112..]; // Bytes 112..end
-
-    // Expected values
-
-    let exp_public_key_offset: u16 = 16; // 2*u8 + 7*u16
-    let exp_signature_offset: u16 = exp_public_key_offset + pubkey.len() as u16;
-    let exp_message_data_offset: u16 = exp_signature_offset + sig.len() as u16;
-    let exp_num_signatures: u8 = 1;
-    let exp_message_data_size: u16 = msg.len().try_into().unwrap();
-
-    // Header and Arg Checks
-
-    // Header
-    if num_signatures != &exp_num_signatures.to_le_bytes()
-        || padding != &[0]
-        || signature_offset != &exp_signature_offset.to_le_bytes()
-        || signature_instruction_index != &u16::MAX.to_le_bytes()
-        || public_key_offset != &exp_public_key_offset.to_le_bytes()
-        || public_key_instruction_index != &u16::MAX.to_le_bytes()
-        || message_data_offset != &exp_message_data_offset.to_le_bytes()
-        || message_data_size != &exp_message_data_size.to_le_bytes()
-        || message_instruction_index != &u16::MAX.to_le_bytes()
-    {
-        return Err(HTLCError::SigVerificationFailed.into());
-    }
-
-    // Arguments
-    if data_pubkey != pubkey || data_msg != msg || data_sig != sig {
-        return Err(HTLCError::SigVerificationFailed.into());
-    }
-
+fn verify_hashlock(secret: &[u8; 32], hashlock: &[u8; 32]) -> Result<()> {
+    let mut hasher = Sha256::new();
+    hasher.update(secret);
+    let computed: [u8; 32] = hasher.finalize().into();
+    require!(computed == *hashlock, TrainError::HashlockMismatch);
     Ok(())
 }
 
-#[program]
-pub mod native_htlc {
+fn transfer_from_vault<'info>(
+    vault: AccountInfo<'info>,
+    destination: AccountInfo<'info>,
+    authority: AccountInfo<'info>,
+    token_program: AccountInfo<'info>,
+    signer_seeds: &[&[&[u8]]],
+    amount: u64,
+) -> Result<()> {
+    let cpi_ctx = CpiContext::new_with_signer(
+        token_program,
+        Transfer {
+            from: vault,
+            to: destination,
+            authority,
+        },
+        signer_seeds,
+    );
+    token::transfer(cpi_ctx, amount)
+}
 
+fn close_vault_if_empty<'info>(
+    vault: &mut Account<'info, TokenAccount>,
+    destination: AccountInfo<'info>,
+    authority: AccountInfo<'info>,
+    token_program: AccountInfo<'info>,
+    signer_seeds: &[&[&[u8]]],
+) -> Result<()> {
+    vault.reload()?;
+    if vault.amount == 0 {
+        let cpi_ctx = CpiContext::new_with_signer(
+            token_program,
+            CloseAccount {
+                account: vault.to_account_info(),
+                destination,
+                authority,
+            },
+            signer_seeds,
+        );
+        token::close_account(cpi_ctx)?;
+    }
+    Ok(())
+}
+
+// ─── Program ───────────────────────────────────────────────────────────────────
+
+#[program]
+pub mod train_htlc {
     use super::*;
 
-    /// @dev Sender / Payer sets up a new pre-hash time lock contract depositing the
-    /// funds and providing the src_receiver and terms.
-    /// @param src_receiver src_receiver of the funds.
-    /// @param timelock UNIX epoch seconds time that the lock expires at.
-    ///                  Refunds can be made after this time.
-    /// @return Id of the new HTLC. This is needed for subsequent calls.
-    pub fn commit(
-        ctx: Context<Commit>,
-        Id: [u8; 32],
-        hopChains: Vec<String>,
-        hopAssets: Vec<String>,
-        hopAddresses: Vec<String>,
-        dst_chain: String,
-        dst_asset: String,
-        dst_address: String,
-        src_asset: String,
-        src_receiver: Pubkey,
-        timelock: u64,
-        amount: u64,
-    ) -> Result<[u8; 32]> {
-        let clock = Clock::get().unwrap();
-        let time: u64 = clock.unix_timestamp.try_into().unwrap();
-        require!(timelock >= time + 900, HTLCError::InvalidTimeLock);
-        require!(amount != 0, HTLCError::FundsNotSent);
+    // ── UserLock: native SOL ───────────────────────────────────────────────────
 
-        let htlc = &mut ctx.accounts.htlc;
-
-        htlc.dst_address = dst_address;
-        htlc.dst_chain = dst_chain;
-        htlc.dst_asset = dst_asset;
-        htlc.src_asset = src_asset;
-        htlc.sender = *ctx.accounts.sender.to_account_info().key;
-        htlc.src_receiver = src_receiver;
-        htlc.hashlock = [0u8; 32];
-        htlc.amount = amount;
-        htlc.timelock = timelock;
-        htlc.reward = 0;
-        htlc.reward_timelock = 0;
-        htlc.claimed = 1;
-        htlc.secret = [0u8; 32];
-
-        let htlc_bump = ctx.bumps.htlc;
-        let bump_vector = htlc_bump.to_le_bytes();
-        let inner = vec![Id.as_ref(), bump_vector.as_ref()];
-        let outer = vec![inner.as_slice()];
-
-        let transfer_context = CpiContext::new_with_signer(
-            ctx.accounts.system_program.to_account_info(),
-            system_program::Transfer {
-                from: ctx.accounts.sender.to_account_info(),
-                to: htlc.to_account_info(),
-            },
-            outer.as_slice(),
-        );
-        system_program::transfer(transfer_context, amount)?;
-        // msg!("hop chains: {:?}", hopChains);
-        // msg!("hop assets: {:?}", hopAssets);
-        // msg!("hop addresses: {:?}", hopAddresses);
-
-        Ok(Id)
-    }
-
-    /// @dev Sender / Payer sets up a new hash time lock contract depositing the
-    /// funds and providing the reciever and terms.
-    /// @param src_receiver receiver of the funds.
-    /// @param hashlock A sha-256 hash hashlock.
-    /// @param timelock UNIX epoch seconds time that the lock expires at.
-    ///                  Refunds can be made after this time.
-    /// @return Id of the new HTLC. This is needed for subsequent calls.
-    pub fn lock(
-        ctx: Context<Lock>,
-        Id: [u8; 32],
+    #[allow(clippy::too_many_arguments)]
+    pub fn user_lock_sol(
+        ctx: Context<UserLockSol>,
         hashlock: [u8; 32],
-        timelock: u64,
         amount: u64,
+        timelock_delta: i64,
+        quote_expiry: i64,
+        sender: Pubkey,
+        recipient: Pubkey,
+        src_chain: String,
         dst_chain: String,
         dst_address: String,
-        dst_asset: String,
-        src_asset: String,
-        src_receiver: Pubkey,
-    ) -> Result<[u8; 32]> {
-        let clock = Clock::get().unwrap();
-        let time: u64 = clock.unix_timestamp.try_into().unwrap();
-        require!(timelock >= time + 1800, HTLCError::InvalidTimeLock);
-        require!(amount != 0, HTLCError::FundsNotSent);
+        dst_amount: u64,
+        dst_token: String,
+        reward_amount: u64,
+        reward_token: String,
+        reward_recipient: String,
+        reward_timelock_delta: i64,
+        user_data: Vec<u8>,
+        solver_data: Vec<u8>,
+    ) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        require!(amount > 0, TrainError::ZeroAmount);
+        require!(timelock_delta > 0, TrainError::ZeroTimelockDelta);
+        require!(now < quote_expiry, TrainError::QuoteExpired);
 
-        let htlc = &mut ctx.accounts.htlc;
+        let timelock = now.checked_add(timelock_delta).ok_or(TrainError::Overflow)?;
 
-        htlc.dst_address = dst_address;
-        htlc.dst_chain = dst_chain;
-        htlc.dst_asset = dst_asset;
-        htlc.src_asset = src_asset;
-        htlc.sender = *ctx.accounts.sender.to_account_info().key;
-        htlc.src_receiver = src_receiver;
-        htlc.hashlock = hashlock;
-        htlc.secret = [0u8; 32];
-        htlc.amount = amount;
-        htlc.timelock = timelock;
-        htlc.reward = 0;
-        htlc.reward_timelock = 0;
-        htlc.claimed = 1;
-
-        let htlc_bump = ctx.bumps.htlc;
-        let bump_vector = htlc_bump.to_le_bytes();
-        let inner = vec![Id.as_ref(), bump_vector.as_ref()];
-        let outer = vec![inner.as_slice()];
-        let transfer_context = CpiContext::new_with_signer(
+        // Transfer SOL from signer into the lock PDA
+        let cpi_ctx = CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
             system_program::Transfer {
-                from: ctx.accounts.sender.to_account_info(),
-                to: htlc.to_account_info(),
+                from: ctx.accounts.signer.to_account_info(),
+                to: ctx.accounts.user_lock.to_account_info(),
             },
-            outer.as_slice(),
         );
-        system_program::transfer(transfer_context, amount)?;
+        system_program::transfer(cpi_ctx, amount)?;
 
-        Ok(Id)
+        let lock = &mut ctx.accounts.user_lock;
+        lock.secret = [0u8; 32];
+        lock.amount = amount;
+        lock.sender = sender;
+        lock.timelock = timelock;
+        lock.status = STATUS_PENDING;
+        lock.recipient = recipient;
+        lock.token_mint = Pubkey::default();
+
+        emit!(UserLocked {
+            hashlock,
+            sender,
+            recipient,
+            src_chain,
+            token_mint: Pubkey::default(),
+            amount,
+            timelock,
+            quote_expiry,
+            dst_chain,
+            dst_address,
+            dst_amount,
+            dst_token,
+            reward_amount,
+            reward_token,
+            reward_recipient,
+            reward_timelock_delta,
+            user_data,
+            solver_data,
+        });
+        Ok(())
     }
 
-    /// @dev Solver / Payer sets the reward for claiming the funds.
-    /// @param reward the amount of the reward token.
-    /// @param reward_timelock After this time the rewards can be claimed.
-    pub fn lock_reward(
-        ctx: Context<LockReward>,
-        Id: [u8; 32],
-        reward_timelock: u64,
+    // ── UserLock: SPL token ────────────────────────────────────────────────────
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn user_lock_token(
+        ctx: Context<UserLockToken>,
+        hashlock: [u8; 32],
+        amount: u64,
+        timelock_delta: i64,
+        quote_expiry: i64,
+        sender: Pubkey,
+        recipient: Pubkey,
+        src_chain: String,
+        dst_chain: String,
+        dst_address: String,
+        dst_amount: u64,
+        dst_token: String,
+        reward_amount: u64,
+        reward_token: String,
+        reward_recipient: String,
+        reward_timelock_delta: i64,
+        user_data: Vec<u8>,
+        solver_data: Vec<u8>,
+    ) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        require!(amount > 0, TrainError::ZeroAmount);
+        require!(timelock_delta > 0, TrainError::ZeroTimelockDelta);
+        require!(now < quote_expiry, TrainError::QuoteExpired);
+
+        let timelock = now.checked_add(timelock_delta).ok_or(TrainError::Overflow)?;
+        let token_mint_key = ctx.accounts.token_mint.key();
+
+        // Transfer tokens from sender into vault
+        let cpi_ctx = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.sender_token_account.to_account_info(),
+                to: ctx.accounts.vault.to_account_info(),
+                authority: ctx.accounts.signer.to_account_info(),
+            },
+        );
+        token::transfer(cpi_ctx, amount)?;
+
+        let lock = &mut ctx.accounts.user_lock;
+        lock.secret = [0u8; 32];
+        lock.amount = amount;
+        lock.sender = sender;
+        lock.timelock = timelock;
+        lock.status = STATUS_PENDING;
+        lock.recipient = recipient;
+        lock.token_mint = token_mint_key;
+
+        emit!(UserLocked {
+            hashlock,
+            sender,
+            recipient,
+            src_chain,
+            token_mint: token_mint_key,
+            amount,
+            timelock,
+            quote_expiry,
+            dst_chain,
+            dst_address,
+            dst_amount,
+            dst_token,
+            reward_amount,
+            reward_token,
+            reward_recipient,
+            reward_timelock_delta,
+            user_data,
+            solver_data,
+        });
+        Ok(())
+    }
+
+    // ── SolverLock: native SOL amount + SOL reward ─────────────────────────────
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn solver_lock_sol(
+        ctx: Context<SolverLockSol>,
+        hashlock: [u8; 32],
+        index: u64,
+        amount: u64,
         reward: u64,
-    ) -> Result<bool> {
-        let clock = Clock::get().unwrap();
-        let htlc = &mut ctx.accounts.htlc;
-
+        timelock_delta: i64,
+        reward_timelock_delta: i64,
+        sender: Pubkey,
+        recipient: Pubkey,
+        reward_recipient: Pubkey,
+        src_chain: String,
+        dst_chain: String,
+        dst_address: String,
+        dst_amount: u64,
+        dst_token: String,
+        data: Vec<u8>,
+    ) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        require!(amount > 0, TrainError::ZeroAmount);
+        require!(timelock_delta > 0, TrainError::ZeroTimelockDelta);
+        if reward > 0 {
+            require!(
+                reward_timelock_delta < timelock_delta,
+                TrainError::RewardTimelockNotLessThanTimelock
+            );
+        }
         require!(
-            reward_timelock < htlc.timelock
-                && reward_timelock > clock.unix_timestamp.try_into().unwrap(),
-            HTLCError::InvalidRewardTimeLock
+            index == ctx.accounts.counter.count.checked_add(1).ok_or(TrainError::Overflow)?,
+            TrainError::InvalidIndex
         );
-        require!(htlc.reward == 0, HTLCError::RewardAlreadyExists);
 
-        htlc.reward_timelock = reward_timelock;
-        htlc.reward = reward;
+        let timelock = now.checked_add(timelock_delta).ok_or(TrainError::Overflow)?;
+        let reward_timelock = now.checked_add(reward_timelock_delta).ok_or(TrainError::Overflow)?;
+        let total = amount.checked_add(reward).ok_or(TrainError::Overflow)?;
 
-        let htlc_bump = ctx.bumps.htlc;
-        let bump_vector = htlc_bump.to_le_bytes();
-        let inner = vec![Id.as_ref(), bump_vector.as_ref()];
-        let outer = vec![inner.as_slice()];
-        let transfer_context = CpiContext::new_with_signer(
+        // Transfer SOL into solver_lock PDA
+        let cpi_ctx = CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
             system_program::Transfer {
-                from: ctx.accounts.sender.to_account_info(),
-                to: htlc.to_account_info(),
+                from: ctx.accounts.signer.to_account_info(),
+                to: ctx.accounts.solver_lock.to_account_info(),
             },
-            outer.as_slice(),
         );
-        system_program::transfer(transfer_context, reward)?;
+        system_program::transfer(cpi_ctx, total)?;
 
-        Ok(true)
+        let lock = &mut ctx.accounts.solver_lock;
+        lock.secret = [0u8; 32];
+        lock.amount = amount;
+        lock.reward = reward;
+        lock.sender = sender;
+        lock.timelock = timelock;
+        lock.reward_timelock = reward_timelock;
+        lock.recipient = recipient;
+        lock.status = STATUS_PENDING;
+        lock.reward_recipient = reward_recipient;
+        lock.token_mint = Pubkey::default();
+        lock.reward_token_mint = Pubkey::default();
+
+        ctx.accounts.counter.count = index;
+
+        emit!(SolverLocked {
+            hashlock,
+            index,
+            sender,
+            recipient,
+            src_chain,
+            token_mint: Pubkey::default(),
+            amount,
+            reward,
+            reward_token_mint: Pubkey::default(),
+            reward_recipient,
+            timelock,
+            reward_timelock,
+            dst_chain,
+            dst_address,
+            dst_amount,
+            dst_token,
+            data,
+        });
+        Ok(())
     }
 
-    /// @dev Called by the sender to add hashlock to the HTLC
-    ///
-    /// @param Id of the HTLC to addLock.
-    /// @param hashlock of the HTLC to be locked.
-    pub fn add_lock(
-        ctx: Context<AddLock>,
-        Id: [u8; 32],
+    // ── SolverLock: SPL token amount + same SPL token reward (single vault) ────
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn solver_lock_token(
+        ctx: Context<SolverLockToken>,
         hashlock: [u8; 32],
-        timelock: u64,
-    ) -> Result<[u8; 32]> {
-        let clock = Clock::get().unwrap();
-        let time: u64 = clock.unix_timestamp.try_into().unwrap();
-        require!(timelock >= time + 900, HTLCError::InvalidTimeLock);
+        index: u64,
+        amount: u64,
+        reward: u64,
+        timelock_delta: i64,
+        reward_timelock_delta: i64,
+        sender: Pubkey,
+        recipient: Pubkey,
+        reward_recipient: Pubkey,
+        src_chain: String,
+        dst_chain: String,
+        dst_address: String,
+        dst_amount: u64,
+        dst_token: String,
+        data: Vec<u8>,
+    ) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        require!(amount > 0, TrainError::ZeroAmount);
+        require!(timelock_delta > 0, TrainError::ZeroTimelockDelta);
+        if reward > 0 {
+            require!(
+                reward_timelock_delta < timelock_delta,
+                TrainError::RewardTimelockNotLessThanTimelock
+            );
+        }
+        require!(
+            index == ctx.accounts.counter.count.checked_add(1).ok_or(TrainError::Overflow)?,
+            TrainError::InvalidIndex
+        );
 
-        let htlc = &mut ctx.accounts.htlc;
-        htlc.hashlock = hashlock;
-        htlc.timelock = timelock;
+        let timelock = now.checked_add(timelock_delta).ok_or(TrainError::Overflow)?;
+        let reward_timelock = now.checked_add(reward_timelock_delta).ok_or(TrainError::Overflow)?;
+        let total = amount.checked_add(reward).ok_or(TrainError::Overflow)?;
+        let token_mint_key = ctx.accounts.token_mint.key();
 
-        Ok(Id)
+        // Transfer amount + reward tokens into vault
+        let cpi_ctx = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.sender_token_account.to_account_info(),
+                to: ctx.accounts.vault.to_account_info(),
+                authority: ctx.accounts.signer.to_account_info(),
+            },
+        );
+        token::transfer(cpi_ctx, total)?;
+
+        let lock = &mut ctx.accounts.solver_lock;
+        lock.secret = [0u8; 32];
+        lock.amount = amount;
+        lock.reward = reward;
+        lock.sender = sender;
+        lock.timelock = timelock;
+        lock.reward_timelock = reward_timelock;
+        lock.recipient = recipient;
+        lock.status = STATUS_PENDING;
+        lock.reward_recipient = reward_recipient;
+        lock.token_mint = token_mint_key;
+        lock.reward_token_mint = token_mint_key;
+
+        ctx.accounts.counter.count = index;
+
+        emit!(SolverLocked {
+            hashlock,
+            index,
+            sender,
+            recipient,
+            src_chain,
+            token_mint: token_mint_key,
+            amount,
+            reward,
+            reward_token_mint: token_mint_key,
+            reward_recipient,
+            timelock,
+            reward_timelock,
+            dst_chain,
+            dst_address,
+            dst_amount,
+            dst_token,
+            data,
+        });
+        Ok(())
     }
 
-    /// @dev Called by the solver to add hashlock to the HTLC
-    ///
-    /// @param Id of the HTLC.
-    /// @param hashlock to be added.
-    pub fn add_lock_sig(
-        ctx: Context<AddLockSig>,
-        Id: [u8; 32],
+    // ── SolverLock: SPL token amount + different SPL token reward (two vaults) ─
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn solver_lock_token_diff_reward(
+        ctx: Context<SolverLockTokenDiffReward>,
         hashlock: [u8; 32],
-        timelock: u64,
-        signature: [u8; 64],
-    ) -> Result<[u8; 32]> {
-        let clock = Clock::get().unwrap();
-        let time: u64 = clock.unix_timestamp.try_into().unwrap();
-        require!(timelock >= time + 900, HTLCError::InvalidTimeLock);
-        let htlc = &mut ctx.accounts.htlc;
-        let signer = htlc.sender.to_bytes();
+        index: u64,
+        amount: u64,
+        reward: u64,
+        timelock_delta: i64,
+        reward_timelock_delta: i64,
+        sender: Pubkey,
+        recipient: Pubkey,
+        reward_recipient: Pubkey,
+        src_chain: String,
+        dst_chain: String,
+        dst_address: String,
+        dst_amount: u64,
+        dst_token: String,
+        data: Vec<u8>,
+    ) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        require!(amount > 0, TrainError::ZeroAmount);
+        require!(timelock_delta > 0, TrainError::ZeroTimelockDelta);
+        if reward > 0 {
+            require!(
+                reward_timelock_delta < timelock_delta,
+                TrainError::RewardTimelockNotLessThanTimelock
+            );
+        }
+        require!(
+            ctx.accounts.token_mint.key() != ctx.accounts.reward_token_mint.key(),
+            TrainError::WrongToken
+        );
+        require!(
+            index == ctx.accounts.counter.count.checked_add(1).ok_or(TrainError::Overflow)?,
+            TrainError::InvalidIndex
+        );
 
-        let ix: Instruction = load_instruction_at_checked(0, &ctx.accounts.ix_sysvar)?;
+        let timelock = now.checked_add(timelock_delta).ok_or(TrainError::Overflow)?;
+        let reward_timelock = now.checked_add(reward_timelock_delta).ok_or(TrainError::Overflow)?;
+        let token_mint_key = ctx.accounts.token_mint.key();
+        let reward_token_mint_key = ctx.accounts.reward_token_mint.key();
 
-        let mut hasher = Sha256::new();
-        hasher.update(Id.clone());
-        hasher.update(hashlock.clone());
-        hasher.update(timelock.to_le_bytes());
-        let hash = hasher.finalize();
+        // Transfer amount tokens into vault
+        let cpi_ctx = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.sender_token_account.to_account_info(),
+                to: ctx.accounts.vault.to_account_info(),
+                authority: ctx.accounts.signer.to_account_info(),
+            },
+        );
+        token::transfer(cpi_ctx, amount)?;
 
-        let signing_domain: &[u8; 16] = b"\xffsolana offchain";
-        let header_version: [u8; 1] = [0u8]; // Version 0
-        let mut application_domain = [0u8; 32];
-        application_domain[..5].copy_from_slice(b"Train");
-        let message_format = [0u8]; // Assuming Restricted ASCII
-        let signer_count = [1u8]; // One signer
-        let message_length = (hash.len() as u16).to_le_bytes();
-
-        let mut raw_message = Vec::new();
-        raw_message.extend_from_slice(signing_domain);
-        raw_message.extend_from_slice(&header_version);
-        raw_message.extend_from_slice(&application_domain);
-        raw_message.extend_from_slice(&message_format);
-        raw_message.extend_from_slice(&signer_count);
-        raw_message.extend_from_slice(&signer);
-        raw_message.extend_from_slice(&message_length);
-        raw_message.extend_from_slice(&hash);
-
-        let hex_message = hex::encode(raw_message);
-        let full_message = hex_message.into_bytes();
-
-        // Check that ix is what we expect to have been sent
-        if ix.program_id!= ED25519_ID ||  // The program id we expect
-        ix.accounts.len()!= 0
-        // With no context accounts
-        || ix.data.len()!= (16 + 64 + 32 + full_message.len())
-        // And data of this size
-        {
-            return Err(HTLCError::SigVerificationFailed.into());
+        // Transfer reward tokens into reward_vault
+        if reward > 0 {
+            let cpi_ctx2 = CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.sender_reward_token_account.to_account_info(),
+                    to: ctx.accounts.reward_vault.to_account_info(),
+                    authority: ctx.accounts.signer.to_account_info(),
+                },
+            );
+            token::transfer(cpi_ctx2, reward)?;
         }
 
-        check_ed25519_data(&ix.data, &signer, &full_message, &signature)?;
+        let lock = &mut ctx.accounts.solver_lock;
+        lock.secret = [0u8; 32];
+        lock.amount = amount;
+        lock.reward = reward;
+        lock.sender = sender;
+        lock.timelock = timelock;
+        lock.reward_timelock = reward_timelock;
+        lock.recipient = recipient;
+        lock.status = STATUS_PENDING;
+        lock.reward_recipient = reward_recipient;
+        lock.token_mint = token_mint_key;
+        lock.reward_token_mint = reward_token_mint_key;
 
-        htlc.hashlock = hashlock;
-        htlc.timelock = timelock;
+        ctx.accounts.counter.count = index;
 
-        Ok(Id)
+        emit!(SolverLocked {
+            hashlock,
+            index,
+            sender,
+            recipient,
+            src_chain,
+            token_mint: token_mint_key,
+            amount,
+            reward,
+            reward_token_mint: reward_token_mint_key,
+            reward_recipient,
+            timelock,
+            reward_timelock,
+            dst_chain,
+            dst_address,
+            dst_amount,
+            dst_token,
+            data,
+        });
+        Ok(())
     }
 
-    /// @dev Called by the src_receiver once they know the secret of the hashlock.
-    /// This will transfer the locked funds to the HTLC's src_receiver's address.
-    ///
-    /// @param Id of the HTLC.
-    /// @param secret sha256(secret) should equal the contract hashlock.
-    pub fn redeem(ctx: Context<Redeem>, Id: [u8; 32], secret: [u8; 32]) -> Result<bool> {
-        let htlc = &mut ctx.accounts.htlc;
-        let mut hasher = Sha256::new();
-        hasher.update(secret);
-        let hash = hasher.finalize();
-        require!([0u8; 32] != htlc.hashlock, HTLCError::HashlockNotSet);
-        require!(hash == htlc.hashlock.into(), HTLCError::HashlockNoMatch);
+    // ── RefundUser: native SOL ─────────────────────────────────────────────────
 
-        htlc.claimed = 3;
-        htlc.secret = secret;
+    pub fn refund_user_sol(ctx: Context<RefundUserSol>, hashlock: [u8; 32]) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let lock = &mut ctx.accounts.user_lock;
 
-        let amount = htlc.amount;
-        let reward = htlc.reward;
+        require!(lock.status == STATUS_PENDING, TrainError::NotPending);
 
-        if htlc.reward != 0 {
-            // if redeem is called before the reward_timelock sender should get the reward back
-            if htlc.reward_timelock > Clock::get().unwrap().unix_timestamp.try_into().unwrap() {
-                htlc.sub_lamports(amount + reward)?;
-                ctx.accounts.src_receiver.add_lamports(amount)?;
-                ctx.accounts.sender.add_lamports(reward)?;
+        let is_recipient = ctx.accounts.caller.key() == lock.recipient;
+        if !is_recipient {
+            require!(now >= lock.timelock, TrainError::TimelockNotExpired);
+        }
+
+        lock.status = STATUS_REFUNDED;
+        let amount = lock.amount;
+
+        ctx.accounts.user_lock.sub_lamports(amount)?;
+        ctx.accounts.sender.add_lamports(amount)?;
+
+        emit!(UserRefunded { hashlock });
+        Ok(())
+    }
+
+    // ── RefundUser: SPL token ──────────────────────────────────────────────────
+
+    pub fn refund_user_token(ctx: Context<RefundUserToken>, hashlock: [u8; 32]) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let lock = &mut ctx.accounts.user_lock;
+
+        require!(lock.status == STATUS_PENDING, TrainError::NotPending);
+
+        let is_recipient = ctx.accounts.caller.key() == lock.recipient;
+        if !is_recipient {
+            require!(now >= lock.timelock, TrainError::TimelockNotExpired);
+        }
+
+        lock.status = STATUS_REFUNDED;
+        let amount = lock.amount;
+        let bump = ctx.bumps.user_lock;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"user_lock", hashlock.as_ref(), &[bump]]];
+
+        transfer_from_vault(
+            ctx.accounts.vault.to_account_info(),
+            ctx.accounts.sender_token_account.to_account_info(),
+            ctx.accounts.user_lock.to_account_info(),
+            ctx.accounts.token_program.to_account_info(),
+            signer_seeds,
+            amount,
+        )?;
+
+        close_vault_if_empty(
+            &mut ctx.accounts.vault,
+            ctx.accounts.sender.to_account_info(),
+            ctx.accounts.user_lock.to_account_info(),
+            ctx.accounts.token_program.to_account_info(),
+            signer_seeds,
+        )?;
+
+        emit!(UserRefunded { hashlock });
+        Ok(())
+    }
+
+    // ── RefundSolver: native SOL ───────────────────────────────────────────────
+
+    pub fn refund_solver_sol(
+        ctx: Context<RefundSolverSol>,
+        hashlock: [u8; 32],
+        _index: u64,
+    ) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let lock = &mut ctx.accounts.solver_lock;
+
+        require!(lock.status == STATUS_PENDING, TrainError::NotPending);
+        require!(now >= lock.timelock, TrainError::TimelockNotExpired);
+
+        lock.status = STATUS_REFUNDED;
+        let total = lock.amount.checked_add(lock.reward).ok_or(TrainError::Overflow)?;
+
+        ctx.accounts.solver_lock.sub_lamports(total)?;
+        ctx.accounts.sender.add_lamports(total)?;
+
+        emit!(SolverRefunded { hashlock, index: _index });
+        Ok(())
+    }
+
+    // ── RefundSolver: SPL token (single vault) ─────────────────────────────────
+
+    pub fn refund_solver_token(
+        ctx: Context<RefundSolverToken>,
+        hashlock: [u8; 32],
+        index: u64,
+    ) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let lock = &mut ctx.accounts.solver_lock;
+
+        require!(lock.status == STATUS_PENDING, TrainError::NotPending);
+        require!(now >= lock.timelock, TrainError::TimelockNotExpired);
+
+        lock.status = STATUS_REFUNDED;
+        let total = lock.amount.checked_add(lock.reward).ok_or(TrainError::Overflow)?;
+        let index_bytes = index.to_le_bytes();
+        let bump = ctx.bumps.solver_lock;
+        let signer_seeds: &[&[&[u8]]] =
+            &[&[b"solver_lock", hashlock.as_ref(), index_bytes.as_ref(), &[bump]]];
+
+        transfer_from_vault(
+            ctx.accounts.vault.to_account_info(),
+            ctx.accounts.sender_token_account.to_account_info(),
+            ctx.accounts.solver_lock.to_account_info(),
+            ctx.accounts.token_program.to_account_info(),
+            signer_seeds,
+            total,
+        )?;
+
+        close_vault_if_empty(
+            &mut ctx.accounts.vault,
+            ctx.accounts.sender.to_account_info(),
+            ctx.accounts.solver_lock.to_account_info(),
+            ctx.accounts.token_program.to_account_info(),
+            signer_seeds,
+        )?;
+
+        emit!(SolverRefunded { hashlock, index });
+        Ok(())
+    }
+
+    // ── RefundSolver: SPL token diff reward (two vaults) ──────────────────────
+
+    pub fn refund_solver_token_diff_reward(
+        ctx: Context<RefundSolverTokenDiffReward>,
+        hashlock: [u8; 32],
+        index: u64,
+    ) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let lock = &mut ctx.accounts.solver_lock;
+
+        require!(lock.status == STATUS_PENDING, TrainError::NotPending);
+        require!(now >= lock.timelock, TrainError::TimelockNotExpired);
+
+        lock.status = STATUS_REFUNDED;
+        let amount = lock.amount;
+        let reward = lock.reward;
+        let index_bytes = index.to_le_bytes();
+        let bump = ctx.bumps.solver_lock;
+        let signer_seeds: &[&[&[u8]]] =
+            &[&[b"solver_lock", hashlock.as_ref(), index_bytes.as_ref(), &[bump]]];
+
+        // Return amount tokens
+        transfer_from_vault(
+            ctx.accounts.vault.to_account_info(),
+            ctx.accounts.sender_token_account.to_account_info(),
+            ctx.accounts.solver_lock.to_account_info(),
+            ctx.accounts.token_program.to_account_info(),
+            signer_seeds,
+            amount,
+        )?;
+        close_vault_if_empty(
+            &mut ctx.accounts.vault,
+            ctx.accounts.sender.to_account_info(),
+            ctx.accounts.solver_lock.to_account_info(),
+            ctx.accounts.token_program.to_account_info(),
+            signer_seeds,
+        )?;
+
+        // Return reward tokens
+        if reward > 0 {
+            transfer_from_vault(
+                ctx.accounts.reward_vault.to_account_info(),
+                ctx.accounts.sender_reward_token_account.to_account_info(),
+                ctx.accounts.solver_lock.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
+                signer_seeds,
+                reward,
+            )?;
+            close_vault_if_empty(
+                &mut ctx.accounts.reward_vault,
+                ctx.accounts.sender.to_account_info(),
+                ctx.accounts.solver_lock.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
+                signer_seeds,
+            )?;
+        }
+
+        emit!(SolverRefunded { hashlock, index });
+        Ok(())
+    }
+
+    // ── RedeemUser: native SOL ─────────────────────────────────────────────────
+
+    pub fn redeem_user_sol(
+        ctx: Context<RedeemUserSol>,
+        hashlock: [u8; 32],
+        secret: [u8; 32],
+    ) -> Result<()> {
+        verify_hashlock(&secret, &hashlock)?;
+
+        let lock = &mut ctx.accounts.user_lock;
+        require!(lock.status == STATUS_PENDING, TrainError::NotPending);
+
+        lock.status = STATUS_REDEEMED;
+        lock.secret = secret;
+        let amount = lock.amount;
+
+        ctx.accounts.user_lock.sub_lamports(amount)?;
+        ctx.accounts.recipient.add_lamports(amount)?;
+
+        emit!(UserRedeemed {
+            hashlock,
+            redeemer: ctx.accounts.caller.key(),
+            secret,
+        });
+        Ok(())
+    }
+
+    // ── RedeemUser: SPL token ──────────────────────────────────────────────────
+
+    pub fn redeem_user_token(
+        ctx: Context<RedeemUserToken>,
+        hashlock: [u8; 32],
+        secret: [u8; 32],
+    ) -> Result<()> {
+        verify_hashlock(&secret, &hashlock)?;
+
+        let lock = &mut ctx.accounts.user_lock;
+        require!(lock.status == STATUS_PENDING, TrainError::NotPending);
+
+        lock.status = STATUS_REDEEMED;
+        lock.secret = secret;
+        let amount = lock.amount;
+        let bump = ctx.bumps.user_lock;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"user_lock", hashlock.as_ref(), &[bump]]];
+
+        transfer_from_vault(
+            ctx.accounts.vault.to_account_info(),
+            ctx.accounts.recipient_token_account.to_account_info(),
+            ctx.accounts.user_lock.to_account_info(),
+            ctx.accounts.token_program.to_account_info(),
+            signer_seeds,
+            amount,
+        )?;
+
+        close_vault_if_empty(
+            &mut ctx.accounts.vault,
+            ctx.accounts.caller.to_account_info(),
+            ctx.accounts.user_lock.to_account_info(),
+            ctx.accounts.token_program.to_account_info(),
+            signer_seeds,
+        )?;
+
+        emit!(UserRedeemed {
+            hashlock,
+            redeemer: ctx.accounts.caller.key(),
+            secret,
+        });
+        Ok(())
+    }
+
+    // ── RedeemSolver: native SOL ───────────────────────────────────────────────
+
+    pub fn redeem_solver_sol(
+        ctx: Context<RedeemSolverSol>,
+        hashlock: [u8; 32],
+        index: u64,
+        secret: [u8; 32],
+    ) -> Result<()> {
+        verify_hashlock(&secret, &hashlock)?;
+
+        let now = Clock::get()?.unix_timestamp;
+        let lock = &mut ctx.accounts.solver_lock;
+        require!(lock.status == STATUS_PENDING, TrainError::NotPending);
+
+        lock.status = STATUS_REDEEMED;
+        lock.secret = secret;
+        let amount = lock.amount;
+        let reward = lock.reward;
+        let reward_timelock = lock.reward_timelock;
+
+        // Amount always → recipient
+        ctx.accounts.solver_lock.sub_lamports(amount)?;
+        ctx.accounts.recipient.add_lamports(amount)?;
+
+        // Reward routing
+        if reward > 0 {
+            ctx.accounts.solver_lock.sub_lamports(reward)?;
+            if now < reward_timelock {
+                ctx.accounts.reward_recipient.add_lamports(reward)?;
             } else {
-                // if the caller is the receiver then they should get and the amount,
-                // and the reward
-                if ctx.accounts.user_signing.key() == ctx.accounts.src_receiver.key() {
-                    htlc.sub_lamports(amount + reward)?;
-                    ctx.accounts.src_receiver.add_lamports(amount + reward)?;
-                } else {
-                    htlc.sub_lamports(amount + reward)?;
-                    ctx.accounts.src_receiver.add_lamports(amount)?;
-                    ctx.accounts.user_signing.add_lamports(reward)?;
-                }
+                ctx.accounts.caller.add_lamports(reward)?;
             }
-        } else {
-            // send the tokens to the receiver if the reward is set to zero
-            htlc.sub_lamports(amount)?;
-            ctx.accounts.src_receiver.add_lamports(amount)?;
         }
 
-        Ok(true)
+        emit!(SolverRedeemed {
+            hashlock,
+            index,
+            redeemer: ctx.accounts.caller.key(),
+            secret,
+        });
+        Ok(())
     }
 
-    /// @dev Called by the sender if there was no redeem AND the time lock has
-    /// expired. This will refund the contract amount.
-    ///
-    /// @param Id of the HTLC to refund from.
-    pub fn refund(ctx: Context<Refund>, Id: [u8; 32]) -> Result<bool> {
-        let htlc = &mut ctx.accounts.htlc;
+    // ── RedeemSolver: SPL token single vault ──────────────────────────────────
 
-        htlc.claimed = 2;
+    pub fn redeem_solver_token(
+        ctx: Context<RedeemSolverToken>,
+        hashlock: [u8; 32],
+        index: u64,
+        secret: [u8; 32],
+    ) -> Result<()> {
+        verify_hashlock(&secret, &hashlock)?;
 
-        let amount = htlc.amount;
-        let reward = htlc.reward;
+        let now = Clock::get()?.unix_timestamp;
+        let lock = &mut ctx.accounts.solver_lock;
+        require!(lock.status == STATUS_PENDING, TrainError::NotPending);
 
-        htlc.sub_lamports(amount + reward)?;
-        ctx.accounts.sender.add_lamports(amount + reward)?;
+        lock.status = STATUS_REDEEMED;
+        lock.secret = secret;
+        let amount = lock.amount;
+        let reward = lock.reward;
+        let reward_timelock = lock.reward_timelock;
+        let index_bytes = index.to_le_bytes();
+        let bump = ctx.bumps.solver_lock;
+        let signer_seeds: &[&[&[u8]]] =
+            &[&[b"solver_lock", hashlock.as_ref(), index_bytes.as_ref(), &[bump]]];
 
-        Ok(true)
+        // Amount always → recipient ATA
+        transfer_from_vault(
+            ctx.accounts.vault.to_account_info(),
+            ctx.accounts.recipient_token_account.to_account_info(),
+            ctx.accounts.solver_lock.to_account_info(),
+            ctx.accounts.token_program.to_account_info(),
+            signer_seeds,
+            amount,
+        )?;
+
+        // Reward routing
+        if reward > 0 {
+            if now < reward_timelock {
+                transfer_from_vault(
+                    ctx.accounts.vault.to_account_info(),
+                    ctx.accounts.reward_recipient_token_account.to_account_info(),
+                    ctx.accounts.solver_lock.to_account_info(),
+                    ctx.accounts.token_program.to_account_info(),
+                    signer_seeds,
+                    reward,
+                )?;
+            } else {
+                transfer_from_vault(
+                    ctx.accounts.vault.to_account_info(),
+                    ctx.accounts.caller_token_account.to_account_info(),
+                    ctx.accounts.solver_lock.to_account_info(),
+                    ctx.accounts.token_program.to_account_info(),
+                    signer_seeds,
+                    reward,
+                )?;
+            }
+        }
+
+        close_vault_if_empty(
+            &mut ctx.accounts.vault,
+            ctx.accounts.caller.to_account_info(),
+            ctx.accounts.solver_lock.to_account_info(),
+            ctx.accounts.token_program.to_account_info(),
+            signer_seeds,
+        )?;
+
+        emit!(SolverRedeemed {
+            hashlock,
+            index,
+            redeemer: ctx.accounts.caller.key(),
+            secret,
+        });
+        Ok(())
     }
 
-    /// @dev Get HTLC details.
-    /// @param Id of the HTLC.
-    pub fn getDetails(ctx: Context<GetDetails>, Id: [u8; 32]) -> Result<HTLC> {
-        let htlc = &ctx.accounts.htlc;
-        msg!("hashlcok: {:?}", htlc.hashlock);
-        Ok(HTLC {
-            dst_address: htlc.dst_address.clone(),
-            dst_chain: htlc.dst_chain.clone(),
-            dst_asset: htlc.dst_asset.clone(),
-            src_asset: htlc.src_asset.clone(),
-            sender: htlc.sender,
-            src_receiver: htlc.src_receiver,
-            hashlock: htlc.hashlock,
-            secret: htlc.secret.clone(),
-            amount: htlc.amount,
-            reward: htlc.reward,
-            timelock: htlc.timelock,
-            reward_timelock: htlc.reward_timelock,
-            claimed: htlc.claimed,
+    // ── RedeemSolver: SPL token diff reward (two vaults) ─────────────────────
+
+    pub fn redeem_solver_token_diff_reward(
+        ctx: Context<RedeemSolverTokenDiffReward>,
+        hashlock: [u8; 32],
+        index: u64,
+        secret: [u8; 32],
+    ) -> Result<()> {
+        verify_hashlock(&secret, &hashlock)?;
+
+        let now = Clock::get()?.unix_timestamp;
+        let lock = &mut ctx.accounts.solver_lock;
+        require!(lock.status == STATUS_PENDING, TrainError::NotPending);
+
+        lock.status = STATUS_REDEEMED;
+        lock.secret = secret;
+        let amount = lock.amount;
+        let reward = lock.reward;
+        let reward_timelock = lock.reward_timelock;
+        let index_bytes = index.to_le_bytes();
+        let bump = ctx.bumps.solver_lock;
+        let signer_seeds: &[&[&[u8]]] =
+            &[&[b"solver_lock", hashlock.as_ref(), index_bytes.as_ref(), &[bump]]];
+
+        // Amount always → recipient ATA (from main vault)
+        transfer_from_vault(
+            ctx.accounts.vault.to_account_info(),
+            ctx.accounts.recipient_token_account.to_account_info(),
+            ctx.accounts.solver_lock.to_account_info(),
+            ctx.accounts.token_program.to_account_info(),
+            signer_seeds,
+            amount,
+        )?;
+        close_vault_if_empty(
+            &mut ctx.accounts.vault,
+            ctx.accounts.caller.to_account_info(),
+            ctx.accounts.solver_lock.to_account_info(),
+            ctx.accounts.token_program.to_account_info(),
+            signer_seeds,
+        )?;
+
+        // Reward routing (from reward vault)
+        if reward > 0 {
+            if now < reward_timelock {
+                transfer_from_vault(
+                    ctx.accounts.reward_vault.to_account_info(),
+                    ctx.accounts.reward_recipient_token_account.to_account_info(),
+                    ctx.accounts.solver_lock.to_account_info(),
+                    ctx.accounts.token_program.to_account_info(),
+                    signer_seeds,
+                    reward,
+                )?;
+            } else {
+                transfer_from_vault(
+                    ctx.accounts.reward_vault.to_account_info(),
+                    ctx.accounts.caller_reward_token_account.to_account_info(),
+                    ctx.accounts.solver_lock.to_account_info(),
+                    ctx.accounts.token_program.to_account_info(),
+                    signer_seeds,
+                    reward,
+                )?;
+            }
+            close_vault_if_empty(
+                &mut ctx.accounts.reward_vault,
+                ctx.accounts.caller.to_account_info(),
+                ctx.accounts.solver_lock.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
+                signer_seeds,
+            )?;
+        }
+
+        emit!(SolverRedeemed {
+            hashlock,
+            index,
+            redeemer: ctx.accounts.caller.key(),
+            secret,
+        });
+        Ok(())
+    }
+
+    // ── View: get UserLock ─────────────────────────────────────────────────────
+
+    pub fn get_user_lock(ctx: Context<GetUserLock>, _hashlock: [u8; 32]) -> Result<UserLockData> {
+        let lock = &ctx.accounts.user_lock;
+        Ok(UserLockData {
+            secret: lock.secret,
+            amount: lock.amount,
+            sender: lock.sender,
+            timelock: lock.timelock,
+            status: lock.status,
+            recipient: lock.recipient,
+            token_mint: lock.token_mint,
         })
     }
+
+    // ── View: get SolverLock ───────────────────────────────────────────────────
+
+    pub fn get_solver_lock(
+        ctx: Context<GetSolverLock>,
+        _hashlock: [u8; 32],
+        _index: u64,
+    ) -> Result<SolverLockData> {
+        let lock = &ctx.accounts.solver_lock;
+        Ok(SolverLockData {
+            secret: lock.secret,
+            amount: lock.amount,
+            reward: lock.reward,
+            sender: lock.sender,
+            timelock: lock.timelock,
+            reward_timelock: lock.reward_timelock,
+            recipient: lock.recipient,
+            status: lock.status,
+            reward_recipient: lock.reward_recipient,
+            token_mint: lock.token_mint,
+            reward_token_mint: lock.reward_token_mint,
+        })
+    }
+
+    // ── View: get SolverLock count ─────────────────────────────────────────────
+
+    pub fn get_solver_lock_count(
+        ctx: Context<GetSolverLockCount>,
+        _hashlock: [u8; 32],
+    ) -> Result<u64> {
+        Ok(ctx.accounts.counter.count)
+    }
 }
+
+// ─── Account structs ───────────────────────────────────────────────────────────
+
 #[account]
 #[derive(Default)]
-pub struct HTLC {
-    pub dst_address: String,
-    pub dst_chain: String,
-    pub dst_asset: String,
-    pub src_asset: String,
-    pub sender: Pubkey,
-    pub src_receiver: Pubkey,
-    pub hashlock: [u8; 32],
-    pub secret: [u8; 32],
-    pub amount: u64,
-    pub reward: u64,
-    pub timelock: u64,
-    pub reward_timelock: u64,
-    pub claimed: u8,
+pub struct UserLock {
+    pub secret:     [u8; 32],
+    pub amount:     u64,
+    pub sender:     Pubkey,
+    pub timelock:   i64,
+    pub status:     u8,
+    pub recipient:  Pubkey,
+    pub token_mint: Pubkey,
 }
+
+#[account]
+#[derive(Default)]
+pub struct SolverLock {
+    pub secret:            [u8; 32],
+    pub amount:            u64,
+    pub reward:            u64,
+    pub sender:            Pubkey,
+    pub timelock:          i64,
+    pub reward_timelock:   i64,
+    pub recipient:         Pubkey,
+    pub status:            u8,
+    pub reward_recipient:  Pubkey,
+    pub token_mint:        Pubkey,
+    pub reward_token_mint: Pubkey,
+}
+
+#[account]
+#[derive(Default)]
+pub struct SolverLockCounter {
+    pub count: u64,
+}
+
+// ─── Return data structs ───────────────────────────────────────────────────────
+
+#[derive(AnchorSerialize, AnchorDeserialize)]
+pub struct UserLockData {
+    pub secret:     [u8; 32],
+    pub amount:     u64,
+    pub sender:     Pubkey,
+    pub timelock:   i64,
+    pub status:     u8,
+    pub recipient:  Pubkey,
+    pub token_mint: Pubkey,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize)]
+pub struct SolverLockData {
+    pub secret:            [u8; 32],
+    pub amount:            u64,
+    pub reward:            u64,
+    pub sender:            Pubkey,
+    pub timelock:          i64,
+    pub reward_timelock:   i64,
+    pub recipient:         Pubkey,
+    pub status:            u8,
+    pub reward_recipient:  Pubkey,
+    pub token_mint:        Pubkey,
+    pub reward_token_mint: Pubkey,
+}
+
+// ─── Instruction account contexts ─────────────────────────────────────────────
+
+// -- UserLock SOL --
+
 #[derive(Accounts)]
-#[instruction(Id: [u8; 32])]
-pub struct Commit<'info> {
+#[instruction(hashlock: [u8; 32])]
+pub struct UserLockSol<'info> {
     #[account(mut)]
-    pub sender: Signer<'info>,
+    pub signer: Signer<'info>,
 
     #[account(
         init,
-        payer = sender,
-        space = size_of::<HTLC>() + 28,
-        seeds = [
-            Id.as_ref()
-        ],
+        payer = signer,
+        space = USER_LOCK_SPACE,
+        seeds = [b"user_lock", hashlock.as_ref()],
         bump,
     )]
-    pub htlc: Box<Account<'info, HTLC>>,
+    pub user_lock: Account<'info, UserLock>,
 
     pub system_program: Program<'info, System>,
-    pub rent: Sysvar<'info, Rent>,
 }
 
+// -- UserLock Token --
+
 #[derive(Accounts)]
-#[instruction(Id: [u8; 32])]
-pub struct Lock<'info> {
+#[instruction(hashlock: [u8; 32])]
+pub struct UserLockToken<'info> {
     #[account(mut)]
-    pub sender: Signer<'info>,
+    pub signer: Signer<'info>,
 
     #[account(
         init,
-        payer = sender,
-        space = size_of::<HTLC>() + 28,
-        seeds = [
-            Id.as_ref()
-        ],
+        payer = signer,
+        space = USER_LOCK_SPACE,
+        seeds = [b"user_lock", hashlock.as_ref()],
         bump,
     )]
-    pub htlc: Box<Account<'info, HTLC>>,
+    pub user_lock: Account<'info, UserLock>,
 
-    pub system_program: Program<'info, System>,
-    pub rent: Sysvar<'info, Rent>,
-}
-
-#[derive(Accounts)]
-#[instruction(Id: [u8; 32])]
-pub struct LockReward<'info> {
-    #[account(mut)]
-    sender: Signer<'info>,
-    #[account(
-    mut,
-    seeds = [
-        Id.as_ref()
-    ],
-    bump,
-    constraint = htlc.claimed == 1 @ HTLCError::AlreadyClaimed,
-    has_one = sender @ HTLCError::UnauthorizedAccess,
-    )]
-    pub htlc: Box<Account<'info, HTLC>>,
-
-    system_program: Program<'info, System>,
-    rent: Sysvar<'info, Rent>,
-}
-
-#[derive(Accounts)]
-#[instruction(Id: [u8; 32])]
-pub struct Redeem<'info> {
-    #[account(mut)]
-    user_signing: Signer<'info>,
-    ///CHECK: The sender
-    #[account(mut)]
-    sender: UncheckedAccount<'info>,
-    ///CHECK: The reciever
-    #[account(mut)]
-    pub src_receiver: UncheckedAccount<'info>,
+    pub token_mint: Account<'info, Mint>,
 
     #[account(
         mut,
-        seeds = [
-            Id.as_ref()
-        ],
-        bump,
-        has_one = sender @HTLCError::NotSender,
-        has_one = src_receiver @HTLCError::NotReciever,
-        constraint = htlc.claimed == 1 @ HTLCError::AlreadyClaimed,
+        constraint = sender_token_account.owner == signer.key() @ TrainError::WrongToken,
+        constraint = sender_token_account.mint == token_mint.key() @ TrainError::WrongToken,
     )]
-    pub htlc: Box<Account<'info, HTLC>>,
+    pub sender_token_account: Account<'info, TokenAccount>,
 
-    system_program: Program<'info, System>,
-    rent: Sysvar<'info, Rent>,
-}
-
-#[derive(Accounts)]
-#[instruction(Id: [u8; 32])]
-pub struct Refund<'info> {
-    #[account(mut)]
-    user_signing: Signer<'info>,
-
-    #[account(mut,
-    seeds = [
-        Id.as_ref()
-    ],
-    bump,
-    has_one = sender @HTLCError::NotSender,
-    constraint = htlc.claimed == 1 @ HTLCError::AlreadyClaimed,
-    constraint = Clock::get().unwrap().unix_timestamp > htlc.timelock.try_into().unwrap() @ HTLCError::NotPastTimeLock,
-    )]
-    pub htlc: Box<Account<'info, HTLC>>,
-
-    ///CHECK: The sender
-    #[account(mut)]
-    sender: UncheckedAccount<'info>,
-
-    system_program: Program<'info, System>,
-    rent: Sysvar<'info, Rent>,
-}
-
-#[derive(Accounts)]
-#[instruction(Id: [u8; 32])]
-pub struct AddLock<'info> {
-    #[account(mut)]
-    sender: Signer<'info>,
-    #[account(mut,
-    seeds = [
-        Id.as_ref()
-    ],
-    bump,
-    constraint = htlc.claimed == 1 @ HTLCError::AlreadyClaimed,
-    constraint = htlc.sender == sender.key() @ HTLCError::UnauthorizedAccess,
-    constraint = htlc.hashlock == [0u8;32] @ HTLCError::HashlockAlreadySet,
-    )]
-    pub htlc: Box<Account<'info, HTLC>>,
-
-    system_program: Program<'info, System>,
-    rent: Sysvar<'info, Rent>,
-}
-
-#[derive(Accounts)]
-#[instruction(Id: [u8;32])]
-pub struct AddLockSig<'info> {
-    #[account(mut)]
-    payer: Signer<'info>,
-    #[account(mut,
-    seeds = [
-        Id.as_ref()
-    ],
-    bump,
-    constraint = htlc.claimed == 1 @ HTLCError::AlreadyClaimed,
-    constraint = htlc.hashlock == [0u8;32] @ HTLCError::HashlockAlreadySet,
-    )]
-    pub htlc: Box<Account<'info, HTLC>>,
-
-    /// CHECK: The address check is needed because otherwise
-    /// the supplied Sysvar could be anything else.
-    /// The Instruction Sysvar has not been implemented
-    /// in the Anchor framework yet, so this is the safe approach.
-    #[account(address = IX_ID)]
-    pub ix_sysvar: AccountInfo<'info>,
-    system_program: Program<'info, System>,
-    rent: Sysvar<'info, Rent>,
-}
-
-#[derive(Accounts)]
-#[instruction(Id: [u8; 32])]
-pub struct GetDetails<'info> {
     #[account(
-        seeds = [
-            Id.as_ref()
-        ],
+        init,
+        payer = signer,
+        seeds = [b"user_vault", hashlock.as_ref()],
+        bump,
+        token::mint = token_mint,
+        token::authority = user_lock,
+    )]
+    pub vault: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
+// -- SolverLock SOL --
+
+#[derive(Accounts)]
+#[instruction(hashlock: [u8; 32], index: u64)]
+pub struct SolverLockSol<'info> {
+    #[account(mut)]
+    pub signer: Signer<'info>,
+
+    #[account(
+        init_if_needed,
+        payer = signer,
+        space = SOLVER_COUNTER_SPACE,
+        seeds = [b"solver_count", hashlock.as_ref()],
         bump,
     )]
-    pub htlc: Box<Account<'info, HTLC>>,
+    pub counter: Account<'info, SolverLockCounter>,
+
+    #[account(
+        init,
+        payer = signer,
+        space = SOLVER_LOCK_SPACE,
+        seeds = [b"solver_lock", hashlock.as_ref(), &index.to_le_bytes()],
+        bump,
+    )]
+    pub solver_lock: Account<'info, SolverLock>,
+
+    pub system_program: Program<'info, System>,
 }
+
+// -- SolverLock Token (same token for amount + reward) --
+
+#[derive(Accounts)]
+#[instruction(hashlock: [u8; 32], index: u64)]
+pub struct SolverLockToken<'info> {
+    #[account(mut)]
+    pub signer: Signer<'info>,
+
+    #[account(
+        init_if_needed,
+        payer = signer,
+        space = SOLVER_COUNTER_SPACE,
+        seeds = [b"solver_count", hashlock.as_ref()],
+        bump,
+    )]
+    pub counter: Account<'info, SolverLockCounter>,
+
+    #[account(
+        init,
+        payer = signer,
+        space = SOLVER_LOCK_SPACE,
+        seeds = [b"solver_lock", hashlock.as_ref(), &index.to_le_bytes()],
+        bump,
+    )]
+    pub solver_lock: Account<'info, SolverLock>,
+
+    pub token_mint: Account<'info, Mint>,
+
+    #[account(
+        mut,
+        constraint = sender_token_account.owner == signer.key() @ TrainError::WrongToken,
+        constraint = sender_token_account.mint == token_mint.key() @ TrainError::WrongToken,
+    )]
+    pub sender_token_account: Account<'info, TokenAccount>,
+
+    #[account(
+        init,
+        payer = signer,
+        seeds = [b"solver_vault", hashlock.as_ref(), &index.to_le_bytes()],
+        bump,
+        token::mint = token_mint,
+        token::authority = solver_lock,
+    )]
+    pub vault: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
+// -- SolverLock Token with different reward token (two vaults) --
+
+#[derive(Accounts)]
+#[instruction(hashlock: [u8; 32], index: u64)]
+pub struct SolverLockTokenDiffReward<'info> {
+    #[account(mut)]
+    pub signer: Signer<'info>,
+
+    #[account(
+        init_if_needed,
+        payer = signer,
+        space = SOLVER_COUNTER_SPACE,
+        seeds = [b"solver_count", hashlock.as_ref()],
+        bump,
+    )]
+    pub counter: Account<'info, SolverLockCounter>,
+
+    #[account(
+        init,
+        payer = signer,
+        space = SOLVER_LOCK_SPACE,
+        seeds = [b"solver_lock", hashlock.as_ref(), &index.to_le_bytes()],
+        bump,
+    )]
+    pub solver_lock: Account<'info, SolverLock>,
+
+    pub token_mint: Account<'info, Mint>,
+    pub reward_token_mint: Account<'info, Mint>,
+
+    #[account(
+        mut,
+        constraint = sender_token_account.owner == signer.key() @ TrainError::WrongToken,
+        constraint = sender_token_account.mint == token_mint.key() @ TrainError::WrongToken,
+    )]
+    pub sender_token_account: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        constraint = sender_reward_token_account.owner == signer.key() @ TrainError::WrongToken,
+        constraint = sender_reward_token_account.mint == reward_token_mint.key() @ TrainError::WrongToken,
+    )]
+    pub sender_reward_token_account: Account<'info, TokenAccount>,
+
+    #[account(
+        init,
+        payer = signer,
+        seeds = [b"solver_vault", hashlock.as_ref(), &index.to_le_bytes()],
+        bump,
+        token::mint = token_mint,
+        token::authority = solver_lock,
+    )]
+    pub vault: Account<'info, TokenAccount>,
+
+    #[account(
+        init,
+        payer = signer,
+        seeds = [b"solver_reward_vault", hashlock.as_ref(), &index.to_le_bytes()],
+        bump,
+        token::mint = reward_token_mint,
+        token::authority = solver_lock,
+    )]
+    pub reward_vault: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
+// -- RefundUser SOL --
+
+#[derive(Accounts)]
+#[instruction(hashlock: [u8; 32])]
+pub struct RefundUserSol<'info> {
+    pub caller: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"user_lock", hashlock.as_ref()],
+        bump,
+        constraint = user_lock.status == STATUS_PENDING @ TrainError::NotPending,
+    )]
+    pub user_lock: Account<'info, UserLock>,
+
+    /// CHECK: verified via user_lock.sender
+    #[account(
+        mut,
+        constraint = sender.key() == user_lock.sender @ TrainError::WrongToken,
+    )]
+    pub sender: UncheckedAccount<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+// -- RefundUser Token --
+
+#[derive(Accounts)]
+#[instruction(hashlock: [u8; 32])]
+pub struct RefundUserToken<'info> {
+    pub caller: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"user_lock", hashlock.as_ref()],
+        bump,
+        constraint = user_lock.status == STATUS_PENDING @ TrainError::NotPending,
+    )]
+    pub user_lock: Account<'info, UserLock>,
+
+    /// CHECK: verified via user_lock.sender
+    #[account(
+        mut,
+        constraint = sender.key() == user_lock.sender @ TrainError::WrongToken,
+    )]
+    pub sender: UncheckedAccount<'info>,
+
+    pub token_mint: Account<'info, Mint>,
+
+    #[account(
+        mut,
+        seeds = [b"user_vault", hashlock.as_ref()],
+        bump,
+    )]
+    pub vault: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        constraint = sender_token_account.owner == user_lock.sender @ TrainError::WrongToken,
+        constraint = sender_token_account.mint == token_mint.key() @ TrainError::WrongToken,
+    )]
+    pub sender_token_account: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+// -- RefundSolver SOL --
+
+#[derive(Accounts)]
+#[instruction(hashlock: [u8; 32], _index: u64)]
+pub struct RefundSolverSol<'info> {
+    pub caller: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"solver_lock", hashlock.as_ref(), &_index.to_le_bytes()],
+        bump,
+        constraint = solver_lock.status == STATUS_PENDING @ TrainError::NotPending,
+    )]
+    pub solver_lock: Account<'info, SolverLock>,
+
+    /// CHECK: verified via solver_lock.sender
+    #[account(
+        mut,
+        constraint = sender.key() == solver_lock.sender @ TrainError::WrongToken,
+    )]
+    pub sender: UncheckedAccount<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+// -- RefundSolver Token (single vault) --
+
+#[derive(Accounts)]
+#[instruction(hashlock: [u8; 32], index: u64)]
+pub struct RefundSolverToken<'info> {
+    pub caller: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"solver_lock", hashlock.as_ref(), &index.to_le_bytes()],
+        bump,
+        constraint = solver_lock.status == STATUS_PENDING @ TrainError::NotPending,
+    )]
+    pub solver_lock: Account<'info, SolverLock>,
+
+    /// CHECK: verified via solver_lock.sender
+    #[account(
+        mut,
+        constraint = sender.key() == solver_lock.sender @ TrainError::WrongToken,
+    )]
+    pub sender: UncheckedAccount<'info>,
+
+    pub token_mint: Account<'info, Mint>,
+
+    #[account(
+        mut,
+        seeds = [b"solver_vault", hashlock.as_ref(), &index.to_le_bytes()],
+        bump,
+    )]
+    pub vault: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        constraint = sender_token_account.owner == solver_lock.sender @ TrainError::WrongToken,
+        constraint = sender_token_account.mint == token_mint.key() @ TrainError::WrongToken,
+    )]
+    pub sender_token_account: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+// -- RefundSolver Token DiffReward (two vaults) --
+
+#[derive(Accounts)]
+#[instruction(hashlock: [u8; 32], index: u64)]
+pub struct RefundSolverTokenDiffReward<'info> {
+    pub caller: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"solver_lock", hashlock.as_ref(), &index.to_le_bytes()],
+        bump,
+        constraint = solver_lock.status == STATUS_PENDING @ TrainError::NotPending,
+    )]
+    pub solver_lock: Account<'info, SolverLock>,
+
+    /// CHECK: verified via solver_lock.sender
+    #[account(
+        mut,
+        constraint = sender.key() == solver_lock.sender @ TrainError::WrongToken,
+    )]
+    pub sender: UncheckedAccount<'info>,
+
+    pub token_mint: Account<'info, Mint>,
+    pub reward_token_mint: Account<'info, Mint>,
+
+    #[account(
+        mut,
+        seeds = [b"solver_vault", hashlock.as_ref(), &index.to_le_bytes()],
+        bump,
+    )]
+    pub vault: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        seeds = [b"solver_reward_vault", hashlock.as_ref(), &index.to_le_bytes()],
+        bump,
+    )]
+    pub reward_vault: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        constraint = sender_token_account.owner == solver_lock.sender @ TrainError::WrongToken,
+        constraint = sender_token_account.mint == token_mint.key() @ TrainError::WrongToken,
+    )]
+    pub sender_token_account: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        constraint = sender_reward_token_account.owner == solver_lock.sender @ TrainError::WrongToken,
+        constraint = sender_reward_token_account.mint == reward_token_mint.key() @ TrainError::WrongToken,
+    )]
+    pub sender_reward_token_account: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+// -- RedeemUser SOL --
+
+#[derive(Accounts)]
+#[instruction(hashlock: [u8; 32])]
+pub struct RedeemUserSol<'info> {
+    #[account(mut)]
+    pub caller: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"user_lock", hashlock.as_ref()],
+        bump,
+        constraint = user_lock.status == STATUS_PENDING @ TrainError::NotPending,
+    )]
+    pub user_lock: Account<'info, UserLock>,
+
+    /// CHECK: verified via user_lock.recipient
+    #[account(
+        mut,
+        constraint = recipient.key() == user_lock.recipient @ TrainError::WrongToken,
+    )]
+    pub recipient: UncheckedAccount<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+// -- RedeemUser Token --
+
+#[derive(Accounts)]
+#[instruction(hashlock: [u8; 32])]
+pub struct RedeemUserToken<'info> {
+    #[account(mut)]
+    pub caller: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"user_lock", hashlock.as_ref()],
+        bump,
+        constraint = user_lock.status == STATUS_PENDING @ TrainError::NotPending,
+    )]
+    pub user_lock: Account<'info, UserLock>,
+
+    /// CHECK: verified via user_lock.recipient
+    pub recipient: UncheckedAccount<'info>,
+
+    pub token_mint: Account<'info, Mint>,
+
+    #[account(
+        mut,
+        seeds = [b"user_vault", hashlock.as_ref()],
+        bump,
+    )]
+    pub vault: Account<'info, TokenAccount>,
+
+    #[account(
+        init_if_needed,
+        payer = caller,
+        associated_token::mint = token_mint,
+        associated_token::authority = recipient,
+    )]
+    pub recipient_token_account: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
+// -- RedeemSolver SOL --
+
+#[derive(Accounts)]
+#[instruction(hashlock: [u8; 32], index: u64)]
+pub struct RedeemSolverSol<'info> {
+    #[account(mut)]
+    pub caller: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"solver_lock", hashlock.as_ref(), &index.to_le_bytes()],
+        bump,
+        constraint = solver_lock.status == STATUS_PENDING @ TrainError::NotPending,
+    )]
+    pub solver_lock: Account<'info, SolverLock>,
+
+    /// CHECK: verified via solver_lock.recipient
+    #[account(
+        mut,
+        constraint = recipient.key() == solver_lock.recipient @ TrainError::WrongToken,
+    )]
+    pub recipient: UncheckedAccount<'info>,
+
+    /// CHECK: verified via solver_lock.reward_recipient
+    #[account(
+        mut,
+        constraint = reward_recipient.key() == solver_lock.reward_recipient @ TrainError::WrongToken,
+    )]
+    pub reward_recipient: UncheckedAccount<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+// -- RedeemSolver Token (single vault) --
+
+#[derive(Accounts)]
+#[instruction(hashlock: [u8; 32], index: u64)]
+pub struct RedeemSolverToken<'info> {
+    #[account(mut)]
+    pub caller: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"solver_lock", hashlock.as_ref(), &index.to_le_bytes()],
+        bump,
+        constraint = solver_lock.status == STATUS_PENDING @ TrainError::NotPending,
+    )]
+    pub solver_lock: Account<'info, SolverLock>,
+
+    /// CHECK: verified via solver_lock.recipient
+    pub recipient: UncheckedAccount<'info>,
+
+    /// CHECK: verified via solver_lock.reward_recipient
+    pub reward_recipient: UncheckedAccount<'info>,
+
+    pub token_mint: Account<'info, Mint>,
+
+    #[account(
+        mut,
+        seeds = [b"solver_vault", hashlock.as_ref(), &index.to_le_bytes()],
+        bump,
+    )]
+    pub vault: Account<'info, TokenAccount>,
+
+    #[account(
+        init_if_needed,
+        payer = caller,
+        associated_token::mint = token_mint,
+        associated_token::authority = recipient,
+    )]
+    pub recipient_token_account: Account<'info, TokenAccount>,
+
+    #[account(
+        init_if_needed,
+        payer = caller,
+        associated_token::mint = token_mint,
+        associated_token::authority = reward_recipient,
+    )]
+    pub reward_recipient_token_account: Account<'info, TokenAccount>,
+
+    #[account(
+        init_if_needed,
+        payer = caller,
+        associated_token::mint = token_mint,
+        associated_token::authority = caller,
+    )]
+    pub caller_token_account: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
+// -- RedeemSolver Token DiffReward (two vaults) --
+
+#[derive(Accounts)]
+#[instruction(hashlock: [u8; 32], index: u64)]
+pub struct RedeemSolverTokenDiffReward<'info> {
+    #[account(mut)]
+    pub caller: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"solver_lock", hashlock.as_ref(), &index.to_le_bytes()],
+        bump,
+        constraint = solver_lock.status == STATUS_PENDING @ TrainError::NotPending,
+    )]
+    pub solver_lock: Account<'info, SolverLock>,
+
+    /// CHECK: verified via solver_lock.recipient
+    pub recipient: UncheckedAccount<'info>,
+
+    /// CHECK: verified via solver_lock.reward_recipient
+    pub reward_recipient: UncheckedAccount<'info>,
+
+    pub token_mint: Account<'info, Mint>,
+    pub reward_token_mint: Account<'info, Mint>,
+
+    #[account(
+        mut,
+        seeds = [b"solver_vault", hashlock.as_ref(), &index.to_le_bytes()],
+        bump,
+    )]
+    pub vault: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        seeds = [b"solver_reward_vault", hashlock.as_ref(), &index.to_le_bytes()],
+        bump,
+    )]
+    pub reward_vault: Account<'info, TokenAccount>,
+
+    #[account(
+        init_if_needed,
+        payer = caller,
+        associated_token::mint = token_mint,
+        associated_token::authority = recipient,
+    )]
+    pub recipient_token_account: Account<'info, TokenAccount>,
+
+    #[account(
+        init_if_needed,
+        payer = caller,
+        associated_token::mint = reward_token_mint,
+        associated_token::authority = reward_recipient,
+    )]
+    pub reward_recipient_token_account: Account<'info, TokenAccount>,
+
+    #[account(
+        init_if_needed,
+        payer = caller,
+        associated_token::mint = reward_token_mint,
+        associated_token::authority = caller,
+    )]
+    pub caller_reward_token_account: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
+// -- View: GetUserLock --
+
+#[derive(Accounts)]
+#[instruction(_hashlock: [u8; 32])]
+pub struct GetUserLock<'info> {
+    #[account(
+        seeds = [b"user_lock", _hashlock.as_ref()],
+        bump,
+    )]
+    pub user_lock: Account<'info, UserLock>,
+}
+
+// -- View: GetSolverLock --
+
+#[derive(Accounts)]
+#[instruction(_hashlock: [u8; 32], _index: u64)]
+pub struct GetSolverLock<'info> {
+    #[account(
+        seeds = [b"solver_lock", _hashlock.as_ref(), &_index.to_le_bytes()],
+        bump,
+    )]
+    pub solver_lock: Account<'info, SolverLock>,
+}
+
+// -- View: GetSolverLockCount --
+
+#[derive(Accounts)]
+#[instruction(_hashlock: [u8; 32])]
+pub struct GetSolverLockCount<'info> {
+    #[account(
+        seeds = [b"solver_count", _hashlock.as_ref()],
+        bump,
+    )]
+    pub counter: Account<'info, SolverLockCounter>,
+}
+
+// ─── Events ────────────────────────────────────────────────────────────────────
+
+#[event]
+pub struct UserLocked {
+    pub hashlock:              [u8; 32],
+    pub sender:                Pubkey,
+    pub recipient:             Pubkey,
+    pub src_chain:             String,
+    pub token_mint:            Pubkey,
+    pub amount:                u64,
+    pub timelock:              i64,
+    pub quote_expiry:          i64,
+    pub dst_chain:             String,
+    pub dst_address:           String,
+    pub dst_amount:            u64,
+    pub dst_token:             String,
+    pub reward_amount:         u64,
+    pub reward_token:          String,
+    pub reward_recipient:      String,
+    pub reward_timelock_delta: i64,
+    pub user_data:             Vec<u8>,
+    pub solver_data:           Vec<u8>,
+}
+
+#[event]
+pub struct SolverLocked {
+    pub hashlock:          [u8; 32],
+    pub index:             u64,
+    pub sender:            Pubkey,
+    pub recipient:         Pubkey,
+    pub src_chain:         String,
+    pub token_mint:        Pubkey,
+    pub amount:            u64,
+    pub reward:            u64,
+    pub reward_token_mint: Pubkey,
+    pub reward_recipient:  Pubkey,
+    pub timelock:          i64,
+    pub reward_timelock:   i64,
+    pub dst_chain:         String,
+    pub dst_address:       String,
+    pub dst_amount:        u64,
+    pub dst_token:         String,
+    pub data:              Vec<u8>,
+}
+
+#[event]
+pub struct UserRefunded {
+    pub hashlock: [u8; 32],
+}
+
+#[event]
+pub struct SolverRefunded {
+    pub hashlock: [u8; 32],
+    pub index:    u64,
+}
+
+#[event]
+pub struct UserRedeemed {
+    pub hashlock: [u8; 32],
+    pub redeemer: Pubkey,
+    pub secret:   [u8; 32],
+}
+
+#[event]
+pub struct SolverRedeemed {
+    pub hashlock: [u8; 32],
+    pub index:    u64,
+    pub redeemer: Pubkey,
+    pub secret:   [u8; 32],
+}
+
+// ─── Errors ────────────────────────────────────────────────────────────────────
 
 #[error_code]
-pub enum HTLCError {
-    #[msg("Invalid TimeLock.")]
-    InvalidTimeLock,
-    #[msg("Not Past TimeLock.")]
-    NotPastTimeLock,
-    #[msg("Invalid Reward TimeLock.")]
-    InvalidRewardTimeLock,
-    #[msg("Hashlock Is Not Set.")]
-    HashlockNotSet,
-    #[msg("Does Not Match the Hashlock.")]
-    HashlockNoMatch,
-    #[msg("Hashlock Already Set.")]
-    HashlockAlreadySet,
-    #[msg("Funds Are Alredy Claimed.")]
-    AlreadyClaimed,
-    #[msg("Funds Can Not Be Zero.")]
-    FundsNotSent,
-    #[msg("Unauthorized Access.")]
-    UnauthorizedAccess,
-    #[msg("Not The Owner.")]
-    NotOwner,
-    #[msg("Not The Sender.")]
-    NotSender,
-    #[msg("Not The Reciever.")]
-    NotReciever,
-    #[msg("Signature verification failed.")]
-    SigVerificationFailed,
-    #[msg("Reward Already Exists.")]
-    RewardAlreadyExists,
+pub enum TrainError {
+    #[msg("Amount must be greater than zero.")]
+    ZeroAmount,
+    #[msg("Timelock delta must be greater than zero.")]
+    ZeroTimelockDelta,
+    #[msg("Quote has expired.")]
+    QuoteExpired,
+    #[msg("Lock is not in Pending status.")]
+    NotPending,
+    #[msg("Timelock has not expired yet.")]
+    TimelockNotExpired,
+    #[msg("Secret does not match hashlock.")]
+    HashlockMismatch,
+    #[msg("Reward timelock delta must be less than timelock delta.")]
+    RewardTimelockNotLessThanTimelock,
+    #[msg("Invalid index: must equal current count + 1.")]
+    InvalidIndex,
+    #[msg("Wrong token mint provided.")]
+    WrongToken,
+    #[msg("Arithmetic overflow.")]
+    Overflow,
 }
