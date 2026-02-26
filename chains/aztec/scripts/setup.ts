@@ -67,6 +67,10 @@ async function main(): Promise<void> {
   ).send({
     from: AztecAddress.ZERO,
     fee: { paymentMethod: payUser },
+    skipClassPublication: false,
+    skipInstancePublication: false,
+    skipInitialization: false,
+    skipRegistration: false,
     wait: { timeout: 120000 },
   });
   await (
@@ -74,6 +78,10 @@ async function main(): Promise<void> {
   ).send({
     from: AztecAddress.ZERO,
     fee: { paymentMethod: paySolver },
+    skipClassPublication: false,
+    skipInstancePublication: false,
+    skipInitialization: false,
+    skipRegistration: false,
     wait: { timeout: 120000 },
   });
   await (
@@ -81,6 +89,10 @@ async function main(): Promise<void> {
   ).send({
     from: AztecAddress.ZERO,
     fee: { paymentMethod: payDeployer },
+    skipClassPublication: false,
+    skipInstancePublication: false,
+    skipInitialization: false,
+    skipRegistration: false,
     wait: { timeout: 120000 },
   });
 
@@ -103,7 +115,7 @@ async function main(): Promise<void> {
   await walletUser.registerSender(deployerAccount.address, 'faucet');
   await walletSolver.registerSender(deployerAccount.address, 'faucet');
 
-  const amount = 2000000n;
+  const amount = 90000000000n;
   const tokenForUser = TokenContract.at(token.address, walletUser);
   const tokenForSolver = TokenContract.at(token.address, walletSolver);
   const tokenForDeployer = TokenContract.at(token.address, walletDeployer);

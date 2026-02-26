@@ -11,6 +11,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@aztec-artifacts/client": "latest",
     "@aztec/accounts": "4.0.0-devnet.2-patch.0",
     "@aztec/aztec.js": "4.0.0-devnet.2-patch.0",
     "@aztec/noir-contracts.js": "4.0.0-devnet.2-patch.0",

@@ -49,18 +49,31 @@ export async function deploySchnorrAccount(
   const sponsoredPaymentMethod = new SponsoredFeePaymentMethod(
     sponsoredFPC.address,
   );
-  logger.info(
-    'Sponsored fee payment method configured for account deployment',
-  );
+  logger.info('Sponsored fee payment method configured for account deployment');
 
   // Deploy account
   await deployMethod.send({
     from: AztecAddress.ZERO,
     fee: { paymentMethod: sponsoredPaymentMethod },
-    wait: { timeout: 120000 },
+    skipClassPublication: false,
+    skipInstancePublication: false,
+    skipInitialization: false,
+    skipRegistration: false,
+    wait: { timeout: 120000, returnReceipt: true, dontThrowOnRevert: true },
   });
 
-  logger.info(`Account deployment transaction successful!`);
+  const metadata = await activeWallet.getContractMetadata(account.address);
+  console.log(`Deployment transaction for account ${account.address.toString()} completed. Checking deployment status...`);
+  logger.info(
+    `Account deployment metadata: initialized=${metadata.isContractInitialized}, published=${metadata.isContractPublished}`,
+  );
+  if (!metadata.isContractInitialized || !metadata.isContractPublished) {
+    throw new Error(
+      `Account deployment incomplete for ${account.address.toString()} (initialized=${metadata.isContractInitialized}, published=${metadata.isContractPublished}).`,
+    );
+  }
+
+  logger.info(`Account deployment transaction successful and published.`);
 
   return account;
 }

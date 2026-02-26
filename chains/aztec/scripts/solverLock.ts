@@ -4,7 +4,7 @@ dotenv.config();
 import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee';
 import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
-import { TokenContract } from './Token.ts';
+import { TokenContract } from './Token.js';
 import { SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/SponsoredFPC';
 import { TrainContract } from './Train.ts';
 import { setupWallet } from './utils/setupWallet.ts';
