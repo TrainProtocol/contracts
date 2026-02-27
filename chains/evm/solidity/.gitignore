@@ -13,3 +13,4 @@ lib/
 # Environment
 .env
 .env.local
+deployments/

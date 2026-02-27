@@ -1,0 +1,14 @@
+{
+  "name": "train-evm",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Train Protocol EVM contracts – deployment scripts",
+  "scripts": {
+    "deploy:tron:nile": "set FOUNDRY_PROFILE=tron && forge build && node script/deploy-tron.js nile",
+    "deploy:tron:mainnet": "set FOUNDRY_PROFILE=tron && forge build && node script/deploy-tron.js mainnet",
+    "deploy:tron:shasta": "set FOUNDRY_PROFILE=tron && forge build && node script/deploy-tron.js shasta"
+  },
+  "dependencies": {
+    "tronweb": "^5.3.2"
+  }
+}
