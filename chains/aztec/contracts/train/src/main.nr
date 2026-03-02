@@ -8,7 +8,6 @@
 //     @@@      @@@        @@@@       @@@@@  @@@   @@@          @@@
 //       @@@@@  @@@           @@@@@@@@@ @@@  @@@   @@@          @@@
 
-mod types;
 mod lib;
 use aztec::macros::aztec;
 
@@ -16,7 +15,7 @@ use aztec::macros::aztec;
 pub contract Train {
     use std::meta::derive;
 
-    use aztec::macros::{functions::{external, initializer, view}, storage::storage};
+    use aztec::macros::{events::event, functions::{external, initializer, view}, storage::storage};
 
     use aztec::{
         protocol::{address::AztecAddress, traits::{Deserialize, Packable, Serialize}},
@@ -26,9 +25,75 @@ pub contract Train {
     use token::Token;
 
     use crate::lib::hashlock_to_fields;
-    use crate::types::events::{
-        SolverLocked, SolverRedeemed, SolverRefunded, UserLocked, UserRedeemed, UserRefunded,
-    };
+
+    #[event]
+    struct UserLocked {
+        hashlock: [u8; 32],
+        sender: AztecAddress,
+        recipient: AztecAddress,
+        src_chain: [u8; 30],
+        token: AztecAddress,
+        amount: u128,
+        timelock: u64,
+        dst_chain: [u8; 30],
+        dst_address: [u8; 90],
+        dst_amount: u128,
+        dst_token: [u8; 90],
+        reward_amount: u128,
+        reward_token: AztecAddress,
+        reward_recipient: [u8; 90],
+        reward_timelock_delta: u64,
+        quote_expiry: u64,
+        userData: [u8; 256],
+        solverData: [u8; 256],
+    }
+
+    #[event]
+    struct SolverLocked {
+        hashlock: [u8; 32],
+        sender: AztecAddress,
+        recipient: AztecAddress,
+        index: Field,
+        src_chain: [u8; 30],
+        token: AztecAddress,
+        amount: u128,
+        reward: u128,
+        reward_token: AztecAddress,
+        reward_recipient: AztecAddress,
+        timelock: u64,
+        reward_timelock: u64,
+        dst_chain: [u8; 30],
+        dst_address: [u8; 90],
+        dst_amount: u128,
+        dst_token: [u8; 90],
+        data: [u8; 256],
+    }
+
+    #[event]
+    struct UserRedeemed {
+        hashlock: [u8; 32],
+        redeemer: AztecAddress,
+        secret: [u8; 32],
+    }
+
+    #[event]
+    struct SolverRedeemed {
+        hashlock: [u8; 32],
+        index: Field,
+        redeemer: AztecAddress,
+        secret: [u8; 32],
+    }
+
+    #[event]
+    struct UserRefunded {
+        hashlock: [u8; 32],
+    }
+
+    #[event]
+    struct SolverRefunded {
+        hashlock: [u8; 32],
+        index: Field,
+    }
 
     global STATUS_EMPTY: u8 = 0;
     global STATUS_PENDING: u8 = 1;
