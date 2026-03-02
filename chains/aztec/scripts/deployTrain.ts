@@ -29,7 +29,10 @@ async function main() {
   const receipt = await TrainContract.deploy(wallet).send({
     from: address,
     fee: { paymentMethod: sponsoredPaymentMethod },
+    skipClassPublication: false,
+    skipInstancePublication: false,
     skipInitialization: false,
+    skipRegistration: false,
     wait: {
       timeout: timeouts.deployTimeout,
       returnReceipt: true,
