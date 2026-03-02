@@ -13,19 +13,11 @@ use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 use anchor_spl::{
     associated_token::AssociatedToken,
-    token::{self, CloseAccount, Mint, Token, TokenAccount, Transfer},
+    token_interface::{self, CloseAccount, Mint, TokenAccount, TokenInterface, TransferChecked},
 };
 use sha2::{Digest, Sha256};
 
-declare_id!("9VJp7ChvYWG2H4d5QY3JK3R8yt2bi3RdFazxZh68XYwN");
-
-// ─── Space constants ───────────────────────────────────────────────────────────
-// UserLock: 8 disc + 32 + 8 + 32 + 8 + 1 + 32 + 32 = 153
-const USER_LOCK_SPACE: usize = 8 + 32 + 8 + 32 + 8 + 1 + 32 + 32;
-// SolverLock: 8 disc + 32 + 8 + 8 + 32 + 8 + 8 + 32 + 1 + 32 + 32 + 32 = 201
-const SOLVER_LOCK_SPACE: usize = 8 + 32 + 8 + 8 + 32 + 8 + 8 + 32 + 1 + 32 + 32 + 32;
-// SolverLockCounter: 8 disc + 8 = 16
-const SOLVER_COUNTER_SPACE: usize = 8 + 8;
+declare_id!("7ZT5gs8CG7BAv34bLYSke31DJeg5RRUa4G7p9GNcbPE");
 
 // Status constants (mirrors Solidity LockStatus enum)
 const STATUS_PENDING: u8 = 0;
@@ -45,25 +37,28 @@ fn verify_hashlock(secret: &[u8; 32], hashlock: &[u8; 32]) -> Result<()> {
 fn transfer_from_vault<'info>(
     vault: AccountInfo<'info>,
     destination: AccountInfo<'info>,
+    mint: AccountInfo<'info>,
     authority: AccountInfo<'info>,
     token_program: AccountInfo<'info>,
     signer_seeds: &[&[&[u8]]],
     amount: u64,
+    decimals: u8,
 ) -> Result<()> {
     let cpi_ctx = CpiContext::new_with_signer(
         token_program,
-        Transfer {
+        TransferChecked {
             from: vault,
             to: destination,
+            mint,
             authority,
         },
         signer_seeds,
     );
-    token::transfer(cpi_ctx, amount)
+    token_interface::transfer_checked(cpi_ctx, amount, decimals)
 }
 
 fn close_vault_if_empty<'info>(
-    vault: &mut Account<'info, TokenAccount>,
+    vault: &mut InterfaceAccount<'info, TokenAccount>,
     destination: AccountInfo<'info>,
     authority: AccountInfo<'info>,
     token_program: AccountInfo<'info>,
@@ -80,7 +75,7 @@ fn close_vault_if_empty<'info>(
             },
             signer_seeds,
         );
-        token::close_account(cpi_ctx)?;
+        token_interface::close_account(cpi_ctx)?;
     }
     Ok(())
 }
@@ -98,8 +93,8 @@ pub mod train_htlc {
         ctx: Context<UserLockSol>,
         hashlock: [u8; 32],
         amount: u64,
-        timelock_delta: i64,
-        quote_expiry: i64,
+        timelock_delta: u64,
+        quote_expiry: u64,
         sender: Pubkey,
         recipient: Pubkey,
         src_chain: String,
@@ -110,11 +105,11 @@ pub mod train_htlc {
         reward_amount: u64,
         reward_token: String,
         reward_recipient: String,
-        reward_timelock_delta: i64,
+        reward_timelock_delta: u64,
         user_data: Vec<u8>,
         solver_data: Vec<u8>,
     ) -> Result<()> {
-        let now = Clock::get()?.unix_timestamp;
+        let now = Clock::get()?.unix_timestamp as u64;
         require!(amount > 0, TrainError::ZeroAmount);
         require!(timelock_delta > 0, TrainError::ZeroTimelockDelta);
         require!(now < quote_expiry, TrainError::QuoteExpired);
@@ -148,7 +143,6 @@ pub mod train_htlc {
             token_mint: Pubkey::default(),
             amount,
             timelock,
-            quote_expiry,
             dst_chain,
             dst_address,
             dst_amount,
@@ -157,6 +151,7 @@ pub mod train_htlc {
             reward_token,
             reward_recipient,
             reward_timelock_delta,
+            quote_expiry,
             user_data,
             solver_data,
         });
@@ -170,8 +165,8 @@ pub mod train_htlc {
         ctx: Context<UserLockToken>,
         hashlock: [u8; 32],
         amount: u64,
-        timelock_delta: i64,
-        quote_expiry: i64,
+        timelock_delta: u64,
+        quote_expiry: u64,
         sender: Pubkey,
         recipient: Pubkey,
         src_chain: String,
@@ -182,11 +177,11 @@ pub mod train_htlc {
         reward_amount: u64,
         reward_token: String,
         reward_recipient: String,
-        reward_timelock_delta: i64,
+        reward_timelock_delta: u64,
         user_data: Vec<u8>,
         solver_data: Vec<u8>,
     ) -> Result<()> {
-        let now = Clock::get()?.unix_timestamp;
+        let now = Clock::get()?.unix_timestamp as u64;
         require!(amount > 0, TrainError::ZeroAmount);
         require!(timelock_delta > 0, TrainError::ZeroTimelockDelta);
         require!(now < quote_expiry, TrainError::QuoteExpired);
@@ -197,13 +192,14 @@ pub mod train_htlc {
         // Transfer tokens from sender into vault
         let cpi_ctx = CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
-            Transfer {
+            TransferChecked {
                 from: ctx.accounts.sender_token_account.to_account_info(),
                 to: ctx.accounts.vault.to_account_info(),
+                mint: ctx.accounts.token_mint.to_account_info(),
                 authority: ctx.accounts.signer.to_account_info(),
             },
         );
-        token::transfer(cpi_ctx, amount)?;
+        token_interface::transfer_checked(cpi_ctx, amount, ctx.accounts.token_mint.decimals)?;
 
         let lock = &mut ctx.accounts.user_lock;
         lock.secret = [0u8; 32];
@@ -222,7 +218,6 @@ pub mod train_htlc {
             token_mint: token_mint_key,
             amount,
             timelock,
-            quote_expiry,
             dst_chain,
             dst_address,
             dst_amount,
@@ -231,6 +226,7 @@ pub mod train_htlc {
             reward_token,
             reward_recipient,
             reward_timelock_delta,
+            quote_expiry,
             user_data,
             solver_data,
         });
@@ -246,8 +242,8 @@ pub mod train_htlc {
         index: u64,
         amount: u64,
         reward: u64,
-        timelock_delta: i64,
-        reward_timelock_delta: i64,
+        timelock_delta: u64,
+        reward_timelock_delta: u64,
         sender: Pubkey,
         recipient: Pubkey,
         reward_recipient: Pubkey,
@@ -258,7 +254,7 @@ pub mod train_htlc {
         dst_token: String,
         data: Vec<u8>,
     ) -> Result<()> {
-        let now = Clock::get()?.unix_timestamp;
+        let now = Clock::get()?.unix_timestamp as u64;
         require!(amount > 0, TrainError::ZeroAmount);
         require!(timelock_delta > 0, TrainError::ZeroTimelockDelta);
         if reward > 0 {
@@ -303,9 +299,9 @@ pub mod train_htlc {
 
         emit!(SolverLocked {
             hashlock,
-            index,
             sender,
             recipient,
+            index,
             src_chain,
             token_mint: Pubkey::default(),
             amount,
@@ -332,8 +328,8 @@ pub mod train_htlc {
         index: u64,
         amount: u64,
         reward: u64,
-        timelock_delta: i64,
-        reward_timelock_delta: i64,
+        timelock_delta: u64,
+        reward_timelock_delta: u64,
         sender: Pubkey,
         recipient: Pubkey,
         reward_recipient: Pubkey,
@@ -344,7 +340,7 @@ pub mod train_htlc {
         dst_token: String,
         data: Vec<u8>,
     ) -> Result<()> {
-        let now = Clock::get()?.unix_timestamp;
+        let now = Clock::get()?.unix_timestamp as u64;
         require!(amount > 0, TrainError::ZeroAmount);
         require!(timelock_delta > 0, TrainError::ZeroTimelockDelta);
         if reward > 0 {
@@ -366,13 +362,14 @@ pub mod train_htlc {
         // Transfer amount + reward tokens into vault
         let cpi_ctx = CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
-            Transfer {
+            TransferChecked {
                 from: ctx.accounts.sender_token_account.to_account_info(),
                 to: ctx.accounts.vault.to_account_info(),
+                mint: ctx.accounts.token_mint.to_account_info(),
                 authority: ctx.accounts.signer.to_account_info(),
             },
         );
-        token::transfer(cpi_ctx, total)?;
+        token_interface::transfer_checked(cpi_ctx, total, ctx.accounts.token_mint.decimals)?;
 
         let lock = &mut ctx.accounts.solver_lock;
         lock.secret = [0u8; 32];
@@ -391,9 +388,9 @@ pub mod train_htlc {
 
         emit!(SolverLocked {
             hashlock,
-            index,
             sender,
             recipient,
+            index,
             src_chain,
             token_mint: token_mint_key,
             amount,
@@ -420,8 +417,8 @@ pub mod train_htlc {
         index: u64,
         amount: u64,
         reward: u64,
-        timelock_delta: i64,
-        reward_timelock_delta: i64,
+        timelock_delta: u64,
+        reward_timelock_delta: u64,
         sender: Pubkey,
         recipient: Pubkey,
         reward_recipient: Pubkey,
@@ -432,7 +429,7 @@ pub mod train_htlc {
         dst_token: String,
         data: Vec<u8>,
     ) -> Result<()> {
-        let now = Clock::get()?.unix_timestamp;
+        let now = Clock::get()?.unix_timestamp as u64;
         require!(amount > 0, TrainError::ZeroAmount);
         require!(timelock_delta > 0, TrainError::ZeroTimelockDelta);
         if reward > 0 {
@@ -458,25 +455,27 @@ pub mod train_htlc {
         // Transfer amount tokens into vault
         let cpi_ctx = CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
-            Transfer {
+            TransferChecked {
                 from: ctx.accounts.sender_token_account.to_account_info(),
                 to: ctx.accounts.vault.to_account_info(),
+                mint: ctx.accounts.token_mint.to_account_info(),
                 authority: ctx.accounts.signer.to_account_info(),
             },
         );
-        token::transfer(cpi_ctx, amount)?;
+        token_interface::transfer_checked(cpi_ctx, amount, ctx.accounts.token_mint.decimals)?;
 
         // Transfer reward tokens into reward_vault
         if reward > 0 {
             let cpi_ctx2 = CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
-                Transfer {
+                TransferChecked {
                     from: ctx.accounts.sender_reward_token_account.to_account_info(),
                     to: ctx.accounts.reward_vault.to_account_info(),
+                    mint: ctx.accounts.reward_token_mint.to_account_info(),
                     authority: ctx.accounts.signer.to_account_info(),
                 },
             );
-            token::transfer(cpi_ctx2, reward)?;
+            token_interface::transfer_checked(cpi_ctx2, reward, ctx.accounts.reward_token_mint.decimals)?;
         }
 
         let lock = &mut ctx.accounts.solver_lock;
@@ -496,9 +495,9 @@ pub mod train_htlc {
 
         emit!(SolverLocked {
             hashlock,
-            index,
             sender,
             recipient,
+            index,
             src_chain,
             token_mint: token_mint_key,
             amount,
@@ -519,10 +518,8 @@ pub mod train_htlc {
     // ── RefundUser: native SOL ─────────────────────────────────────────────────
 
     pub fn refund_user_sol(ctx: Context<RefundUserSol>, hashlock: [u8; 32]) -> Result<()> {
-        let now = Clock::get()?.unix_timestamp;
+        let now = Clock::get()?.unix_timestamp as u64;
         let lock = &mut ctx.accounts.user_lock;
-
-        require!(lock.status == STATUS_PENDING, TrainError::NotPending);
 
         let is_recipient = ctx.accounts.caller.key() == lock.recipient;
         if !is_recipient {
@@ -542,10 +539,8 @@ pub mod train_htlc {
     // ── RefundUser: SPL token ──────────────────────────────────────────────────
 
     pub fn refund_user_token(ctx: Context<RefundUserToken>, hashlock: [u8; 32]) -> Result<()> {
-        let now = Clock::get()?.unix_timestamp;
+        let now = Clock::get()?.unix_timestamp as u64;
         let lock = &mut ctx.accounts.user_lock;
-
-        require!(lock.status == STATUS_PENDING, TrainError::NotPending);
 
         let is_recipient = ctx.accounts.caller.key() == lock.recipient;
         if !is_recipient {
@@ -560,10 +555,12 @@ pub mod train_htlc {
         transfer_from_vault(
             ctx.accounts.vault.to_account_info(),
             ctx.accounts.sender_token_account.to_account_info(),
+            ctx.accounts.token_mint.to_account_info(),
             ctx.accounts.user_lock.to_account_info(),
             ctx.accounts.token_program.to_account_info(),
             signer_seeds,
             amount,
+            ctx.accounts.token_mint.decimals,
         )?;
 
         close_vault_if_empty(
@@ -585,10 +582,9 @@ pub mod train_htlc {
         hashlock: [u8; 32],
         _index: u64,
     ) -> Result<()> {
-        let now = Clock::get()?.unix_timestamp;
+        let now = Clock::get()?.unix_timestamp as u64;
         let lock = &mut ctx.accounts.solver_lock;
 
-        require!(lock.status == STATUS_PENDING, TrainError::NotPending);
         require!(now >= lock.timelock, TrainError::TimelockNotExpired);
 
         lock.status = STATUS_REFUNDED;
@@ -608,10 +604,9 @@ pub mod train_htlc {
         hashlock: [u8; 32],
         index: u64,
     ) -> Result<()> {
-        let now = Clock::get()?.unix_timestamp;
+        let now = Clock::get()?.unix_timestamp as u64;
         let lock = &mut ctx.accounts.solver_lock;
 
-        require!(lock.status == STATUS_PENDING, TrainError::NotPending);
         require!(now >= lock.timelock, TrainError::TimelockNotExpired);
 
         lock.status = STATUS_REFUNDED;
@@ -624,10 +619,12 @@ pub mod train_htlc {
         transfer_from_vault(
             ctx.accounts.vault.to_account_info(),
             ctx.accounts.sender_token_account.to_account_info(),
+            ctx.accounts.token_mint.to_account_info(),
             ctx.accounts.solver_lock.to_account_info(),
             ctx.accounts.token_program.to_account_info(),
             signer_seeds,
             total,
+            ctx.accounts.token_mint.decimals,
         )?;
 
         close_vault_if_empty(
@@ -649,10 +646,9 @@ pub mod train_htlc {
         hashlock: [u8; 32],
         index: u64,
     ) -> Result<()> {
-        let now = Clock::get()?.unix_timestamp;
+        let now = Clock::get()?.unix_timestamp as u64;
         let lock = &mut ctx.accounts.solver_lock;
 
-        require!(lock.status == STATUS_PENDING, TrainError::NotPending);
         require!(now >= lock.timelock, TrainError::TimelockNotExpired);
 
         lock.status = STATUS_REFUNDED;
@@ -667,10 +663,12 @@ pub mod train_htlc {
         transfer_from_vault(
             ctx.accounts.vault.to_account_info(),
             ctx.accounts.sender_token_account.to_account_info(),
+            ctx.accounts.token_mint.to_account_info(),
             ctx.accounts.solver_lock.to_account_info(),
             ctx.accounts.token_program.to_account_info(),
             signer_seeds,
             amount,
+            ctx.accounts.token_mint.decimals,
         )?;
         close_vault_if_empty(
             &mut ctx.accounts.vault,
@@ -685,10 +683,12 @@ pub mod train_htlc {
             transfer_from_vault(
                 ctx.accounts.reward_vault.to_account_info(),
                 ctx.accounts.sender_reward_token_account.to_account_info(),
+                ctx.accounts.reward_token_mint.to_account_info(),
                 ctx.accounts.solver_lock.to_account_info(),
                 ctx.accounts.token_program.to_account_info(),
                 signer_seeds,
                 reward,
+                ctx.accounts.reward_token_mint.decimals,
             )?;
             close_vault_if_empty(
                 &mut ctx.accounts.reward_vault,
@@ -713,7 +713,6 @@ pub mod train_htlc {
         verify_hashlock(&secret, &hashlock)?;
 
         let lock = &mut ctx.accounts.user_lock;
-        require!(lock.status == STATUS_PENDING, TrainError::NotPending);
 
         lock.status = STATUS_REDEEMED;
         lock.secret = secret;
@@ -740,7 +739,6 @@ pub mod train_htlc {
         verify_hashlock(&secret, &hashlock)?;
 
         let lock = &mut ctx.accounts.user_lock;
-        require!(lock.status == STATUS_PENDING, TrainError::NotPending);
 
         lock.status = STATUS_REDEEMED;
         lock.secret = secret;
@@ -751,10 +749,12 @@ pub mod train_htlc {
         transfer_from_vault(
             ctx.accounts.vault.to_account_info(),
             ctx.accounts.recipient_token_account.to_account_info(),
+            ctx.accounts.token_mint.to_account_info(),
             ctx.accounts.user_lock.to_account_info(),
             ctx.accounts.token_program.to_account_info(),
             signer_seeds,
             amount,
+            ctx.accounts.token_mint.decimals,
         )?;
 
         close_vault_if_empty(
@@ -783,9 +783,8 @@ pub mod train_htlc {
     ) -> Result<()> {
         verify_hashlock(&secret, &hashlock)?;
 
-        let now = Clock::get()?.unix_timestamp;
+        let now = Clock::get()?.unix_timestamp as u64;
         let lock = &mut ctx.accounts.solver_lock;
-        require!(lock.status == STATUS_PENDING, TrainError::NotPending);
 
         lock.status = STATUS_REDEEMED;
         lock.secret = secret;
@@ -826,9 +825,8 @@ pub mod train_htlc {
     ) -> Result<()> {
         verify_hashlock(&secret, &hashlock)?;
 
-        let now = Clock::get()?.unix_timestamp;
+        let now = Clock::get()?.unix_timestamp as u64;
         let lock = &mut ctx.accounts.solver_lock;
-        require!(lock.status == STATUS_PENDING, TrainError::NotPending);
 
         lock.status = STATUS_REDEEMED;
         lock.secret = secret;
@@ -844,10 +842,12 @@ pub mod train_htlc {
         transfer_from_vault(
             ctx.accounts.vault.to_account_info(),
             ctx.accounts.recipient_token_account.to_account_info(),
+            ctx.accounts.token_mint.to_account_info(),
             ctx.accounts.solver_lock.to_account_info(),
             ctx.accounts.token_program.to_account_info(),
             signer_seeds,
             amount,
+            ctx.accounts.token_mint.decimals,
         )?;
 
         // Reward routing
@@ -856,19 +856,23 @@ pub mod train_htlc {
                 transfer_from_vault(
                     ctx.accounts.vault.to_account_info(),
                     ctx.accounts.reward_recipient_token_account.to_account_info(),
+                    ctx.accounts.token_mint.to_account_info(),
                     ctx.accounts.solver_lock.to_account_info(),
                     ctx.accounts.token_program.to_account_info(),
                     signer_seeds,
                     reward,
+                    ctx.accounts.token_mint.decimals,
                 )?;
             } else {
                 transfer_from_vault(
                     ctx.accounts.vault.to_account_info(),
                     ctx.accounts.caller_token_account.to_account_info(),
+                    ctx.accounts.token_mint.to_account_info(),
                     ctx.accounts.solver_lock.to_account_info(),
                     ctx.accounts.token_program.to_account_info(),
                     signer_seeds,
                     reward,
+                    ctx.accounts.token_mint.decimals,
                 )?;
             }
         }
@@ -900,9 +904,8 @@ pub mod train_htlc {
     ) -> Result<()> {
         verify_hashlock(&secret, &hashlock)?;
 
-        let now = Clock::get()?.unix_timestamp;
+        let now = Clock::get()?.unix_timestamp as u64;
         let lock = &mut ctx.accounts.solver_lock;
-        require!(lock.status == STATUS_PENDING, TrainError::NotPending);
 
         lock.status = STATUS_REDEEMED;
         lock.secret = secret;
@@ -918,10 +921,12 @@ pub mod train_htlc {
         transfer_from_vault(
             ctx.accounts.vault.to_account_info(),
             ctx.accounts.recipient_token_account.to_account_info(),
+            ctx.accounts.token_mint.to_account_info(),
             ctx.accounts.solver_lock.to_account_info(),
             ctx.accounts.token_program.to_account_info(),
             signer_seeds,
             amount,
+            ctx.accounts.token_mint.decimals,
         )?;
         close_vault_if_empty(
             &mut ctx.accounts.vault,
@@ -937,19 +942,23 @@ pub mod train_htlc {
                 transfer_from_vault(
                     ctx.accounts.reward_vault.to_account_info(),
                     ctx.accounts.reward_recipient_token_account.to_account_info(),
+                    ctx.accounts.reward_token_mint.to_account_info(),
                     ctx.accounts.solver_lock.to_account_info(),
                     ctx.accounts.token_program.to_account_info(),
                     signer_seeds,
                     reward,
+                    ctx.accounts.reward_token_mint.decimals,
                 )?;
             } else {
                 transfer_from_vault(
                     ctx.accounts.reward_vault.to_account_info(),
                     ctx.accounts.caller_reward_token_account.to_account_info(),
+                    ctx.accounts.reward_token_mint.to_account_info(),
                     ctx.accounts.solver_lock.to_account_info(),
                     ctx.accounts.token_program.to_account_info(),
                     signer_seeds,
                     reward,
+                    ctx.accounts.reward_token_mint.decimals,
                 )?;
             }
             close_vault_if_empty(
@@ -967,6 +976,24 @@ pub mod train_htlc {
             redeemer: ctx.accounts.caller.key(),
             secret,
         });
+        Ok(())
+    }
+
+    // ── Close: reclaim rent from terminal UserLock ────────────────────────────
+
+    pub fn close_user_lock(_ctx: Context<CloseUserLock>, _hashlock: [u8; 32]) -> Result<()> {
+        // Account is closed via the `close = caller` constraint
+        Ok(())
+    }
+
+    // ── Close: reclaim rent from terminal SolverLock ────────────────────────
+
+    pub fn close_solver_lock(
+        _ctx: Context<CloseSolverLock>,
+        _hashlock: [u8; 32],
+        _index: u64,
+    ) -> Result<()> {
+        // Account is closed via the `close = caller` constraint
         Ok(())
     }
 
@@ -1021,26 +1048,26 @@ pub mod train_htlc {
 // ─── Account structs ───────────────────────────────────────────────────────────
 
 #[account]
-#[derive(Default)]
+#[derive(Default, InitSpace)]
 pub struct UserLock {
     pub secret:     [u8; 32],
     pub amount:     u64,
     pub sender:     Pubkey,
-    pub timelock:   i64,
+    pub timelock:   u64,
     pub status:     u8,
     pub recipient:  Pubkey,
     pub token_mint: Pubkey,
 }
 
 #[account]
-#[derive(Default)]
+#[derive(Default, InitSpace)]
 pub struct SolverLock {
     pub secret:            [u8; 32],
     pub amount:            u64,
     pub reward:            u64,
     pub sender:            Pubkey,
-    pub timelock:          i64,
-    pub reward_timelock:   i64,
+    pub timelock:          u64,
+    pub reward_timelock:   u64,
     pub recipient:         Pubkey,
     pub status:            u8,
     pub reward_recipient:  Pubkey,
@@ -1049,7 +1076,7 @@ pub struct SolverLock {
 }
 
 #[account]
-#[derive(Default)]
+#[derive(Default, InitSpace)]
 pub struct SolverLockCounter {
     pub count: u64,
 }
@@ -1061,7 +1088,7 @@ pub struct UserLockData {
     pub secret:     [u8; 32],
     pub amount:     u64,
     pub sender:     Pubkey,
-    pub timelock:   i64,
+    pub timelock:   u64,
     pub status:     u8,
     pub recipient:  Pubkey,
     pub token_mint: Pubkey,
@@ -1073,8 +1100,8 @@ pub struct SolverLockData {
     pub amount:            u64,
     pub reward:            u64,
     pub sender:            Pubkey,
-    pub timelock:          i64,
-    pub reward_timelock:   i64,
+    pub timelock:          u64,
+    pub reward_timelock:   u64,
     pub recipient:         Pubkey,
     pub status:            u8,
     pub reward_recipient:  Pubkey,
@@ -1095,7 +1122,7 @@ pub struct UserLockSol<'info> {
     #[account(
         init,
         payer = signer,
-        space = USER_LOCK_SPACE,
+        space = 8 + UserLock::INIT_SPACE,
         seeds = [b"user_lock", hashlock.as_ref()],
         bump,
     )]
@@ -1115,20 +1142,20 @@ pub struct UserLockToken<'info> {
     #[account(
         init,
         payer = signer,
-        space = USER_LOCK_SPACE,
+        space = 8 + UserLock::INIT_SPACE,
         seeds = [b"user_lock", hashlock.as_ref()],
         bump,
     )]
     pub user_lock: Account<'info, UserLock>,
 
-    pub token_mint: Account<'info, Mint>,
+    pub token_mint: InterfaceAccount<'info, Mint>,
 
     #[account(
         mut,
         constraint = sender_token_account.owner == signer.key() @ TrainError::WrongToken,
         constraint = sender_token_account.mint == token_mint.key() @ TrainError::WrongToken,
     )]
-    pub sender_token_account: Account<'info, TokenAccount>,
+    pub sender_token_account: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
         init,
@@ -1137,10 +1164,11 @@ pub struct UserLockToken<'info> {
         bump,
         token::mint = token_mint,
         token::authority = user_lock,
+        token::token_program = token_program,
     )]
-    pub vault: Account<'info, TokenAccount>,
+    pub vault: InterfaceAccount<'info, TokenAccount>,
 
-    pub token_program: Program<'info, Token>,
+    pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
 }
@@ -1156,7 +1184,7 @@ pub struct SolverLockSol<'info> {
     #[account(
         init_if_needed,
         payer = signer,
-        space = SOLVER_COUNTER_SPACE,
+        space = 8 + SolverLockCounter::INIT_SPACE,
         seeds = [b"solver_count", hashlock.as_ref()],
         bump,
     )]
@@ -1165,7 +1193,7 @@ pub struct SolverLockSol<'info> {
     #[account(
         init,
         payer = signer,
-        space = SOLVER_LOCK_SPACE,
+        space = 8 + SolverLock::INIT_SPACE,
         seeds = [b"solver_lock", hashlock.as_ref(), &index.to_le_bytes()],
         bump,
     )]
@@ -1185,7 +1213,7 @@ pub struct SolverLockToken<'info> {
     #[account(
         init_if_needed,
         payer = signer,
-        space = SOLVER_COUNTER_SPACE,
+        space = 8 + SolverLockCounter::INIT_SPACE,
         seeds = [b"solver_count", hashlock.as_ref()],
         bump,
     )]
@@ -1194,20 +1222,20 @@ pub struct SolverLockToken<'info> {
     #[account(
         init,
         payer = signer,
-        space = SOLVER_LOCK_SPACE,
+        space = 8 + SolverLock::INIT_SPACE,
         seeds = [b"solver_lock", hashlock.as_ref(), &index.to_le_bytes()],
         bump,
     )]
     pub solver_lock: Account<'info, SolverLock>,
 
-    pub token_mint: Account<'info, Mint>,
+    pub token_mint: InterfaceAccount<'info, Mint>,
 
     #[account(
         mut,
         constraint = sender_token_account.owner == signer.key() @ TrainError::WrongToken,
         constraint = sender_token_account.mint == token_mint.key() @ TrainError::WrongToken,
     )]
-    pub sender_token_account: Account<'info, TokenAccount>,
+    pub sender_token_account: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
         init,
@@ -1216,10 +1244,11 @@ pub struct SolverLockToken<'info> {
         bump,
         token::mint = token_mint,
         token::authority = solver_lock,
+        token::token_program = token_program,
     )]
-    pub vault: Account<'info, TokenAccount>,
+    pub vault: InterfaceAccount<'info, TokenAccount>,
 
-    pub token_program: Program<'info, Token>,
+    pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
 }
@@ -1235,7 +1264,7 @@ pub struct SolverLockTokenDiffReward<'info> {
     #[account(
         init_if_needed,
         payer = signer,
-        space = SOLVER_COUNTER_SPACE,
+        space = 8 + SolverLockCounter::INIT_SPACE,
         seeds = [b"solver_count", hashlock.as_ref()],
         bump,
     )]
@@ -1244,28 +1273,28 @@ pub struct SolverLockTokenDiffReward<'info> {
     #[account(
         init,
         payer = signer,
-        space = SOLVER_LOCK_SPACE,
+        space = 8 + SolverLock::INIT_SPACE,
         seeds = [b"solver_lock", hashlock.as_ref(), &index.to_le_bytes()],
         bump,
     )]
-    pub solver_lock: Account<'info, SolverLock>,
+    pub solver_lock: Box<Account<'info, SolverLock>>,
 
-    pub token_mint: Account<'info, Mint>,
-    pub reward_token_mint: Account<'info, Mint>,
+    pub token_mint: InterfaceAccount<'info, Mint>,
+    pub reward_token_mint: InterfaceAccount<'info, Mint>,
 
     #[account(
         mut,
         constraint = sender_token_account.owner == signer.key() @ TrainError::WrongToken,
         constraint = sender_token_account.mint == token_mint.key() @ TrainError::WrongToken,
     )]
-    pub sender_token_account: Account<'info, TokenAccount>,
+    pub sender_token_account: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
         mut,
         constraint = sender_reward_token_account.owner == signer.key() @ TrainError::WrongToken,
         constraint = sender_reward_token_account.mint == reward_token_mint.key() @ TrainError::WrongToken,
     )]
-    pub sender_reward_token_account: Account<'info, TokenAccount>,
+    pub sender_reward_token_account: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
         init,
@@ -1274,8 +1303,9 @@ pub struct SolverLockTokenDiffReward<'info> {
         bump,
         token::mint = token_mint,
         token::authority = solver_lock,
+        token::token_program = token_program,
     )]
-    pub vault: Account<'info, TokenAccount>,
+    pub vault: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
         init,
@@ -1284,10 +1314,11 @@ pub struct SolverLockTokenDiffReward<'info> {
         bump,
         token::mint = reward_token_mint,
         token::authority = solver_lock,
+        token::token_program = token_program,
     )]
-    pub reward_vault: Account<'info, TokenAccount>,
+    pub reward_vault: InterfaceAccount<'info, TokenAccount>,
 
-    pub token_program: Program<'info, Token>,
+    pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
 }
@@ -1310,7 +1341,7 @@ pub struct RefundUserSol<'info> {
     /// CHECK: verified via user_lock.sender
     #[account(
         mut,
-        constraint = sender.key() == user_lock.sender @ TrainError::WrongToken,
+        constraint = sender.key() == user_lock.sender @ TrainError::WrongSender,
     )]
     pub sender: UncheckedAccount<'info>,
 
@@ -1322,6 +1353,7 @@ pub struct RefundUserSol<'info> {
 #[derive(Accounts)]
 #[instruction(hashlock: [u8; 32])]
 pub struct RefundUserToken<'info> {
+    #[account(mut)]
     pub caller: Signer<'info>,
 
     #[account(
@@ -1335,28 +1367,35 @@ pub struct RefundUserToken<'info> {
     /// CHECK: verified via user_lock.sender
     #[account(
         mut,
-        constraint = sender.key() == user_lock.sender @ TrainError::WrongToken,
+        constraint = sender.key() == user_lock.sender @ TrainError::WrongSender,
     )]
     pub sender: UncheckedAccount<'info>,
 
-    pub token_mint: Account<'info, Mint>,
+    #[account(
+        constraint = token_mint.key() == user_lock.token_mint @ TrainError::WrongToken,
+    )]
+    pub token_mint: InterfaceAccount<'info, Mint>,
 
     #[account(
         mut,
         seeds = [b"user_vault", hashlock.as_ref()],
         bump,
     )]
-    pub vault: Account<'info, TokenAccount>,
+    pub vault: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
-        mut,
-        constraint = sender_token_account.owner == user_lock.sender @ TrainError::WrongToken,
-        constraint = sender_token_account.mint == token_mint.key() @ TrainError::WrongToken,
+        init_if_needed,
+        payer = caller,
+        associated_token::mint = token_mint,
+        associated_token::authority = sender,
+        associated_token::token_program = token_program,
     )]
-    pub sender_token_account: Account<'info, TokenAccount>,
+    pub sender_token_account: InterfaceAccount<'info, TokenAccount>,
 
-    pub token_program: Program<'info, Token>,
+    pub token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
 }
 
 // -- RefundSolver SOL --
@@ -1377,7 +1416,7 @@ pub struct RefundSolverSol<'info> {
     /// CHECK: verified via solver_lock.sender
     #[account(
         mut,
-        constraint = sender.key() == solver_lock.sender @ TrainError::WrongToken,
+        constraint = sender.key() == solver_lock.sender @ TrainError::WrongSender,
     )]
     pub sender: UncheckedAccount<'info>,
 
@@ -1389,6 +1428,7 @@ pub struct RefundSolverSol<'info> {
 #[derive(Accounts)]
 #[instruction(hashlock: [u8; 32], index: u64)]
 pub struct RefundSolverToken<'info> {
+    #[account(mut)]
     pub caller: Signer<'info>,
 
     #[account(
@@ -1402,28 +1442,35 @@ pub struct RefundSolverToken<'info> {
     /// CHECK: verified via solver_lock.sender
     #[account(
         mut,
-        constraint = sender.key() == solver_lock.sender @ TrainError::WrongToken,
+        constraint = sender.key() == solver_lock.sender @ TrainError::WrongSender,
     )]
     pub sender: UncheckedAccount<'info>,
 
-    pub token_mint: Account<'info, Mint>,
+    #[account(
+        constraint = token_mint.key() == solver_lock.token_mint @ TrainError::WrongToken,
+    )]
+    pub token_mint: InterfaceAccount<'info, Mint>,
 
     #[account(
         mut,
         seeds = [b"solver_vault", hashlock.as_ref(), &index.to_le_bytes()],
         bump,
     )]
-    pub vault: Account<'info, TokenAccount>,
+    pub vault: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
-        mut,
-        constraint = sender_token_account.owner == solver_lock.sender @ TrainError::WrongToken,
-        constraint = sender_token_account.mint == token_mint.key() @ TrainError::WrongToken,
+        init_if_needed,
+        payer = caller,
+        associated_token::mint = token_mint,
+        associated_token::authority = sender,
+        associated_token::token_program = token_program,
     )]
-    pub sender_token_account: Account<'info, TokenAccount>,
+    pub sender_token_account: InterfaceAccount<'info, TokenAccount>,
 
-    pub token_program: Program<'info, Token>,
+    pub token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
 }
 
 // -- RefundSolver Token DiffReward (two vaults) --
@@ -1431,6 +1478,7 @@ pub struct RefundSolverToken<'info> {
 #[derive(Accounts)]
 #[instruction(hashlock: [u8; 32], index: u64)]
 pub struct RefundSolverTokenDiffReward<'info> {
+    #[account(mut)]
     pub caller: Signer<'info>,
 
     #[account(
@@ -1444,43 +1492,56 @@ pub struct RefundSolverTokenDiffReward<'info> {
     /// CHECK: verified via solver_lock.sender
     #[account(
         mut,
-        constraint = sender.key() == solver_lock.sender @ TrainError::WrongToken,
+        constraint = sender.key() == solver_lock.sender @ TrainError::WrongSender,
     )]
     pub sender: UncheckedAccount<'info>,
 
-    pub token_mint: Account<'info, Mint>,
-    pub reward_token_mint: Account<'info, Mint>,
+    #[account(
+        constraint = token_mint.key() == solver_lock.token_mint @ TrainError::WrongToken,
+    )]
+    pub token_mint: InterfaceAccount<'info, Mint>,
+
+    #[account(
+        constraint = reward_token_mint.key() == solver_lock.reward_token_mint @ TrainError::WrongToken,
+    )]
+    pub reward_token_mint: InterfaceAccount<'info, Mint>,
 
     #[account(
         mut,
         seeds = [b"solver_vault", hashlock.as_ref(), &index.to_le_bytes()],
         bump,
     )]
-    pub vault: Account<'info, TokenAccount>,
+    pub vault: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
         mut,
         seeds = [b"solver_reward_vault", hashlock.as_ref(), &index.to_le_bytes()],
         bump,
     )]
-    pub reward_vault: Account<'info, TokenAccount>,
+    pub reward_vault: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
-        mut,
-        constraint = sender_token_account.owner == solver_lock.sender @ TrainError::WrongToken,
-        constraint = sender_token_account.mint == token_mint.key() @ TrainError::WrongToken,
+        init_if_needed,
+        payer = caller,
+        associated_token::mint = token_mint,
+        associated_token::authority = sender,
+        associated_token::token_program = token_program,
     )]
-    pub sender_token_account: Account<'info, TokenAccount>,
+    pub sender_token_account: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
-        mut,
-        constraint = sender_reward_token_account.owner == solver_lock.sender @ TrainError::WrongToken,
-        constraint = sender_reward_token_account.mint == reward_token_mint.key() @ TrainError::WrongToken,
+        init_if_needed,
+        payer = caller,
+        associated_token::mint = reward_token_mint,
+        associated_token::authority = sender,
+        associated_token::token_program = token_program,
     )]
-    pub sender_reward_token_account: Account<'info, TokenAccount>,
+    pub sender_reward_token_account: InterfaceAccount<'info, TokenAccount>,
 
-    pub token_program: Program<'info, Token>,
+    pub token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
 }
 
 // -- RedeemUser SOL --
@@ -1502,7 +1563,7 @@ pub struct RedeemUserSol<'info> {
     /// CHECK: verified via user_lock.recipient
     #[account(
         mut,
-        constraint = recipient.key() == user_lock.recipient @ TrainError::WrongToken,
+        constraint = recipient.key() == user_lock.recipient @ TrainError::WrongRecipient,
     )]
     pub recipient: UncheckedAccount<'info>,
 
@@ -1526,26 +1587,33 @@ pub struct RedeemUserToken<'info> {
     pub user_lock: Account<'info, UserLock>,
 
     /// CHECK: verified via user_lock.recipient
+    #[account(
+        constraint = recipient.key() == user_lock.recipient @ TrainError::WrongRecipient,
+    )]
     pub recipient: UncheckedAccount<'info>,
 
-    pub token_mint: Account<'info, Mint>,
+    #[account(
+        constraint = token_mint.key() == user_lock.token_mint @ TrainError::WrongToken,
+    )]
+    pub token_mint: InterfaceAccount<'info, Mint>,
 
     #[account(
         mut,
         seeds = [b"user_vault", hashlock.as_ref()],
         bump,
     )]
-    pub vault: Account<'info, TokenAccount>,
+    pub vault: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
         init_if_needed,
         payer = caller,
         associated_token::mint = token_mint,
         associated_token::authority = recipient,
+        associated_token::token_program = token_program,
     )]
-    pub recipient_token_account: Account<'info, TokenAccount>,
+    pub recipient_token_account: InterfaceAccount<'info, TokenAccount>,
 
-    pub token_program: Program<'info, Token>,
+    pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
@@ -1570,14 +1638,14 @@ pub struct RedeemSolverSol<'info> {
     /// CHECK: verified via solver_lock.recipient
     #[account(
         mut,
-        constraint = recipient.key() == solver_lock.recipient @ TrainError::WrongToken,
+        constraint = recipient.key() == solver_lock.recipient @ TrainError::WrongRecipient,
     )]
     pub recipient: UncheckedAccount<'info>,
 
     /// CHECK: verified via solver_lock.reward_recipient
     #[account(
         mut,
-        constraint = reward_recipient.key() == solver_lock.reward_recipient @ TrainError::WrongToken,
+        constraint = reward_recipient.key() == solver_lock.reward_recipient @ TrainError::WrongRecipient,
     )]
     pub reward_recipient: UncheckedAccount<'info>,
 
@@ -1601,45 +1669,57 @@ pub struct RedeemSolverToken<'info> {
     pub solver_lock: Account<'info, SolverLock>,
 
     /// CHECK: verified via solver_lock.recipient
+    #[account(
+        constraint = recipient.key() == solver_lock.recipient @ TrainError::WrongRecipient,
+    )]
     pub recipient: UncheckedAccount<'info>,
 
     /// CHECK: verified via solver_lock.reward_recipient
+    #[account(
+        constraint = reward_recipient.key() == solver_lock.reward_recipient @ TrainError::WrongRecipient,
+    )]
     pub reward_recipient: UncheckedAccount<'info>,
 
-    pub token_mint: Account<'info, Mint>,
+    #[account(
+        constraint = token_mint.key() == solver_lock.token_mint @ TrainError::WrongToken,
+    )]
+    pub token_mint: InterfaceAccount<'info, Mint>,
 
     #[account(
         mut,
         seeds = [b"solver_vault", hashlock.as_ref(), &index.to_le_bytes()],
         bump,
     )]
-    pub vault: Account<'info, TokenAccount>,
+    pub vault: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
         init_if_needed,
         payer = caller,
         associated_token::mint = token_mint,
         associated_token::authority = recipient,
+        associated_token::token_program = token_program,
     )]
-    pub recipient_token_account: Account<'info, TokenAccount>,
+    pub recipient_token_account: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
         init_if_needed,
         payer = caller,
         associated_token::mint = token_mint,
         associated_token::authority = reward_recipient,
+        associated_token::token_program = token_program,
     )]
-    pub reward_recipient_token_account: Account<'info, TokenAccount>,
+    pub reward_recipient_token_account: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
         init_if_needed,
         payer = caller,
         associated_token::mint = token_mint,
         associated_token::authority = caller,
+        associated_token::token_program = token_program,
     )]
-    pub caller_token_account: Account<'info, TokenAccount>,
+    pub caller_token_account: InterfaceAccount<'info, TokenAccount>,
 
-    pub token_program: Program<'info, Token>,
+    pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
@@ -1662,56 +1742,108 @@ pub struct RedeemSolverTokenDiffReward<'info> {
     pub solver_lock: Account<'info, SolverLock>,
 
     /// CHECK: verified via solver_lock.recipient
+    #[account(
+        constraint = recipient.key() == solver_lock.recipient @ TrainError::WrongRecipient,
+    )]
     pub recipient: UncheckedAccount<'info>,
 
     /// CHECK: verified via solver_lock.reward_recipient
+    #[account(
+        constraint = reward_recipient.key() == solver_lock.reward_recipient @ TrainError::WrongRecipient,
+    )]
     pub reward_recipient: UncheckedAccount<'info>,
 
-    pub token_mint: Account<'info, Mint>,
-    pub reward_token_mint: Account<'info, Mint>,
+    #[account(
+        constraint = token_mint.key() == solver_lock.token_mint @ TrainError::WrongToken,
+    )]
+    pub token_mint: InterfaceAccount<'info, Mint>,
+
+    #[account(
+        constraint = reward_token_mint.key() == solver_lock.reward_token_mint @ TrainError::WrongToken,
+    )]
+    pub reward_token_mint: InterfaceAccount<'info, Mint>,
 
     #[account(
         mut,
         seeds = [b"solver_vault", hashlock.as_ref(), &index.to_le_bytes()],
         bump,
     )]
-    pub vault: Account<'info, TokenAccount>,
+    pub vault: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
         mut,
         seeds = [b"solver_reward_vault", hashlock.as_ref(), &index.to_le_bytes()],
         bump,
     )]
-    pub reward_vault: Account<'info, TokenAccount>,
+    pub reward_vault: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
         init_if_needed,
         payer = caller,
         associated_token::mint = token_mint,
         associated_token::authority = recipient,
+        associated_token::token_program = token_program,
     )]
-    pub recipient_token_account: Account<'info, TokenAccount>,
+    pub recipient_token_account: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
         init_if_needed,
         payer = caller,
         associated_token::mint = reward_token_mint,
         associated_token::authority = reward_recipient,
+        associated_token::token_program = token_program,
     )]
-    pub reward_recipient_token_account: Account<'info, TokenAccount>,
+    pub reward_recipient_token_account: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
         init_if_needed,
         payer = caller,
         associated_token::mint = reward_token_mint,
         associated_token::authority = caller,
+        associated_token::token_program = token_program,
     )]
-    pub caller_reward_token_account: Account<'info, TokenAccount>,
+    pub caller_reward_token_account: InterfaceAccount<'info, TokenAccount>,
 
-    pub token_program: Program<'info, Token>,
+    pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
+}
+
+// -- Close UserLock --
+
+#[derive(Accounts)]
+#[instruction(_hashlock: [u8; 32])]
+pub struct CloseUserLock<'info> {
+    #[account(mut)]
+    pub caller: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"user_lock", _hashlock.as_ref()],
+        bump,
+        constraint = user_lock.status != STATUS_PENDING @ TrainError::StillPending,
+        close = caller,
+    )]
+    pub user_lock: Account<'info, UserLock>,
+}
+
+// -- Close SolverLock --
+
+#[derive(Accounts)]
+#[instruction(_hashlock: [u8; 32], _index: u64)]
+pub struct CloseSolverLock<'info> {
+    #[account(mut)]
+    pub caller: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"solver_lock", _hashlock.as_ref(), &_index.to_le_bytes()],
+        bump,
+        constraint = solver_lock.status != STATUS_PENDING @ TrainError::StillPending,
+        close = caller,
+    )]
+    pub solver_lock: Account<'info, SolverLock>,
 }
 
 // -- View: GetUserLock --
@@ -1760,8 +1892,7 @@ pub struct UserLocked {
     pub src_chain:             String,
     pub token_mint:            Pubkey,
     pub amount:                u64,
-    pub timelock:              i64,
-    pub quote_expiry:          i64,
+    pub timelock:              u64,
     pub dst_chain:             String,
     pub dst_address:           String,
     pub dst_amount:            u64,
@@ -1769,7 +1900,8 @@ pub struct UserLocked {
     pub reward_amount:         u64,
     pub reward_token:          String,
     pub reward_recipient:      String,
-    pub reward_timelock_delta: i64,
+    pub reward_timelock_delta: u64,
+    pub quote_expiry:          u64,
     pub user_data:             Vec<u8>,
     pub solver_data:           Vec<u8>,
 }
@@ -1777,17 +1909,17 @@ pub struct UserLocked {
 #[event]
 pub struct SolverLocked {
     pub hashlock:          [u8; 32],
-    pub index:             u64,
     pub sender:            Pubkey,
     pub recipient:         Pubkey,
+    pub index:             u64,
     pub src_chain:         String,
     pub token_mint:        Pubkey,
     pub amount:            u64,
     pub reward:            u64,
     pub reward_token_mint: Pubkey,
     pub reward_recipient:  Pubkey,
-    pub timelock:          i64,
-    pub reward_timelock:   i64,
+    pub timelock:          u64,
+    pub reward_timelock:   u64,
     pub dst_chain:         String,
     pub dst_address:       String,
     pub dst_amount:        u64,
@@ -1843,6 +1975,12 @@ pub enum TrainError {
     InvalidIndex,
     #[msg("Wrong token mint provided.")]
     WrongToken,
+    #[msg("Wrong sender address.")]
+    WrongSender,
+    #[msg("Wrong recipient address.")]
+    WrongRecipient,
+    #[msg("Lock is still pending.")]
+    StillPending,
     #[msg("Arithmetic overflow.")]
     Overflow,
 }

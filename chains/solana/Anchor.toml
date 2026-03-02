@@ -1,0 +1,16 @@
+[toolchain]
+anchor_version = "0.32.1"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.devnet]
+train_htlc = "7ZT5gs8CG7BAv34bLYSke31DJeg5RRUa4G7p9GNcbPE"
+
+[programs.localnet]
+train_htlc = "7ZT5gs8CG7BAv34bLYSke31DJeg5RRUa4G7p9GNcbPE"
+
+[provider]
+cluster = "devnet"
+wallet = "~/.config/solana/id.json"
