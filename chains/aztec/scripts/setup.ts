@@ -6,7 +6,7 @@ import { createAztecNodeClient } from '@aztec/aztec.js/node';
 import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee';
 import { EmbeddedWallet } from '@aztec/wallets/embedded';
-import { TokenContract } from './Token.js';
+import { TokenContract } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js';
 import { SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/SponsoredFPC';
 import { updateEnvFile } from './utils/utils.ts';
 import { getAztecNodeUrl, getEnv } from './utils/config.ts';
@@ -115,7 +115,7 @@ async function main(): Promise<void> {
   await walletUser.registerSender(deployerAccount.address, 'faucet');
   await walletSolver.registerSender(deployerAccount.address, 'faucet');
 
-  const amount = 90000000000n;
+  const amount = 100000000000n;
   const tokenForUser = TokenContract.at(token.address, walletUser);
   const tokenForSolver = TokenContract.at(token.address, walletSolver);
   const tokenForDeployer = TokenContract.at(token.address, walletDeployer);

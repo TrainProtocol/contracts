@@ -6,7 +6,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "tx-status": "tsx getTxStatus.ts",
-    "user-transfer-public": "tsx userTransferPublic.ts"
+    "user-transfer-public": "tsx userTransferPublic.ts",
+    "verify-train-aztecscan": "tsx verifyTrainAztecScan.ts"
   },
   "keywords": [],
   "author": "",
@@ -14,10 +15,12 @@
   "description": "",
   "dependencies": {
     "@aztec-artifacts/client": "latest",
-    "@aztec/accounts": "4.0.0-devnet.2-patch.0",
-    "@aztec/aztec.js": "4.0.0-devnet.2-patch.0",
-    "@aztec/noir-contracts.js": "4.0.0-devnet.2-patch.0",
-    "@aztec/wallets": "4.0.0-devnet.2-patch.0",
+    "@aztec/accounts": "4.0.0-devnet.2-patch.1",
+    "@aztec/aztec.js": "4.0.0-devnet.2-patch.1",
+    "@aztec/noir-contracts.js": "4.0.0-devnet.2-patch.1",
+    "@aztec/wallets": "4.0.0-devnet.2-patch.1",
+    "@defi-wonderland/aztec-standards": "4.0.0-devnet.2-patch.1",
+    "aztec-scan-sdk": "github:aztec-scan/aztec-scan-sdk",
     "dotenv": "^16.5.0"
   },
   "devDependencies": {
