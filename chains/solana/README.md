@@ -115,11 +115,23 @@ npm install
 anchor build
 ```
 
+## Testing
+
+Run the full automated test suite against a local validator:
+
+```bash
+anchor test
+```
+
+This builds the program, starts a local validator, deploys the program, and runs all tests. No manual setup required.
+
 ## Scripts
 
 All scripts are in `scripts/` and run via `npx ts-node`. They use your Solana CLI wallet (`~/.config/solana/id.json`) and connect to devnet by default.
 
-### Testing Preparation
+### Manual Devnet Testing
+
+#### Preparation
 
 You need two wallet addresses for testing. Use your own wallet as one and generate a second:
 
