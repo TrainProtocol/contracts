@@ -38,7 +38,7 @@ dst_address: (bigint | number)[]
 dst_amount: (bigint | number)
 dst_token: (bigint | number)[]
 reward_amount: (bigint | number)
-reward_token: AztecAddressLike
+reward_token: (bigint | number)[]
 reward_recipient: (bigint | number)[]
 reward_timelock_delta: (bigint | number)
 quote_expiry: (bigint | number)
@@ -212,8 +212,8 @@ solver_lock_count: {
     /** sync_state() */
     sync_state: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** user_lock(hashlock: array, amount: integer, transfer_nonce: field, reward_amount: integer, timelock_delta: integer, reward_timelock_delta: integer, quote_expiry: integer, sender: struct, recipient: struct, token: struct, reward_token: struct, reward_recipient: array, src_chain: array, dst_chain: array, dst_address: array, dst_amount: integer, dst_token: array, user_data: array, solver_data: array) */
-    user_lock: ((hashlock: (bigint | number)[], amount: (bigint | number), transfer_nonce: FieldLike, reward_amount: (bigint | number), timelock_delta: (bigint | number), reward_timelock_delta: (bigint | number), quote_expiry: (bigint | number), sender: AztecAddressLike, recipient: AztecAddressLike, token: AztecAddressLike, reward_token: AztecAddressLike, reward_recipient: (bigint | number)[], src_chain: (bigint | number)[], dst_chain: (bigint | number)[], dst_address: (bigint | number)[], dst_amount: (bigint | number), dst_token: (bigint | number)[], user_data: (bigint | number)[], solver_data: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** user_lock(hashlock: array, amount: integer, transfer_nonce: field, reward_amount: integer, timelock_delta: integer, reward_timelock_delta: integer, quote_expiry: integer, sender: struct, recipient: struct, token: struct, reward_token: array, reward_recipient: array, src_chain: array, dst_chain: array, dst_address: array, dst_amount: integer, dst_token: array, user_data: array, solver_data: array) */
+    user_lock: ((hashlock: (bigint | number)[], amount: (bigint | number), transfer_nonce: FieldLike, reward_amount: (bigint | number), timelock_delta: (bigint | number), reward_timelock_delta: (bigint | number), quote_expiry: (bigint | number), sender: AztecAddressLike, recipient: AztecAddressLike, token: AztecAddressLike, reward_token: (bigint | number)[], reward_recipient: (bigint | number)[], src_chain: (bigint | number)[], dst_chain: (bigint | number)[], dst_address: (bigint | number)[], dst_amount: (bigint | number), dst_token: (bigint | number)[], user_data: (bigint | number)[], solver_data: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
   };
 
   
@@ -434,16 +434,13 @@ UserLocked: {
         {
             "name": "reward_token",
             "type": {
-                "kind": "struct",
-                "fields": [
-                    {
-                        "name": "inner",
-                        "type": {
-                            "kind": "field"
-                        }
-                    }
-                ],
-                "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
+                "kind": "array",
+                "length": 90,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
             }
         },
         {
@@ -501,7 +498,7 @@ UserLocked: {
     ],
     "path": "Train::UserLocked"
 },
-        eventSelector: EventSelector.fromString("0xe9d9ac73"),
+        eventSelector: EventSelector.fromString("0x93b4b4cc"),
         fieldNames: ["hashlock","sender","recipient","src_chain","token","amount","timelock","dst_chain","dst_address","dst_amount","dst_token","reward_amount","reward_token","reward_recipient","reward_timelock_delta","quote_expiry","userData","solverData"],
       },
 SolverRefunded: {

@@ -38,11 +38,7 @@ async function main(): Promise<void> {
   const dstChain = stringToBytes(requireEnv('DST_CHAIN'), 30);
   const dstAddress = stringToBytes(requireEnv('DST_ADDRESS'), 90);
   const dstToken = stringToBytes(requireEnv('DST_TOKEN'), 90);
-  const rewardTokenRaw = requireEnv('REWARD_TOKEN_ADDRESS');
-  const rewardToken =
-    rewardTokenRaw === '0x0'
-      ? AztecAddress.ZERO
-      : AztecAddress.fromString(rewardTokenRaw);
+  const rewardToken = stringToBytes(requireEnv('REWARD_TOKEN_ADDRESS'), 90);
   const rewardRecipient = stringToBytes(requireEnv('REWARD_RECIPIENT'), 90);
   const solverData = new Array(256).fill(0);
   const userData = new Array(256).fill(0);
