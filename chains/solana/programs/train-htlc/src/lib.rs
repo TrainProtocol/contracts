@@ -17,7 +17,7 @@ use anchor_spl::{
 };
 use sha2::{Digest, Sha256};
 
-declare_id!("7ZT5gs8CG7BAv34bLYSke31DJeg5RRUa4G7p9GNcbPE");
+declare_id!("7CWoH7g5BaNswYTnd3pxjvJ5PZaBScHa5CpnVeL8wW4a");
 
 // Status constants (mirrors Solidity LockStatus enum)
 const STATUS_PENDING: u8 = 0;
