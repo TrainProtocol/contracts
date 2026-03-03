@@ -9,7 +9,9 @@
     "mint-again:devnet": "AZTEC_ENV=devnet tsx mintAgain.ts",
     "tx-status": "tsx getTxStatus.ts",
     "user-transfer-public": "tsx userTransferPublic.ts",
-    "verify-train-aztecscan": "tsx verifyTrainAztecScan.ts"
+    "verify-train-aztecscan": "tsx verifyTrainAztecScan.ts",
+    "parse-events": "tsx parseEvents.ts",
+    "parse-events:devnet": "AZTEC_ENV=devnet tsx parseEvents.ts"
   },
   "keywords": [],
   "author": "",

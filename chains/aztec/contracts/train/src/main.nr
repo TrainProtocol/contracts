@@ -185,7 +185,7 @@ pub contract Train {
             transfer_nonce,
         ));
 
-        self.context.emit_public_log(
+        self.emit(
             UserLocked {
                 hashlock,
                 sender,
@@ -295,7 +295,7 @@ pub contract Train {
             ));
         }
 
-        self.context.emit_public_log(
+        self.emit(
             SolverLocked {
                 hashlock,
                 sender,
@@ -349,7 +349,7 @@ pub contract Train {
         ));
 
         let redeemer = self.msg_sender();
-        self.context.emit_public_log(UserRedeemed { hashlock, redeemer, secret });
+        self.emit(UserRedeemed { hashlock, redeemer, secret });
     }
 
     #[external("public")]
@@ -416,7 +416,7 @@ pub contract Train {
             }
         }
 
-        self.context.emit_public_log(SolverRedeemed { hashlock, index, redeemer, secret });
+        self.emit(SolverRedeemed { hashlock, index, redeemer, secret });
     }
 
     #[external("public")]
@@ -451,7 +451,7 @@ pub contract Train {
             0,
         ));
 
-        self.context.emit_public_log(UserRefunded { hashlock });
+        self.emit(UserRefunded { hashlock });
     }
 
     #[external("public")]
@@ -506,7 +506,7 @@ pub contract Train {
             }
         }
 
-        self.context.emit_public_log(SolverRefunded { hashlock, index });
+        self.emit(SolverRefunded { hashlock, index });
     }
 
     // ============ View Functions ============
