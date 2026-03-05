@@ -1,1 +1,5 @@
 /target
+/.snfoundry_cache
+/.agents
+/.claude
+skills-lock.json
