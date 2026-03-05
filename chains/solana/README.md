@@ -2,7 +2,7 @@
 
 A unified Solana program for Hash Time-Locked Contracts (HTLC) enabling cross-chain atomic swaps. Supports native SOL and SPL tokens (including Token-2022), with optional different reward tokens for solver locks.
 
-**Program ID (devnet):** `7ZT5gs8CG7BAv34bLYSke31DJeg5RRUa4G7p9GNcbPE`
+**Program ID (devnet):** `6zasug6x5AY93zNVjPZPGoqQfdTBd3C1w6CU9NDKtNH8`
 
 ## Architecture
 
@@ -37,8 +37,9 @@ If the swap doesn't complete, both parties can refund after their respective tim
 ### Status Flow
 
 ```
-PENDING (0) --> REDEEMED (2)   (secret revealed)
-PENDING (0) --> REFUNDED (1)   (timelock expired)
+EMPTY (0)   --> PENDING (1)    (lock created)
+PENDING (1) --> REDEEMED (3)   (secret revealed)
+PENDING (1) --> REFUNDED (2)   (timelock expired)
 ```
 
 ## Instructions

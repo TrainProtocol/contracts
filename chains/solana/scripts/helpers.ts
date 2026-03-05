@@ -9,9 +9,7 @@ import * as path from "path";
 const idlPath = path.join(__dirname, "..", "target", "idl", "train_htlc.json");
 const idl = JSON.parse(fs.readFileSync(idlPath, "utf-8")) as Idl;
 
-export const PROGRAM_ID = new PublicKey(
-  "7CWoH7g5BaNswYTnd3pxjvJ5PZaBScHa5CpnVeL8wW4a"
-);
+export const PROGRAM_ID = new PublicKey('6zasug6x5AY93zNVjPZPGoqQfdTBd3C1w6CU9NDKtNH8');
 
 export function loadWallet(): Keypair {
   const walletPath =

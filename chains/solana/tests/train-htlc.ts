@@ -122,9 +122,10 @@ function deriveSolverCount(
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const STATUS_PENDING = 0;
-const STATUS_REFUNDED = 1;
-const STATUS_REDEEMED = 2;
+const STATUS_EMPTY = 0;
+const STATUS_PENDING = 1;
+const STATUS_REFUNDED = 2;
+const STATUS_REDEEMED = 3;
 
 // Common instruction fields for user_lock_sol / user_lock_token
 function userLockBaseArgs(

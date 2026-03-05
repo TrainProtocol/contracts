@@ -17,12 +17,13 @@ use anchor_spl::{
 };
 use sha2::{Digest, Sha256};
 
-declare_id!("7CWoH7g5BaNswYTnd3pxjvJ5PZaBScHa5CpnVeL8wW4a");
+declare_id!("6zasug6x5AY93zNVjPZPGoqQfdTBd3C1w6CU9NDKtNH8");
 
 // Status constants (mirrors Solidity LockStatus enum)
-const STATUS_PENDING: u8 = 0;
-const STATUS_REFUNDED: u8 = 1;
-const STATUS_REDEEMED: u8 = 2;
+const STATUS_EMPTY: u8 = 0;
+const STATUS_PENDING: u8 = 1;
+const STATUS_REFUNDED: u8 = 2;
+const STATUS_REDEEMED: u8 = 3;
 
 // ─── Helper functions ──────────────────────────────────────────────────────────
 

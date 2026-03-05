@@ -13,7 +13,7 @@ async function main() {
 
   const lock = await fetchUserLock(program, userLockPDA);
 
-  const STATUS = ["PENDING", "REFUNDED", "REDEEMED"];
+  const STATUS = ["EMPTY", "PENDING", "REFUNDED", "REDEEMED"];
   const tokenMint = (lock.tokenMint as any) as PublicKey;
   const isSOL = tokenMint.equals(PublicKey.default);
 
