@@ -494,14 +494,15 @@ describe("train-htlc", () => {
         .accounts({
           caller: signer.publicKey,
           userLock: userLockPda,
+          sender: signer.publicKey,
           recipient: recipient.publicKey,
           systemProgram: SystemProgram.programId,
         } as any)
         .rpc();
 
-      const lock = await (program.account as any).userLock.fetch(userLockPda);
-      expect(lock.status).to.equal(STATUS_REDEEMED);
-      expect(lock.secret).to.deep.equal(secret);
+      // Account should be auto-closed after redeem
+      const info = await provider.connection.getAccountInfo(userLockPda);
+      expect(info).to.be.null;
 
       const recipientBalAfter = await provider.connection.getBalance(
         recipient.publicKey
@@ -540,6 +541,7 @@ describe("train-htlc", () => {
           .accounts({
             caller: signer.publicKey,
             userLock: userLockPda,
+            sender: signer.publicKey,
             recipient: recipient.publicKey,
             systemProgram: SystemProgram.programId,
           } as any)
@@ -597,6 +599,7 @@ describe("train-htlc", () => {
         .accounts({
           caller: signer.publicKey,
           userLock: userLockPda,
+          sender: signer.publicKey,
           recipient: recipient.publicKey,
           tokenMint: mintA,
           vault: vaultPda,
@@ -608,8 +611,9 @@ describe("train-htlc", () => {
         } as any)
         .rpc();
 
-      const lock = await (program.account as any).userLock.fetch(userLockPda);
-      expect(lock.status).to.equal(STATUS_REDEEMED);
+      // Account should be auto-closed after redeem
+      const info = await provider.connection.getAccountInfo(userLockPda);
+      expect(info).to.be.null;
 
       const recipientTokenAcc = await getAccount(
         provider.connection,
@@ -648,7 +652,7 @@ describe("train-htlc", () => {
         } as any)
         .rpc();
 
-      await sleep(2000);
+      await sleep(3000);
 
       const senderBalBefore = await provider.connection.getBalance(
         signer.publicKey
@@ -664,8 +668,9 @@ describe("train-htlc", () => {
         } as any)
         .rpc();
 
-      const lock = await (program.account as any).userLock.fetch(userLockPda);
-      expect(lock.status).to.equal(STATUS_REFUNDED);
+      // Account should be auto-closed after refund
+      const info = await provider.connection.getAccountInfo(userLockPda);
+      expect(info).to.be.null;
     });
 
     it("recipient can refund anytime", async () => {
@@ -704,8 +709,9 @@ describe("train-htlc", () => {
         .signers([recipient])
         .rpc();
 
-      const lock = await (program.account as any).userLock.fetch(userLockPda);
-      expect(lock.status).to.equal(STATUS_REFUNDED);
+      // Account should be auto-closed after refund
+      const info = await provider.connection.getAccountInfo(userLockPda);
+      expect(info).to.be.null;
     });
 
     it("fails before timelock for non-recipient", async () => {
@@ -793,7 +799,7 @@ describe("train-htlc", () => {
         } as any)
         .rpc();
 
-      await sleep(2000);
+      await sleep(3000);
 
       // Use init_if_needed ATA for sender
       const senderAtaA = getAssociatedTokenAddressSync(
@@ -817,8 +823,9 @@ describe("train-htlc", () => {
         } as any)
         .rpc();
 
-      const lock = await (program.account as any).userLock.fetch(userLockPda);
-      expect(lock.status).to.equal(STATUS_REFUNDED);
+      // Account should be auto-closed after refund
+      const info = await provider.connection.getAccountInfo(userLockPda);
+      expect(info).to.be.null;
     });
   });
 
@@ -1247,7 +1254,7 @@ describe("train-htlc", () => {
         } as any)
         .rpc();
 
-      await sleep(2000);
+      await sleep(3000);
 
       // Use a third-party caller to verify reward goes to caller, not reward_recipient
       const thirdParty = Keypair.generate();
@@ -1356,6 +1363,7 @@ describe("train-htlc", () => {
           recipientTokenAccount: recipientAtaA,
           rewardRecipientTokenAccount: rewardRecipientAtaA,
           callerTokenAccount: callerAtaA,
+          sender: signer.publicKey,
           tokenProgram: TOKEN_PROGRAM_ID,
           associatedTokenProgram: anchor.utils.token.ASSOCIATED_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
@@ -1449,6 +1457,7 @@ describe("train-htlc", () => {
           recipientTokenAccount: recipientAtaA,
           rewardRecipientTokenAccount: rewardRecipientAtaB,
           callerRewardTokenAccount: callerAtaB,
+          sender: signer.publicKey,
           tokenProgram: TOKEN_PROGRAM_ID,
           associatedTokenProgram: anchor.utils.token.ASSOCIATED_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
@@ -1499,7 +1508,7 @@ describe("train-htlc", () => {
         } as any)
         .rpc();
 
-      await sleep(2000);
+      await sleep(3000);
 
       await program.methods
         .refundSolverSol(hashlock, new BN(1))
@@ -1565,7 +1574,7 @@ describe("train-htlc", () => {
         } as any)
         .rpc();
 
-      await sleep(2000);
+      await sleep(3000);
 
       await program.methods
         .refundSolverToken(hashlock, new BN(1))
@@ -1649,7 +1658,7 @@ describe("train-htlc", () => {
         } as any)
         .rpc();
 
-      await sleep(2000);
+      await sleep(3000);
 
       await program.methods
         .refundSolverTokenDiffReward(hashlock, new BN(1))
@@ -1681,58 +1690,8 @@ describe("train-htlc", () => {
   // Close
   // ═══════════════════════════════════════════════════════════════════════════
 
-  describe("Close", () => {
-    it("closes redeemed user lock", async () => {
-      const { secret, hashlock } = generateHashlock();
-      const [userLockPda] = deriveUserLock(programId, hashlock);
-      const amount = 5_000_000;
-
-      // Lock
-      await program.methods
-        .userLockSol(
-          ...Object.values(
-            userLockBaseArgs(
-              hashlock,
-              amount,
-              300,
-              signer.publicKey,
-              recipient.publicKey
-            )
-          ) as any
-        )
-        .accounts({
-          signer: signer.publicKey,
-          userLock: userLockPda,
-          systemProgram: SystemProgram.programId,
-        } as any)
-        .rpc();
-
-      // Redeem
-      await program.methods
-        .redeemUserSol(hashlock, secret)
-        .accounts({
-          caller: signer.publicKey,
-          userLock: userLockPda,
-          recipient: recipient.publicKey,
-          systemProgram: SystemProgram.programId,
-        } as any)
-        .rpc();
-
-      // Close
-      await program.methods
-        .closeUserLock(hashlock)
-        .accounts({
-          caller: signer.publicKey,
-          userLock: userLockPda,
-        } as any)
-        .rpc();
-
-      // Account should no longer exist
-      const info = await provider.connection.getAccountInfo(userLockPda);
-      expect(info).to.be.null;
-    });
-
-    it("closes refunded solver lock", async () => {
+  describe("Close Solver Lock", () => {
+    it("solver closes refunded solver lock", async () => {
       const { hashlock } = generateHashlock();
       const [counterPda] = deriveSolverCount(programId, hashlock);
       const [solverLockPda] = deriveSolverLock(programId, hashlock, 1);
@@ -1762,7 +1721,7 @@ describe("train-htlc", () => {
         } as any)
         .rpc();
 
-      await sleep(2000);
+      await sleep(3000);
 
       // Refund
       await program.methods
@@ -1775,7 +1734,7 @@ describe("train-htlc", () => {
         } as any)
         .rpc();
 
-      // Close
+      // Close — solver (sender) calls close
       await program.methods
         .closeSolverLock(hashlock, new BN(1))
         .accounts({
@@ -1788,35 +1747,101 @@ describe("train-htlc", () => {
       expect(info).to.be.null;
     });
 
-    it("fails to close pending lock", async () => {
+    it("fails to close solver lock as non-solver", async () => {
       const { hashlock } = generateHashlock();
-      const [userLockPda] = deriveUserLock(programId, hashlock);
+      const [counterPda] = deriveSolverCount(programId, hashlock);
+      const [solverLockPda] = deriveSolverLock(programId, hashlock, 1);
 
+      // Lock with 1s timelock
       await program.methods
-        .userLockSol(
+        .solverLockSol(
           ...Object.values(
-            userLockBaseArgs(
+            solverLockBaseArgs(
               hashlock,
+              1,
               5_000_000,
-              300,
+              0,
+              1,
+              0,
               signer.publicKey,
-              recipient.publicKey
+              recipient.publicKey,
+              rewardRecipient.publicKey
             )
           ) as any
         )
         .accounts({
           signer: signer.publicKey,
-          userLock: userLockPda,
+          counter: counterPda,
+          solverLock: solverLockPda,
+          systemProgram: SystemProgram.programId,
+        } as any)
+        .rpc();
+
+      await sleep(3000);
+
+      // Refund
+      await program.methods
+        .refundSolverSol(hashlock, new BN(1))
+        .accounts({
+          caller: signer.publicKey,
+          solverLock: solverLockPda,
+          sender: signer.publicKey,
+          systemProgram: SystemProgram.programId,
+        } as any)
+        .rpc();
+
+      // Non-solver tries to close — should fail
+      try {
+        await program.methods
+          .closeSolverLock(hashlock, new BN(1))
+          .accounts({
+            caller: recipient.publicKey,
+            solverLock: solverLockPda,
+          } as any)
+          .signers([recipient])
+          .rpc();
+        expect.fail("should have thrown");
+      } catch (e: any) {
+        expect(e).to.be.instanceOf(AnchorError);
+        expect(e.error.errorCode.code).to.equal("WrongSender");
+      }
+    });
+
+    it("fails to close pending solver lock", async () => {
+      const { hashlock } = generateHashlock();
+      const [counterPda] = deriveSolverCount(programId, hashlock);
+      const [solverLockPda] = deriveSolverLock(programId, hashlock, 1);
+
+      await program.methods
+        .solverLockSol(
+          ...Object.values(
+            solverLockBaseArgs(
+              hashlock,
+              1,
+              5_000_000,
+              0,
+              300,
+              0,
+              signer.publicKey,
+              recipient.publicKey,
+              rewardRecipient.publicKey
+            )
+          ) as any
+        )
+        .accounts({
+          signer: signer.publicKey,
+          counter: counterPda,
+          solverLock: solverLockPda,
           systemProgram: SystemProgram.programId,
         } as any)
         .rpc();
 
       try {
         await program.methods
-          .closeUserLock(hashlock)
+          .closeSolverLock(hashlock, new BN(1))
           .accounts({
             caller: signer.publicKey,
-            userLock: userLockPda,
+            solverLock: solverLockPda,
           } as any)
           .rpc();
         expect.fail("should have thrown");

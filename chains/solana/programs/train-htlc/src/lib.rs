@@ -17,7 +17,7 @@ use anchor_spl::{
 };
 use sha2::{Digest, Sha256};
 
-declare_id!("6zasug6x5AY93zNVjPZPGoqQfdTBd3C1w6CU9NDKtNH8");
+declare_id!("ADwgQuJzWCrxEgsBR5EwGmvqD12xLbAW316KG8L2f8BL");
 
 // Status constants (mirrors Solidity LockStatus enum)
 const STATUS_EMPTY: u8 = 0;
@@ -760,7 +760,7 @@ pub mod train_htlc {
 
         close_vault_if_empty(
             &mut ctx.accounts.vault,
-            ctx.accounts.caller.to_account_info(),
+            ctx.accounts.sender.to_account_info(),
             ctx.accounts.user_lock.to_account_info(),
             ctx.accounts.token_program.to_account_info(),
             signer_seeds,
@@ -880,7 +880,7 @@ pub mod train_htlc {
 
         close_vault_if_empty(
             &mut ctx.accounts.vault,
-            ctx.accounts.caller.to_account_info(),
+            ctx.accounts.sender.to_account_info(),
             ctx.accounts.solver_lock.to_account_info(),
             ctx.accounts.token_program.to_account_info(),
             signer_seeds,
@@ -931,7 +931,7 @@ pub mod train_htlc {
         )?;
         close_vault_if_empty(
             &mut ctx.accounts.vault,
-            ctx.accounts.caller.to_account_info(),
+            ctx.accounts.sender.to_account_info(),
             ctx.accounts.solver_lock.to_account_info(),
             ctx.accounts.token_program.to_account_info(),
             signer_seeds,
@@ -964,7 +964,7 @@ pub mod train_htlc {
             }
             close_vault_if_empty(
                 &mut ctx.accounts.reward_vault,
-                ctx.accounts.caller.to_account_info(),
+                ctx.accounts.sender.to_account_info(),
                 ctx.accounts.solver_lock.to_account_info(),
                 ctx.accounts.token_program.to_account_info(),
                 signer_seeds,
@@ -977,13 +977,6 @@ pub mod train_htlc {
             redeemer: ctx.accounts.caller.key(),
             secret,
         });
-        Ok(())
-    }
-
-    // ── Close: reclaim rent from terminal UserLock ────────────────────────────
-
-    pub fn close_user_lock(_ctx: Context<CloseUserLock>, _hashlock: [u8; 32]) -> Result<()> {
-        // Account is closed via the `close = caller` constraint
         Ok(())
     }
 
@@ -1336,6 +1329,7 @@ pub struct RefundUserSol<'info> {
         seeds = [b"user_lock", hashlock.as_ref()],
         bump,
         constraint = user_lock.status == STATUS_PENDING @ TrainError::NotPending,
+        close = sender,
     )]
     pub user_lock: Account<'info, UserLock>,
 
@@ -1362,6 +1356,7 @@ pub struct RefundUserToken<'info> {
         seeds = [b"user_lock", hashlock.as_ref()],
         bump,
         constraint = user_lock.status == STATUS_PENDING @ TrainError::NotPending,
+        close = sender,
     )]
     pub user_lock: Account<'info, UserLock>,
 
@@ -1558,8 +1553,16 @@ pub struct RedeemUserSol<'info> {
         seeds = [b"user_lock", hashlock.as_ref()],
         bump,
         constraint = user_lock.status == STATUS_PENDING @ TrainError::NotPending,
+        close = sender,
     )]
     pub user_lock: Account<'info, UserLock>,
+
+    /// CHECK: verified via user_lock.sender
+    #[account(
+        mut,
+        constraint = sender.key() == user_lock.sender @ TrainError::WrongSender,
+    )]
+    pub sender: UncheckedAccount<'info>,
 
     /// CHECK: verified via user_lock.recipient
     #[account(
@@ -1584,8 +1587,16 @@ pub struct RedeemUserToken<'info> {
         seeds = [b"user_lock", hashlock.as_ref()],
         bump,
         constraint = user_lock.status == STATUS_PENDING @ TrainError::NotPending,
+        close = sender,
     )]
     pub user_lock: Account<'info, UserLock>,
+
+    /// CHECK: verified via user_lock.sender
+    #[account(
+        mut,
+        constraint = sender.key() == user_lock.sender @ TrainError::WrongSender,
+    )]
+    pub sender: UncheckedAccount<'info>,
 
     /// CHECK: verified via user_lock.recipient
     #[account(
@@ -1720,6 +1731,13 @@ pub struct RedeemSolverToken<'info> {
     )]
     pub caller_token_account: InterfaceAccount<'info, TokenAccount>,
 
+    /// CHECK: verified via solver_lock.sender
+    #[account(
+        mut,
+        constraint = sender.key() == solver_lock.sender @ TrainError::WrongSender,
+    )]
+    pub sender: UncheckedAccount<'info>,
+
     pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
@@ -1805,28 +1823,17 @@ pub struct RedeemSolverTokenDiffReward<'info> {
     )]
     pub caller_reward_token_account: InterfaceAccount<'info, TokenAccount>,
 
+    /// CHECK: verified via solver_lock.sender
+    #[account(
+        mut,
+        constraint = sender.key() == solver_lock.sender @ TrainError::WrongSender,
+    )]
+    pub sender: UncheckedAccount<'info>,
+
     pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
-}
-
-// -- Close UserLock --
-
-#[derive(Accounts)]
-#[instruction(_hashlock: [u8; 32])]
-pub struct CloseUserLock<'info> {
-    #[account(mut)]
-    pub caller: Signer<'info>,
-
-    #[account(
-        mut,
-        seeds = [b"user_lock", _hashlock.as_ref()],
-        bump,
-        constraint = user_lock.status != STATUS_PENDING @ TrainError::StillPending,
-        close = caller,
-    )]
-    pub user_lock: Account<'info, UserLock>,
 }
 
 // -- Close SolverLock --
@@ -1842,6 +1849,7 @@ pub struct CloseSolverLock<'info> {
         seeds = [b"solver_lock", _hashlock.as_ref(), &_index.to_le_bytes()],
         bump,
         constraint = solver_lock.status != STATUS_PENDING @ TrainError::StillPending,
+        constraint = caller.key() == solver_lock.sender @ TrainError::WrongSender,
         close = caller,
     )]
     pub solver_lock: Account<'info, SolverLock>,

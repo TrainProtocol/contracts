@@ -44,6 +44,7 @@ async function main() {
       recipientTokenAccount: recipientATA,
       rewardRecipientTokenAccount: rewardRecipientATA,
       callerTokenAccount: callerATA,
+      sender: lockData.sender as any,
       tokenProgram: TOKEN_PROGRAM_ID,
       associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       systemProgram: anchor.web3.SystemProgram.programId,

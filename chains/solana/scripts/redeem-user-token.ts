@@ -20,11 +20,13 @@ async function main() {
   const [vaultPDA] = deriveUserVaultPDA(hashlock);
 
   const lockData = await fetchUserLock(program, userLockPDA);
+  const sender = lockData.sender as any;
   const recipient = lockData.recipient as any;
   const recipientATA = getAssociatedTokenAddressSync(tokenMint, recipient);
 
   console.log("=== Redeem User Token ===");
   console.log("Hashlock:", hashlock.toString("hex"));
+  console.log("Sender (rent to):", sender.toBase58());
   console.log("Recipient:", recipient.toBase58());
 
   const sig = await program.methods
@@ -32,6 +34,7 @@ async function main() {
     .accounts({
       caller: wallet.publicKey,
       userLock: userLockPDA,
+      sender: sender,
       recipient: recipient,
       tokenMint: tokenMint,
       vault: vaultPDA,

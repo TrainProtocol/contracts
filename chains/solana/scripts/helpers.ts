@@ -4,14 +4,46 @@ import { PublicKey, Connection, Keypair, clusterApiUrl } from "@solana/web3.js";
 import { createHash } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
+import * as dotenv from "dotenv";
+
+// Load .env from project root
+dotenv.config({ path: path.join(__dirname, "..", ".env") });
 
 // Load IDL
 const idlPath = path.join(__dirname, "..", "target", "idl", "train_htlc.json");
 const idl = JSON.parse(fs.readFileSync(idlPath, "utf-8")) as Idl;
 
-export const PROGRAM_ID = new PublicKey('6zasug6x5AY93zNVjPZPGoqQfdTBd3C1w6CU9NDKtNH8');
+export const PROGRAM_ID = new PublicKey('ADwgQuJzWCrxEgsBR5EwGmvqD12xLbAW316KG8L2f8BL');
 
+// Wallet name → .env variable mapping
+const WALLET_ENV_MAP: Record<string, string> = {
+  default: "DEFAULT_KEY",
+  solver: "SOLVER_KEY",
+  thirdparty: "THIRDPARTY_KEY",
+};
+
+/**
+ * Load a wallet keypair. Resolution order:
+ * 1. WALLET env var — use a named wallet from .env (e.g. WALLET=solver)
+ * 2. ANCHOR_WALLET env var — use a keypair file path
+ * 3. Default: ~/.config/solana/id.json
+ */
 export function loadWallet(): Keypair {
+  const walletName = process.env.WALLET?.toLowerCase();
+  if (walletName) {
+    const envVar = WALLET_ENV_MAP[walletName];
+    if (!envVar) {
+      console.error(`Unknown wallet name: "${walletName}". Use: ${Object.keys(WALLET_ENV_MAP).join(", ")}`);
+      process.exit(1);
+    }
+    const raw = process.env[envVar];
+    if (!raw) {
+      console.error(`${envVar} not found in .env`);
+      process.exit(1);
+    }
+    return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(raw)));
+  }
+
   const walletPath =
     process.env.ANCHOR_WALLET ||
     path.join(process.env.HOME!, ".config", "solana", "id.json");

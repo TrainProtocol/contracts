@@ -2,7 +2,7 @@
 
 A unified Solana program for Hash Time-Locked Contracts (HTLC) enabling cross-chain atomic swaps. Supports native SOL and SPL tokens (including Token-2022), with optional different reward tokens for solver locks.
 
-**Program ID (devnet):** `6zasug6x5AY93zNVjPZPGoqQfdTBd3C1w6CU9NDKtNH8`
+**Program ID (devnet):** `ADwgQuJzWCrxEgsBR5EwGmvqD12xLbAW316KG8L2f8BL`
 
 ## Architecture
 
@@ -74,12 +74,13 @@ PENDING (1) --> REFUNDED (2)   (timelock expired)
 | `refund_solver_token` | Refund solver's token lock after timelock |
 | `refund_solver_token_diff_reward` | Refund solver's diff-reward token lock |
 
-### Close (2)
+### Close (1)
 
 | Instruction | Description |
 |-------------|-------------|
-| `close_user_lock` | Reclaim rent from redeemed/refunded user lock |
-| `close_solver_lock` | Reclaim rent from redeemed/refunded solver lock |
+| `close_solver_lock` | Reclaim rent from redeemed/refunded solver lock (solver only) |
+
+> **Note:** User lock accounts are automatically closed during refund/redeem — rent returns to the user (sender). Solver lock accounts require an explicit close by the solver.
 
 ### View (3)
 
@@ -132,20 +133,70 @@ All scripts are in `scripts/` and run via `npx ts-node`. They use your Solana CL
 
 ### Manual Devnet Testing
 
-#### Preparation
+#### Wallet Setup
 
-You need two wallet addresses for testing. Use your own wallet as one and generate a second:
+All keypairs are stored in the `.env` file (git-ignored). The file contains three wallets used for testing different roles:
+
+| Variable | Role | Description |
+|----------|------|-------------|
+| `DEFAULT_KEY` | User | Your default Solana CLI wallet. Creates user locks. |
+| `SOLVER_KEY` | Solver | Creates solver locks, closes solver lock accounts. |
+| `THIRDPARTY_KEY` | Third Party | Simulates an external caller (e.g. redeemer). |
+
+**Generating wallets:**
 
 ```bash
-# Your wallet (sender/caller)
-solana address
-# Example: AR7DUwfrf17iir72oauSPJMqgYzboALej8a7f9yqnA4F
+# Your default wallet is at ~/.config/solana/id.json
+# Back up its keypair array to .env:
+cat ~/.config/solana/id.json
+# Copy the JSON array and add to .env as: DEFAULT_KEY=[...]
 
-# Generate a second wallet for recipient
-solana-keygen new -o /tmp/recipient.json --no-bip39-passphrase
-solana address -k /tmp/recipient.json
-# Example: 4EwnXAbwX1bQq7gzJa43y5p7PL7X9sqUmBnuiZAFVupC
+# Generate additional wallets:
+solana-keygen new -o /tmp/solver.json --no-bip39-passphrase
+cat /tmp/solver.json
+# Copy the array to .env as: SOLVER_KEY=[...]
+
+solana-keygen new -o /tmp/thirdparty.json --no-bip39-passphrase
+cat /tmp/thirdparty.json
+# Copy the array to .env as: THIRDPARTY_KEY=[...]
 ```
+
+**`.env` file format:**
+
+```bash
+# Default wallet (AR7DUwfrf17iir72oauSPJMqgYzboALej8a7f9yqnA4F)
+DEFAULT_KEY=[74,40,67,...]
+
+# RPC
+ANCHOR_PROVIDER_URL=https://api.devnet.solana.com
+
+# Solver wallet (BKTxkxMsNpKmmtzKpA4c3gp6B8wvPrTDGJFp2mp1Gw6u)
+SOLVER_KEY=[253,115,70,...]
+
+# Third party wallet (8nvF65SJpPuJ36shzCNqZ3rtcz33cqsBpWsLyfaF6c8A)
+THIRDPARTY_KEY=[107,79,81,...]
+```
+
+**Switching wallets when running scripts:**
+
+Use the `WALLET` env var to select a wallet by name. The scripts load the keypair directly from `.env` — no temp files needed:
+
+```bash
+# Run as default wallet (no WALLET var needed)
+npx ts-node scripts/user-lock-sol.ts ...
+
+# Run as solver
+WALLET=solver npx ts-node scripts/solver-lock-sol.ts ...
+
+# Run as third party
+WALLET=thirdparty npx ts-node scripts/redeem-user-sol.ts ...
+```
+
+Valid wallet names: `default`, `solver`, `thirdparty`.
+
+> **Note:** Never commit `.env` or keypair files. Both `.env` and `keys/` are in `.gitignore`.
+
+#### Token Setup
 
 For token tests, create two SPL token mints:
 
@@ -166,18 +217,16 @@ spl-token create-account <TOKEN_B_MINT>
 spl-token mint <TOKEN_B_MINT> 1000000000
 ```
 
-Save these values — all examples below use them:
+Save these values for use in the examples below:
 
 ```
-WALLET=<your wallet pubkey>
-RECIPIENT=<second wallet pubkey>
 TOKEN_A=<token A mint>
 TOKEN_B=<token B mint>
 ```
 
 ---
 
-### Test 1: User Lock SOL (lock + redeem + close)
+### Test 1: User Lock SOL (lock + redeem)
 
 ```bash
 # Step 1: Lock 0.001 SOL with 5 min timelock
@@ -196,7 +245,7 @@ npx ts-node scripts/get-user-lock.ts $HASHLOCK
 # Should show: status=REDEEMED
 
 # Step 5: Reclaim rent
-npx ts-node scripts/close-user-lock.ts $HASHLOCK
+# User lock is auto-closed during redeem/refund — no separate close needed
 ```
 
 ### Test 2: User Lock SOL (lock + refund after timelock)
@@ -213,10 +262,10 @@ npx ts-node scripts/refund-user-sol.ts $HASHLOCK
 # Step 4: Verify and cleanup
 npx ts-node scripts/get-user-lock.ts $HASHLOCK
 # Should show: status=REFUNDED
-npx ts-node scripts/close-user-lock.ts $HASHLOCK
+# User lock is auto-closed during redeem/refund — no separate close needed
 ```
 
-### Test 3: User Lock Token (lock + redeem + close)
+### Test 3: User Lock Token (lock + redeem)
 
 ```bash
 # Step 1: Lock 1000 tokens with 5 min timelock
@@ -230,7 +279,7 @@ npx ts-node scripts/get-user-lock.ts $HASHLOCK
 npx ts-node scripts/redeem-user-token.ts $HASHLOCK $SECRET $TOKEN_A
 
 # Step 4: Cleanup
-npx ts-node scripts/close-user-lock.ts $HASHLOCK
+# User lock is auto-closed during redeem/refund — no separate close needed
 ```
 
 ### Test 4: User Lock Token (lock + refund)
@@ -245,7 +294,7 @@ npx ts-node scripts/user-lock-token.ts $TOKEN_A 1000 60 $RECIPIENT
 npx ts-node scripts/refund-user-token.ts $HASHLOCK $TOKEN_A
 
 # Step 4: Cleanup
-npx ts-node scripts/close-user-lock.ts $HASHLOCK
+# User lock is auto-closed during redeem/refund — no separate close needed
 ```
 
 ### Test 5: Solver Lock SOL (lock + redeem + close)
@@ -400,7 +449,6 @@ npx ts-node scripts/close-solver-lock.ts $HASHLOCK 2
 | `redeem-solver-sol.ts` | `<hashlock> <index> <secret>` |
 | `redeem-solver-token.ts` | `<hashlock> <index> <secret> <token_mint>` |
 | `redeem-solver-token-diff-reward.ts` | `<hashlock> <index> <secret> <token_mint> <reward_token_mint>` |
-| `close-user-lock.ts` | `<hashlock>` |
 | `close-solver-lock.ts` | `<hashlock> <index>` |
 | `get-user-lock.ts` | `<hashlock>` |
 | `get-solver-lock.ts` | `<hashlock> <index>` |
@@ -412,7 +460,8 @@ All hashlock and secret arguments are hex strings (64 characters). Amounts are i
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ANCHOR_WALLET` | `~/.config/solana/id.json` | Path to wallet keypair |
+| `WALLET` | *(unset — uses default wallet)* | Named wallet from `.env`: `default`, `solver`, `thirdparty` |
+| `ANCHOR_WALLET` | `~/.config/solana/id.json` | Path to wallet keypair file (fallback if `WALLET` is not set) |
 | `ANCHOR_PROVIDER_URL` | `https://api.devnet.solana.com` | RPC endpoint |
 
 ## Deployment
@@ -442,11 +491,25 @@ solana-verify build
 
 ### Deploy to devnet
 
+> **IMPORTANT:** Always include `--program-id` to deploy to the correct address. Without it, Solana generates a random new address that won't match `declare_id!`.
+
 ```bash
 solana program deploy target/deploy/train_htlc.so \
   --program-id target/deploy/train_htlc-keypair.json \
   --with-compute-unit-price 10000 \
   --max-sign-attempts 50
+```
+
+Verify the deployed address matches:
+
+```bash
+solana address -k target/deploy/train_htlc-keypair.json
+```
+
+If you accidentally deployed without `--program-id`, reclaim the SOL:
+
+```bash
+solana program close <WRONG_ADDRESS>
 ```
 
 Add `--final` for non-upgradeable (immutable) deployment. Only do this after testing — it is irreversible.
