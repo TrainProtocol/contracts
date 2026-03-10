@@ -15,7 +15,7 @@ train_htlc = "ADwgQuJzWCrxEgsBR5EwGmvqD12xLbAW316KG8L2f8BL"
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "devnet"
+cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
