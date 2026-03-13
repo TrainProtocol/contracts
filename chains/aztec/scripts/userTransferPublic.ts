@@ -2,12 +2,10 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import { AztecAddress } from '@aztec/aztec.js/addresses';
-import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee';
 import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
 import { TokenContract } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js';
-import { SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/SponsoredFPC';
 import { setupWallet } from './utils/setupWallet.ts';
-import { getSponsoredFPCInstance } from './utils/sponsoredFpc.ts';
+import { getPaymentMethod } from './utils/feePayment.ts';
 import { requireEnv, updateEnvFile } from './utils/utils.ts';
 import { getTimeouts } from './utils/config.ts';
 
@@ -51,9 +49,6 @@ async function main(): Promise<void> {
   const amount = getInputAmount();
 
   const wallet = await setupWallet();
-  const sponsoredFPC = await getSponsoredFPCInstance();
-  await wallet.registerContract(sponsoredFPC, SponsoredFPCContractArtifact);
-  const paymentMethod = new SponsoredFeePaymentMethod(sponsoredFPC.address);
 
   const userAccount = await wallet.createSchnorrAccount(
     Fr.fromString(requireEnv('USER_SECRET')),
@@ -68,13 +63,15 @@ async function main(): Promise<void> {
     );
   }
 
+  const paymentMethod = await getPaymentMethod(wallet, userAccount.address);
+
   const token = TokenContract.at(tokenAddress, wallet);
   const transferNonce = Fr.random();
 
-  const senderBalBefore = await token.methods
+  const { result: senderBalBefore } = await token.methods
     .balance_of_public(userAccount.address)
     .simulate({ from: userAccount.address });
-  const recipientBalBefore = await token.methods
+  const { result: recipientBalBefore } = await token.methods
     .balance_of_public(toAddress)
     .simulate({ from: userAccount.address });
 
@@ -98,20 +95,20 @@ async function main(): Promise<void> {
       wait: { timeout: timeouts.txTimeout, dontThrowOnRevert: true },
     });
 
-  if (tx.hasExecutionReverted()) {
+  if (tx.receipt.hasExecutionReverted()) {
     throw new Error(
-      `transfer_public_to_public reverted: executionResult=${tx.executionResult ?? 'unknown'}, error=${tx.error ?? 'unknown'}, block=${tx.blockNumber ?? 'unknown'}`,
+      `transfer_public_to_public reverted: executionResult=${tx.receipt.executionResult ?? 'unknown'}, error=${tx.receipt.error ?? 'unknown'}, block=${tx.receipt.blockNumber ?? 'unknown'}`,
     );
   }
 
-  const senderBalAfter = await token.methods
+  const { result: senderBalAfter } = await token.methods
     .balance_of_public(userAccount.address)
     .simulate({ from: userAccount.address });
-  const recipientBalAfter = await token.methods
+  const { result: recipientBalAfter } = await token.methods
     .balance_of_public(toAddress)
     .simulate({ from: userAccount.address });
 
-  const txHash = tx.txHash?.toString?.() ?? String(tx);
+  const txHash = tx.receipt.txHash?.toString?.() ?? String(tx);
   updateEnvFile('.env', { USER_PUBLIC_TRANSFER_TX_HASH: txHash });
 
   console.log(`Transfer tx: ${txHash}`);
@@ -119,7 +116,9 @@ async function main(): Promise<void> {
   console.log(`Recipient token balance after: ${recipientBalAfter}`);
 }
 
-main().catch((err) => {
+main()
+  .then(() => process.exit(0))
+  .catch((err) => {
   console.error(`Error: ${err}`);
   process.exit(1);
 });

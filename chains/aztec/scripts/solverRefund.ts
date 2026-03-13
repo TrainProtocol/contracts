@@ -2,14 +2,12 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import { AztecAddress } from '@aztec/aztec.js/addresses';
-import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee';
 import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
 import { createAztecNodeClient } from '@aztec/aztec.js/node';
 import { TokenContract } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js';
-import { SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/SponsoredFPC';
 import { TrainContract } from './Train.ts';
 import { setupWallet } from './utils/setupWallet.ts';
-import { getSponsoredFPCInstance } from './utils/sponsoredFpc.ts';
+import { getPaymentMethod } from './utils/feePayment.ts';
 import {
   decodeLockStatus,
   parseHashlock,
@@ -27,9 +25,6 @@ async function main(): Promise<void> {
   const solverIndex = BigInt(requireEnv('SOLVER_LOCK_INDEX'));
 
   const wallet = await setupWallet();
-  const sponsoredFPC = await getSponsoredFPCInstance();
-  await wallet.registerContract(sponsoredFPC, SponsoredFPCContractArtifact);
-  const paymentMethod = new SponsoredFeePaymentMethod(sponsoredFPC.address);
 
   const solverAccount = await wallet.createSchnorrAccount(
     Fr.fromString(requireEnv('SOLVER_SECRET')),
@@ -44,10 +39,12 @@ async function main(): Promise<void> {
     );
   }
 
+  const paymentMethod = await getPaymentMethod(wallet, solverAccount.address);
+
   const train = TrainContract.at(trainAddress, wallet);
   const token = TokenContract.at(tokenAddress, wallet);
 
-  const lockBefore = await train.methods
+  const { result: lockBefore } = await train.methods
     .get_solver_lock(hashlock, solverIndex)
     .simulate({ from: solverAccount.address });
 
@@ -59,10 +56,10 @@ async function main(): Promise<void> {
   const now = Number(latestHeader.globalVariables.timestamp);
   const timelock = Number(lockBefore.timelock);
 
-  const solverBalBefore = await token.methods
+  const { result: solverBalBefore } = await token.methods
     .balance_of_public(solverAccount.address)
     .simulate({ from: solverAccount.address });
-  const trainBalBefore = await token.methods
+  const { result: trainBalBefore } = await token.methods
     .balance_of_public(trainAddress)
     .simulate({ from: solverAccount.address });
 
@@ -82,24 +79,24 @@ async function main(): Promise<void> {
     wait: { timeout: timeouts.txTimeout, dontThrowOnRevert: true },
   });
 
-  if (tx.hasExecutionReverted()) {
+  if (tx.receipt.hasExecutionReverted()) {
     throw new Error(
-      `refund_solver reverted: executionResult=${tx.executionResult ?? 'unknown'}, error=${tx.error ?? 'unknown'}, block=${tx.blockNumber ?? 'unknown'}`,
+      `refund_solver reverted: executionResult=${tx.receipt.executionResult ?? 'unknown'}, error=${tx.receipt.error ?? 'unknown'}, block=${tx.receipt.blockNumber ?? 'unknown'}`,
     );
   }
 
-  const lockAfter = await train.methods
+  const { result: lockAfter } = await train.methods
     .get_solver_lock(hashlock, solverIndex)
     .simulate({ from: solverAccount.address });
   const statusAfter = decodeLockStatus(lockAfter.status);
-  const solverBalAfter = await token.methods
+  const { result: solverBalAfter } = await token.methods
     .balance_of_public(solverAccount.address)
     .simulate({ from: solverAccount.address });
-  const trainBalAfter = await token.methods
+  const { result: trainBalAfter } = await token.methods
     .balance_of_public(trainAddress)
     .simulate({ from: solverAccount.address });
 
-  const txHash = tx.txHash?.toString?.() ?? String(tx);
+  const txHash = tx.receipt.txHash?.toString?.() ?? String(tx);
   updateEnvFile('.env', { SOLVER_REFUND_TX_HASH: txHash });
 
   console.log(`Solver refund tx: ${txHash}`);
@@ -108,7 +105,9 @@ async function main(): Promise<void> {
   console.log(`Train token balance after: ${trainBalAfter}`);
 }
 
-main().catch((err) => {
+main()
+  .then(() => process.exit(0))
+  .catch((err) => {
   console.error(`Error: ${err}`);
   process.exit(1);
 });

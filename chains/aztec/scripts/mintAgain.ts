@@ -2,12 +2,10 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import { AztecAddress } from '@aztec/aztec.js/addresses';
-import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee';
 import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
 import { TokenContract } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js';
-import { SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/SponsoredFPC';
 import { setupWallet } from './utils/setupWallet.ts';
-import { getSponsoredFPCInstance } from './utils/sponsoredFpc.ts';
+import { getPaymentMethod } from './utils/feePayment.ts';
 import { requireEnv, updateEnvFile } from './utils/utils.ts';
 import { getTimeouts } from './utils/config.ts';
 
@@ -37,9 +35,6 @@ async function main(): Promise<void> {
   const amountEach = getMintAmount();
 
   const wallet = await setupWallet();
-  const sponsoredFPC = await getSponsoredFPCInstance();
-  await wallet.registerContract(sponsoredFPC, SponsoredFPCContractArtifact);
-  const paymentMethod = new SponsoredFeePaymentMethod(sponsoredFPC.address);
 
   const deployerAccount = await wallet.createSchnorrAccount(
     Fr.fromString(requireEnv('DEPLOYER_SECRET')),
@@ -56,10 +51,10 @@ async function main(): Promise<void> {
 
   const token = TokenContract.at(tokenAddress, wallet);
 
-  const userBalBefore = await token.methods
+  const { result: userBalBefore } = await token.methods
     .balance_of_public(userAddress)
     .simulate({ from: deployerAccount.address });
-  const solverBalBefore = await token.methods
+  const { result: solverBalBefore } = await token.methods
     .balance_of_public(solverAddress)
     .simulate({ from: deployerAccount.address });
 
@@ -75,13 +70,13 @@ async function main(): Promise<void> {
     .mint_to_public(userAddress, amountEach)
     .send({
       from: deployerAccount.address,
-      fee: { paymentMethod },
+      fee: { paymentMethod: await getPaymentMethod(wallet, deployerAccount.address) },
       wait: { timeout: timeouts.txTimeout, dontThrowOnRevert: true },
     });
 
-  if (userMintTx.hasExecutionReverted()) {
+  if (userMintTx.receipt.hasExecutionReverted()) {
     throw new Error(
-      `mint_to_public(user) reverted: executionResult=${userMintTx.executionResult ?? 'unknown'}, error=${userMintTx.error ?? 'unknown'}, block=${userMintTx.blockNumber ?? 'unknown'}`,
+      `mint_to_public(user) reverted: executionResult=${userMintTx.receipt.executionResult ?? 'unknown'}, error=${userMintTx.receipt.error ?? 'unknown'}, block=${userMintTx.receipt.blockNumber ?? 'unknown'}`,
     );
   }
 
@@ -89,27 +84,27 @@ async function main(): Promise<void> {
     .mint_to_public(solverAddress, amountEach)
     .send({
       from: deployerAccount.address,
-      fee: { paymentMethod },
+      fee: { paymentMethod: await getPaymentMethod(wallet, deployerAccount.address) },
       wait: { timeout: timeouts.txTimeout, dontThrowOnRevert: true },
     });
 
-  if (solverMintTx.hasExecutionReverted()) {
+  if (solverMintTx.receipt.hasExecutionReverted()) {
     throw new Error(
-      `mint_to_public(solver) reverted: executionResult=${solverMintTx.executionResult ?? 'unknown'}, error=${solverMintTx.error ?? 'unknown'}, block=${solverMintTx.blockNumber ?? 'unknown'}`,
+      `mint_to_public(solver) reverted: executionResult=${solverMintTx.receipt.executionResult ?? 'unknown'}, error=${solverMintTx.receipt.error ?? 'unknown'}, block=${solverMintTx.receipt.blockNumber ?? 'unknown'}`,
     );
   }
 
-  const userBalAfter = await token.methods
+  const { result: userBalAfter } = await token.methods
     .balance_of_public(userAddress)
     .simulate({ from: deployerAccount.address });
-  const solverBalAfter = await token.methods
+  const { result: solverBalAfter } = await token.methods
     .balance_of_public(solverAddress)
     .simulate({ from: deployerAccount.address });
 
   const userMintTxHash =
-    userMintTx.txHash?.toString?.() ?? String(userMintTx);
+    userMintTx.receipt.txHash?.toString?.() ?? String(userMintTx);
   const solverMintTxHash =
-    solverMintTx.txHash?.toString?.() ?? String(solverMintTx);
+    solverMintTx.receipt.txHash?.toString?.() ?? String(solverMintTx);
 
   updateEnvFile('.env', {
     MINT_AGAIN_AMOUNT: amountEach.toString(),
@@ -123,7 +118,9 @@ async function main(): Promise<void> {
   console.log(`Solver balance after: ${solverBalAfter}`);
 }
 
-main().catch((err) => {
+main()
+  .then(() => process.exit(0))
+  .catch((err) => {
   console.error(`Error: ${err}`);
   process.exit(1);
 });

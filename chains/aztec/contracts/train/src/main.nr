@@ -167,6 +167,7 @@ pub contract Train {
         assert(existing.status == STATUS_EMPTY, "SwapAlreadyExists");
 
         let timelock = self.context.timestamp() + timelock_delta;
+        assert(timelock > self.context.timestamp(), "TimelockOverflow");
         let lock = UserLock {
             secret: [0u8; 32],
             amount,
@@ -238,7 +239,9 @@ pub contract Train {
 
         let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
         let timelock = self.context.timestamp() + timelock_delta;
+        assert(timelock > self.context.timestamp(), "TimelockOverflow");
         let reward_timelock = self.context.timestamp() + reward_timelock_delta;
+        assert(reward_timelock >= self.context.timestamp(), "RewardTimelockOverflow");
 
         // Auto-increment index
         let current_count =
@@ -263,6 +266,7 @@ pub contract Train {
 
         // Transfer tokens
         if reward > 0 {
+            assert(amount + reward >= amount, "AmountOverflow");
             if token == reward_token {
                 // Same token: single transfer for amount + reward
                 self.call(Token::at(token).transfer_public_to_public(
@@ -325,8 +329,8 @@ pub contract Train {
         let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
         let lock = self.storage.user_locks.at(hashlock_high).at(hashlock_low).read();
 
-        assert(lock.sender != AztecAddress::zero(), "LockNotFound");
-        let hashed_secret = sha256::sha256_var(secret, secret.len() as u64);
+        assert(lock.status != STATUS_EMPTY, "LockNotFound");
+        let hashed_secret = sha256::sha256_var(secret, secret.len() as u32);
         assert(hashlock == hashed_secret, "HashlockMismatch");
         assert(lock.status == STATUS_PENDING, "LockNotPending");
 
@@ -361,8 +365,8 @@ pub contract Train {
         let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
         let lock = self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(index).read();
 
-        assert(lock.sender != AztecAddress::zero(), "LockNotFound");
-        let hashed_secret = sha256::sha256_var(secret, secret.len() as u64);
+        assert(lock.status != STATUS_EMPTY, "LockNotFound");
+        let hashed_secret = sha256::sha256_var(secret, secret.len() as u32);
         assert(hashlock == hashed_secret, "HashlockMismatch");
         assert(lock.status == STATUS_PENDING, "LockNotPending");
 
@@ -424,7 +428,7 @@ pub contract Train {
         let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
         let lock = self.storage.user_locks.at(hashlock_high).at(hashlock_low).read();
 
-        assert(lock.sender != AztecAddress::zero(), "LockNotFound");
+        assert(lock.status != STATUS_EMPTY, "LockNotFound");
         assert(lock.status == STATUS_PENDING, "LockNotPending");
 
         let caller = self.msg_sender();
@@ -462,7 +466,7 @@ pub contract Train {
         let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
         let lock = self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(index).read();
 
-        assert(lock.sender != AztecAddress::zero(), "LockNotFound");
+        assert(lock.status != STATUS_EMPTY, "LockNotFound");
         assert(lock.status == STATUS_PENDING, "LockNotPending");
         assert(self.context.timestamp() >= lock.timelock, "RefundNotAllowed");
 

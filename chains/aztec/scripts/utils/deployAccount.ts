@@ -1,4 +1,5 @@
 import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee';
+import type { FeePaymentMethod } from '@aztec/aztec.js/fee';
 import { getSponsoredFPCInstance } from './sponsoredFpc.ts';
 import { SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/SponsoredFPC';
 import { Fr } from '@aztec/aztec.js/fields';
@@ -9,18 +10,19 @@ import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { AccountManager } from '@aztec/aztec.js/wallet';
 import { EmbeddedWallet } from '@aztec/wallets/embedded';
 
-export async function deploySchnorrAccount(
+/**
+ * Creates a Schnorr account without deploying it.
+ * Returns the account manager so the caller can get the address and deploy later.
+ */
+export async function createSchnorrAccount(
   wallet?: EmbeddedWallet,
-): Promise<AccountManager> {
-  let logger: Logger;
-  logger = createLogger('aztec:aztec-starter');
-  logger.info('Starting Schnorr account deployment...');
+): Promise<{ account: AccountManager; wallet: EmbeddedWallet }> {
+  const logger = createLogger('aztec:aztec-starter');
+  logger.info('Creating Schnorr account...');
 
-  // Generate account keys
-  logger.info('Generating account keys...');
-  let secretKey = Fr.random();
-  let signingKey = GrumpkinScalar.random();
-  let salt = Fr.random();
+  const secretKey = Fr.random();
+  const signingKey = GrumpkinScalar.random();
+  const salt = Fr.random();
   logger.info(`Save the following SECRET and SALT in .env for future use.`);
   logger.info(`Secret key generated: ${secretKey.toString()}`);
   logger.info(`Signing key generated: ${signingKey.toString()}`);
@@ -34,7 +36,57 @@ export async function deploySchnorrAccount(
   );
   logger.info(`Account address will be: ${account.address}`);
 
+  return { account, wallet: activeWallet };
+}
+
+/**
+ * Deploys a Schnorr account with the given fee payment method.
+ */
+export async function deployAccount(
+  account: AccountManager,
+  wallet: EmbeddedWallet,
+  paymentMethod: FeePaymentMethod,
+  timeout: number = 120000,
+): Promise<AccountManager> {
+  const logger = createLogger('aztec:aztec-starter');
+
   const deployMethod = await account.getDeployMethod();
+
+  logger.info('Deploying account...');
+  await deployMethod.send({
+    from: AztecAddress.ZERO,
+    fee: { paymentMethod },
+    skipClassPublication: false,
+    skipInstancePublication: false,
+    skipInitialization: false,
+    skipRegistration: false,
+    wait: { timeout, returnReceipt: true, dontThrowOnRevert: true },
+  });
+
+  const metadata = await wallet.getContractMetadata(account.address);
+  console.log(`Deployment transaction for account ${account.address.toString()} completed. Checking deployment status...`);
+  logger.info(
+    `Account deployment metadata: initialized=${metadata.isContractInitialized}, published=${metadata.isContractPublished}`,
+  );
+  if (!metadata.isContractInitialized || !metadata.isContractPublished) {
+    throw new Error(
+      `Account deployment incomplete for ${account.address.toString()} (initialized=${metadata.isContractInitialized}, published=${metadata.isContractPublished}).`,
+    );
+  }
+
+  logger.info(`Account deployment transaction successful and published.`);
+  return account;
+}
+
+/**
+ * Original convenience function: creates and deploys using SponsoredFPC.
+ * Works for local-network and devnet.
+ */
+export async function deploySchnorrAccount(
+  wallet?: EmbeddedWallet,
+): Promise<AccountManager> {
+  const logger = createLogger('aztec:aztec-starter');
+  const { account, wallet: activeWallet } = await createSchnorrAccount(wallet);
 
   // Setup sponsored FPC
   logger.info('Setting up sponsored fee payment for account deployment...');
@@ -51,29 +103,5 @@ export async function deploySchnorrAccount(
   );
   logger.info('Sponsored fee payment method configured for account deployment');
 
-  // Deploy account
-  await deployMethod.send({
-    from: AztecAddress.ZERO,
-    fee: { paymentMethod: sponsoredPaymentMethod },
-    skipClassPublication: false,
-    skipInstancePublication: false,
-    skipInitialization: false,
-    skipRegistration: false,
-    wait: { timeout: 120000, returnReceipt: true, dontThrowOnRevert: true },
-  });
-
-  const metadata = await activeWallet.getContractMetadata(account.address);
-  console.log(`Deployment transaction for account ${account.address.toString()} completed. Checking deployment status...`);
-  logger.info(
-    `Account deployment metadata: initialized=${metadata.isContractInitialized}, published=${metadata.isContractPublished}`,
-  );
-  if (!metadata.isContractInitialized || !metadata.isContractPublished) {
-    throw new Error(
-      `Account deployment incomplete for ${account.address.toString()} (initialized=${metadata.isContractInitialized}, published=${metadata.isContractPublished}).`,
-    );
-  }
-
-  logger.info(`Account deployment transaction successful and published.`);
-
-  return account;
+  return deployAccount(account, activeWallet, sponsoredPaymentMethod);
 }

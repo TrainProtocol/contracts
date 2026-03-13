@@ -46,7 +46,9 @@ async function main(): Promise<void> {
   console.log(`Has tx effect: ${effect ? 'yes' : 'no'}`);
 }
 
-main().catch((err) => {
+main()
+  .then(() => process.exit(0))
+  .catch((err) => {
   const message = String(err?.message ?? err);
   if (message.includes('ECONNREFUSED')) {
     console.error('Cannot connect to Aztec node.');

@@ -1,10 +1,10 @@
 {
-  "name": "devnet",
-  "environment": "devnet",
+  "name": "testnet",
+  "environment": "testnet",
   "network": {
-    "nodeUrl": "https://v4-devnet-2.aztec-labs.com",
-    "l1RpcUrl": "",
-    "l1ChainId": 1
+    "nodeUrl": "https://rpc.testnet.aztec-labs.com",
+    "l1RpcUrl": "https://0xrpc.io/sep",
+    "l1ChainId": 11155111
   },
   "settings": {
     "skipLocalNetwork": true,

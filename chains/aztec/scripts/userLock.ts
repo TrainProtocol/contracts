@@ -4,13 +4,11 @@ dotenv.config();
 import crypto from 'crypto';
 import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { createAztecNodeClient } from '@aztec/aztec.js/node';
-import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee';
 import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
 import { TokenContract } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js';
-import { SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/SponsoredFPC';
 import { TrainContract } from './Train.ts';
 import { setupWallet } from './utils/setupWallet.ts';
-import { getSponsoredFPCInstance } from './utils/sponsoredFpc.ts';
+import { getPaymentMethod } from './utils/feePayment.ts';
 import {
   authorizePublicTransfer,
   bytesToHex,
@@ -44,9 +42,6 @@ async function main(): Promise<void> {
   const userData = new Array(256).fill(0);
 
   const wallet = await setupWallet();
-  const sponsoredFPC = await getSponsoredFPCInstance();
-  await wallet.registerContract(sponsoredFPC, SponsoredFPCContractArtifact);
-  const paymentMethod = new SponsoredFeePaymentMethod(sponsoredFPC.address);
 
   const secretKey = Fr.fromString(requireEnv('USER_SECRET'));
   const salt = Fr.fromString(requireEnv('USER_SALT'));
@@ -81,10 +76,10 @@ async function main(): Promise<void> {
   const now = Number(latestHeader.globalVariables.timestamp);
   const quoteExpiry = now + quoteExpiryDelta;
 
-  const userBalBefore = await token.methods
+  const { result: userBalBefore } = await token.methods
     .balance_of_public(account.address)
     .simulate({ from: account.address });
-  const trainBalBefore = await token.methods
+  const { result: trainBalBefore } = await token.methods
     .balance_of_public(trainAddress)
     .simulate({ from: account.address });
 
@@ -114,7 +109,7 @@ async function main(): Promise<void> {
     account.address,
     trainAddress,
     publicAction,
-    paymentMethod,
+    await getPaymentMethod(wallet, account.address),
     timeouts.txTimeout,
   );
   console.log('Authwit tx confirmed.');
@@ -143,24 +138,24 @@ async function main(): Promise<void> {
   );
   const tx = await lockCall.send({
     from: account.address,
-    fee: { paymentMethod },
+    fee: { paymentMethod: await getPaymentMethod(wallet, account.address) },
     wait: { timeout: timeouts.txTimeout, dontThrowOnRevert: true },
   });
-  if (tx.hasExecutionReverted()) {
+  if (tx.receipt.hasExecutionReverted()) {
     const latestAfter = await node.getBlockHeader('latest');
     const latestTs = latestAfter
       ? Number(latestAfter.globalVariables.timestamp)
       : undefined;
     throw new Error(
-      `user_lock reverted: executionResult=${tx.executionResult ?? 'unknown'}, error=${tx.error ?? 'unknown'}, block=${tx.blockNumber ?? 'unknown'}, latestTimestamp=${latestTs ?? 'unknown'}, quoteExpiry=${quoteExpiry}`,
+      `user_lock reverted: executionResult=${tx.receipt.executionResult ?? 'unknown'}, error=${tx.receipt.error ?? 'unknown'}, block=${tx.receipt.blockNumber ?? 'unknown'}, latestTimestamp=${latestTs ?? 'unknown'}, quoteExpiry=${quoteExpiry}`,
     );
   }
 
-  const trainBal = await token.methods
+  const { result: trainBal } = await token.methods
     .balance_of_public(trainAddress)
     .simulate({ from: account.address });
 
-  const txHash = tx.txHash?.toString?.() ?? String(tx);
+  const txHash = tx.receipt.txHash?.toString?.() ?? String(tx);
   const secretHex = bytesToHex(secret);
   const hashlockHex = bytesToHex(hashlock);
 
@@ -176,7 +171,9 @@ async function main(): Promise<void> {
   console.log(`Train public balance: ${trainBal}`);
 }
 
-main().catch((err) => {
+main()
+  .then(() => process.exit(0))
+  .catch((err) => {
   console.error(`Error: ${err}`);
   process.exit(1);
 });

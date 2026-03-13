@@ -6,7 +6,7 @@ import { createAztecNodeClient } from '@aztec/aztec.js/node';
 import { AztecScanClient, fromContractInstance } from 'aztec-scan-sdk';
 import type { DeployerMetadata } from 'aztec-scan-sdk';
 import TrainArtifact from '../contracts/train/target/train-Train.json' with { type: 'json' };
-import { getAztecNodeUrl } from './utils/config.ts';
+import { getAztecNodeUrl, getEnv } from './utils/config.ts';
 import { requireEnv } from './utils/utils.ts';
 
 function optionalString(name: string): string | undefined {
@@ -28,7 +28,9 @@ async function main(): Promise<void> {
     );
   }
 
-  const network = optionalString('AZTECSCAN_NETWORK') ?? 'devnet';
+  const env = getEnv();
+  const networkFromEnv = env === 'testnet' ? 'testnet' : 'devnet';
+  const network = optionalString('AZTECSCAN_NETWORK') ?? networkFromEnv;
   const client = new AztecScanClient({
     network: network as 'devnet' | 'testnet' | 'mainnet',
     explorerApiUrl: optionalString('AZTECSCAN_API_URL'),
@@ -117,7 +119,9 @@ function buildDeployerMetadata(): DeployerMetadata | undefined {
   };
 }
 
-main().catch((err) => {
+main()
+  .then(() => process.exit(0))
+  .catch((err) => {
   console.error(`Error: ${err}`);
   process.exit(1);
 });

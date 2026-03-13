@@ -29,8 +29,8 @@ async function main(): Promise<void> {
   const train = TrainContract.at(trainAddress, wallet);
   const from = userAccount.address;
 
-  const userLock = await train.methods.get_user_lock(hashlock).simulate({ from });
-  const solverCount = await train.methods
+  const { result: userLock } = await train.methods.get_user_lock(hashlock).simulate({ from });
+  const { result: solverCount } = await train.methods
     .get_solver_lock_count(hashlock)
     .simulate({ from });
 
@@ -54,7 +54,7 @@ async function main(): Promise<void> {
 
   for (let i = 1; i <= solverCountNum; i++) {
     const solverIndex = BigInt(i);
-    const solverLock = await train.methods
+    const { result: solverLock } = await train.methods
       .get_solver_lock(hashlock, solverIndex)
       .simulate({ from });
     console.log(`\nSolverLock index: ${solverIndex.toString()}`);
@@ -70,7 +70,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
+main()
+  .then(() => process.exit(0))
+  .catch((err) => {
   console.error(`Error: ${err}`);
   process.exit(1);
 });

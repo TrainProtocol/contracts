@@ -195,7 +195,9 @@ async function main(): Promise<void> {
   console.log(`\nMatched events: ${matched} / ${logs.length} logs`);
 }
 
-main().catch((err) => {
+main()
+  .then(() => process.exit(0))
+  .catch((err) => {
   console.error(`Error: ${err}`);
   process.exit(1);
 });

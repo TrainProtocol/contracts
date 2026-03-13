@@ -69,6 +69,10 @@ export class ConfigManager {
     return this.config.environment === 'devnet';
   }
 
+  public isTestnet(): boolean {
+    return this.config.environment === 'testnet';
+  }
+
   public isLocalNetwork(): boolean {
     return this.config.environment === 'local';
   }
@@ -91,7 +95,7 @@ export class ConfigManager {
     }
 
     // Otherwise, use defaults based on environment
-    if (this.isDevnet()) {
+    if (this.isDevnet() || this.isTestnet()) {
       return {
         deployTimeout: 1200000, // 20 minutes
         txTimeout: 180000, // 3 minutes
