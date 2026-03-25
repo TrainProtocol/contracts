@@ -19,19 +19,12 @@ const RECEIVER_PATH = process.env.RECEIVER_PATH || "m/84'/1'/0'/0/0";
 
 class TestnetBitcoin extends BitcoinTrain {
   constructor() {
-    super(networks.testnet);
+    super('testnet4');
   }
 }
 
 function ensureDir(p: string) {
   if (!existsSync(p)) mkdirSync(p, { recursive: true });
-}
-
-function parseHex32(env?: string | null): Buffer | undefined {
-  if (!env) return undefined;
-  const h = env.replace(/^0x/i, '');
-  if (h.length !== 64) throw new Error('expected 32-byte hex');
-  return Buffer.from(h, 'hex');
 }
 
 (async () => {
@@ -50,7 +43,7 @@ function parseHex32(env?: string | null): Buffer | undefined {
   if (!senderNode.privateKey || !recvNode.publicKey) throw new Error('Key derivation failed');
 
   const sender = ECPair.fromPrivateKey(senderNode.privateKey, { network: networks.testnet });
-  const srcReceiverPubKey = recvNode.publicKey;
+  const recipientPubKey = recvNode.publicKey;
 
   const outDir = join(__dirname, '../metadata');
   ensureDir(outDir);
@@ -62,15 +55,9 @@ function parseHex32(env?: string | null): Buffer | undefined {
 
   const amount = Number(process.env.LOCK_AMOUNT_SAT || '817') >>> 0;
   const fee = Number(process.env.LOCK_FEE_SAT || '350') >>> 0;
-  const csvDelaySeconds = Number(process.env.LOCK_DELAY_SEC || '1800') >>> 0;
+  const timelockDelta = Number(process.env.LOCK_DELAY_SEC || '1800') >>> 0;
 
-  let lockId = parseHex32(process.env.LOCK_ID_HEX);
-  if (!lockId) {
-    lockId = randomBytes(32);
-    writeFileSync(join(outDir, 'lock_id.hex'), lockId.toString('hex'));
-  }
-
-  let paymentHashlockHex: string | undefined;
+  let hashlock: Buffer | undefined;
   let secretHexForRecord: string | undefined;
 
   const envHash = process.env.PAYMENT_HASHLOCK_HEX;
@@ -79,28 +66,34 @@ function parseHex32(env?: string | null): Buffer | undefined {
   if (envHash) {
     const h = envHash.replace(/^0x/i, '');
     if (h.length !== 64) throw new Error('PAYMENT_HASHLOCK_HEX must be 32 bytes hex');
-    paymentHashlockHex = h;
+    hashlock = Buffer.from(h, 'hex');
   } else if (envSecret) {
     const s = envSecret.replace(/^0x/i, '');
     if (s.length !== 64) throw new Error('PAYMENT_SECRET_HEX must be 32 bytes hex');
     secretHexForRecord = s;
-    paymentHashlockHex = createHash('sha256').update(Buffer.from(s, 'hex')).digest('hex');
+    hashlock = createHash('sha256').update(Buffer.from(s, 'hex')).digest();
   } else {
     const secret = randomBytes(32);
     secretHexForRecord = secret.toString('hex');
     writeFileSync(join(outDir, 'payment_secret.hex'), secretHexForRecord);
-    paymentHashlockHex = createHash('sha256').update(secret).digest('hex');
+    hashlock = createHash('sha256').update(secret).digest();
   }
 
   const dstChain = (process.env.DST_CHAIN || 'ETH').slice(0, 4);
   const dstAsset = (process.env.DST_ASSET || 'USDC').slice(0, 4);
+  const dstAddress = Buffer.alloc(20); // placeholder destination address
+  const dstAmount = BigInt(process.env.DST_AMOUNT || '0');
 
-  const res = await svc.lock(sender, srcReceiverPubKey, amount, csvDelaySeconds, {
+  const res = await svc.userLock(sender, recipientPubKey, {
+    hashlock: hashlock!,
+    amount,
+    timelockDelta,
     fee,
-    lockId: lockId!,
-    paymentHashlockHex: paymentHashlockHex!,
+  }, {
     dstChain,
-    dstAsset,
+    dstAddress,
+    dstAmount,
+    dstToken: dstAsset,
   });
 
   writeFileSync(join(outDir, 'lock_meta.json'), JSON.stringify(res, null, 2));

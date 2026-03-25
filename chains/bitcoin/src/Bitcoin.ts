@@ -55,8 +55,7 @@ export default abstract class Bitcoin {
     if (networkOrChain === 'testnet4') {
       this.network = networks.testnet;
       this.mempool = makeTestnet4Adapter();
-      // this.baseUrl = 'https://mempool.space/testnet4';
-      this.baseUrl = 'https://blockstream.info/testnet4';
+      this.baseUrl = 'https://mempool.space/testnet4';
       return;
     }
 
@@ -69,6 +68,40 @@ export default abstract class Bitcoin {
     }).bitcoin;
     // this.baseUrl = `https://mempool.space/${networkStr}`;
     this.baseUrl = `https://blockstream.info${networkStr === 'bitcoin' ? '' : '/testnet'}`;
+  }
+
+  /**
+   * Get recommended fee rates from mempool.space API.
+   * Returns sat/vB for different confirmation targets.
+   */
+  public async getFeeEstimates(): Promise<{
+    fastest: number;   // ~1 block
+    halfHour: number;  // ~3 blocks
+    hour: number;      // ~6 blocks
+    economy: number;   // ~12+ blocks
+    minimum: number;   // mempool minimum
+  }> {
+    const { data } = await axios.get<Record<string, number>>(`${this.baseUrl}/api/v1/fees/recommended`);
+    return {
+      fastest: data.fastestFee,
+      halfHour: data.halfHourFee,
+      hour: data.hourFee,
+      economy: data.economyFee,
+      minimum: data.minimumFee,
+    };
+  }
+
+  /**
+   * Estimate total fee in sats for a given tx vsize and confirmation target.
+   * @param vsize  Estimated transaction virtual size in vbytes
+   * @param target 'fastest' | 'halfHour' | 'hour' | 'economy'
+   */
+  public async estimateFee(
+    vsize: number,
+    target: 'fastest' | 'halfHour' | 'hour' | 'economy' = 'halfHour'
+  ): Promise<number> {
+    const rates = await this.getFeeEstimates();
+    return Math.ceil(vsize * rates[target]);
   }
 
   public createHashPair(): HashPair {
@@ -91,14 +124,15 @@ export default abstract class Bitcoin {
     };
   }
 
-  async postTransaction(txhex: string): Promise<any> {
+  async postTransaction(txhex: string): Promise<string> {
     const endpoint = `${this.baseUrl}/api/tx`;
-    return new Promise((resolve, reject) => {
-      axios
-        .post(endpoint, txhex)
-        .then((res) => resolve(res.data))
-        .catch((error) => reject(error));
-    });
+    try {
+      const res = await axios.post(endpoint, txhex);
+      return res.data;
+    } catch (error: any) {
+      const detail = error?.response?.data || error?.message || 'unknown error';
+      throw new Error(`Broadcast failed: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`);
+    }
   }
 
   protected async getInputData(txid: string, contractAddress: string): Promise<{ value: number; index: number }> {
@@ -163,9 +197,7 @@ export default abstract class Bitcoin {
     const internalPoint = H.add(rG);
     internalPoint.assertValidity();
 
-    const x = internalPoint.toAffine().x;
-    const hex = x.toString(16).padStart(64, '0');
-    return Buffer.from(hex, 'hex');
+    return Buffer.from(internalPoint.toRawX());
   }
 
   protected witnessStackToScriptWitness(witness: any): Buffer {
@@ -200,7 +232,9 @@ export default abstract class Bitcoin {
           return looksHex ? Buffer.from(hex, 'hex') : Buffer.from(data, 'utf8');
         })();
 
-    if (buf.length > 80) throw new Error('OP_RETURN data exceeds 80 bytes');
+    // Bitcoin Core v29+ removed the OP_RETURN standardness size limit.
+    // Keep a generous safety limit to prevent accidental tx bloat.
+    if (buf.length > 520) throw new Error('OP_RETURN data exceeds 520 bytes');
 
     const opretScript = payments.embed({ data: [buf] }).output!;
     return { script: opretScript, value: 0 };
