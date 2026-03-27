@@ -50,7 +50,7 @@ async function main() {
 
     // Check if account is already deployed
     const metadata = await wallet.getContractMetadata(address);
-    if (!metadata.isContractInitialized) {
+    if (metadata.initializationStatus !== 'INITIALIZED') {
       console.log('Account not yet deployed, deploying...');
       // First tx: uses FeeJuicePaymentMethodWithClaim to claim bridged Fee Juice
       const claimPayment = await getPaymentMethod(wallet, address);

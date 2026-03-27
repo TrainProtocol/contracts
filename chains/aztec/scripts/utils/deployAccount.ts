@@ -2,11 +2,12 @@ import { SponsoredFeePaymentMethod } from '@aztec/aztec.js/fee';
 import type { FeePaymentMethod } from '@aztec/aztec.js/fee';
 import { getSponsoredFPCInstance } from './sponsoredFpc.ts';
 import { SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/SponsoredFPC';
+import { NO_FROM } from '@aztec/aztec.js/account';
 import { Fr } from '@aztec/aztec.js/fields';
 import { GrumpkinScalar } from '@aztec/foundation/curves/grumpkin';
 import { type Logger, createLogger } from '@aztec/foundation/log';
 import { setupWallet } from './setupWallet.ts';
-import { AztecAddress } from '@aztec/aztec.js/addresses';
+
 import { AccountManager } from '@aztec/aztec.js/wallet';
 import { EmbeddedWallet } from '@aztec/wallets/embedded';
 
@@ -54,7 +55,7 @@ export async function deployAccount(
 
   logger.info('Deploying account...');
   await deployMethod.send({
-    from: AztecAddress.ZERO,
+    from: NO_FROM,
     fee: { paymentMethod },
     skipClassPublication: false,
     skipInstancePublication: false,
@@ -66,11 +67,11 @@ export async function deployAccount(
   const metadata = await wallet.getContractMetadata(account.address);
   console.log(`Deployment transaction for account ${account.address.toString()} completed. Checking deployment status...`);
   logger.info(
-    `Account deployment metadata: initialized=${metadata.isContractInitialized}, published=${metadata.isContractPublished}`,
+    `Account deployment metadata: initializationStatus=${metadata.initializationStatus}, published=${metadata.isContractPublished}`,
   );
-  if (!metadata.isContractInitialized || !metadata.isContractPublished) {
+  if (metadata.initializationStatus !== 'INITIALIZED' || !metadata.isContractPublished) {
     throw new Error(
-      `Account deployment incomplete for ${account.address.toString()} (initialized=${metadata.isContractInitialized}, published=${metadata.isContractPublished}).`,
+      `Account deployment incomplete for ${account.address.toString()} (initializationStatus=${metadata.initializationStatus}, published=${metadata.isContractPublished}).`,
     );
   }
 

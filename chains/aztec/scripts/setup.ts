@@ -119,6 +119,15 @@ async function main(): Promise<void> {
     console.log(`  User:     ${userAccount.address.toString()}`);
     console.log(`  Solver:   ${solverAccount.address.toString()}`);
     console.log(`  Deployer: ${deployerAccount.address.toString()}`);
+
+    // Update addresses in .env and process.env (may change between SDK versions due to account contract class changes)
+    const updatedAddresses = {
+      USER_ADDRESS: userAccount.address.toString(),
+      SOLVER_ADDRESS: solverAccount.address.toString(),
+      DEPLOYER_ADDRESS: deployerAccount.address.toString(),
+    };
+    updateEnvFile('.env', updatedAddresses);
+    Object.assign(process.env, updatedAddresses);
   } else {
     // Local/devnet: generate fresh keys each time
     const userSecretKey = Fr.random();
@@ -161,21 +170,20 @@ async function main(): Promise<void> {
   ];
 
   for (const [account, wallet, label] of accounts) {
-    if (isTestnet) {
-      const metadata = await wallet.getContractMetadata(account.address);
-      if (metadata.isContractInitialized) {
-        console.log(`${label} account already deployed, skipping.`);
-        continue;
-      }
+    const metadata = await wallet.getContractMetadata(account.address);
+    if (metadata.initializationStatus === 'INITIALIZED') {
+      console.log(`${label} account already deployed, skipping.`);
+      continue;
     }
     console.log(`Deploying ${label} account...`);
     const pay = await getPaymentMethod(wallet, account.address);
-    if (!pay) {
+    if (!pay && isTestnet) {
       throw new Error(
-        `Cannot deploy ${label} account: no claim data found. Run bridgeFeeJuice.ts first.`,
+        `Cannot deploy ${label} account: no claim data and no existing Fee Juice balance.\n` +
+        `Run bridgeFeeJuice.ts first to fund ${account.address.toString()}.`,
       );
     }
-    await deployAccount(account, wallet, pay, timeouts.deployTimeout);
+    await deployAccount(account, wallet, pay!, timeouts.deployTimeout);
   }
 
   // Get payment method for deployer — may be a claim (first tx) or undefined (existing balance)

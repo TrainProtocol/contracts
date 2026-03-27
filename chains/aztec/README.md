@@ -2,7 +2,7 @@
 
 HTLC (Hash Time Locked Contract) implementation for cross-chain atomic swaps on Aztec Network.
 
-Built with Aztec Noir contracts and Aztec.js SDK `v4.1.0-rc.2` (testnet).
+Built with Aztec Noir contracts and Aztec.js SDK `v4.2.0-aztecnr-rc.2`.
 
 ## Project Structure
 
@@ -46,9 +46,9 @@ aztec/
 
 ## Prerequisites
 
-- [Aztec CLI](https://docs.aztec.network/) `4.1.0-rc.2`
+- [Aztec CLI](https://docs.aztec.network/) `4.2.0-aztecnr-rc.2`
 - Install command:
-  `aztec-up install 4.1.0-rc.2`
+  `aztec-up install 4.2.0-aztecnr-rc.2`
 - Node.js >= 18
 - For local development: a running Aztec sandbox (`aztec start --sandbox`)
 
@@ -80,8 +80,8 @@ EMPTY (0) --> PENDING (1) --> REDEEMED (3)
 
 | Function | Description |
 |---|---|
-| `user_lock(...)` | User locks funds with hashlock + timelock. Emits `UserLocked` event. |
-| `solver_lock(...)` | Solver locks funds against same hashlock. Returns index. Emits `SolverLocked`. |
+| `user_lock(...)` | User locks funds with hashlock + timelock. Emits `UserLocked` log. |
+| `solver_lock(...)` | Solver locks funds against same hashlock. Returns index. Emits `SolverLocked` log. |
 | `redeem_user(hashlock, secret)` | Redeem user lock by providing preimage. Transfers amount to recipient. |
 | `redeem_solver(hashlock, index, secret)` | Redeem solver lock. Reward routing depends on `reward_timelock`. |
 | `refund_user(hashlock)` | Refund after timelock. Recipient can refund anytime. |
@@ -89,6 +89,19 @@ EMPTY (0) --> PENDING (1) --> REDEEMED (3)
 | `get_user_lock(hashlock)` | View: returns UserLock state. |
 | `get_solver_lock(hashlock, index)` | View: returns SolverLock state. |
 | `get_solver_lock_count(hashlock)` | View: returns number of solver locks for a hashlock. |
+
+### Event Emission
+
+Events are emitted via `emit_public_log_unsafe` (bypassing the v4.2.0 `#[event]` macro's 10-field size limit, which is derived from private log encryption constraints and does not apply to public-only contracts). Each event has a unique tag for off-chain indexing:
+
+| Tag | Event |
+|---|---|
+| 1 | `UserLocked` |
+| 2 | `SolverLocked` |
+| 3 | `UserRedeemed` |
+| 4 | `SolverRedeemed` |
+| 5 | `UserRefunded` |
+| 6 | `SolverRefunded` |
 
 ### Reward Routing (Solver Redeem)
 
@@ -100,7 +113,7 @@ When redeeming a solver lock:
 
 | Network | Address |
 |---|---|
-| Testnet | `0x0f2c75ee97ee46f007b54f18cf6ecf4efecdc42710c67f4ff1cbbb83508153b7` |
+| Testnet | `0x2233bce6ff669363662dd88749129cae32a626203667df82a9151ad28964c3e9` |
 
 ## Compile Contract
 
@@ -111,110 +124,131 @@ aztec compile
 
 Output artifact: `contracts/train/target/train-Train.json`
 
-## Scripts
-
-All scripts run from the `scripts/` directory using `npx tsx <script>.ts`.
-
-Set environment via `AZTEC_ENV` (defaults to `local-network`):
+To regenerate the TypeScript wrapper after compilation:
 
 ```bash
-export AZTEC_ENV=testnet  # or local-network, devnet
+aztec codegen contracts/train/target/train-Train.json -o scripts/
 ```
 
-Or use the npm script shortcuts:
+## Scripts
+
+All scripts run from the `scripts/` directory.
+
+**Set the environment** before running any script:
+
+```bash
+export AZTEC_ENV=testnet      # Aztec testnet (requires Fee Juice from L1 Sepolia)
+export AZTEC_ENV=local-network # Local sandbox (default, requires `aztec start --sandbox`)
+export AZTEC_ENV=devnet        # Aztec devnet
+```
+
+Or use the npm script shortcuts which set the environment automatically:
 
 ```bash
 npm run setup:testnet
 npm run bridge:testnet
 npm run deploy:testnet
 npm run user-lock:testnet
-# etc.
+npm run solver-lock:testnet
+npm run user-redeem:testnet
+npm run solver-redeem:testnet
+npm run user-refund:testnet
+npm run solver-refund:testnet
+npm run read-locks:testnet
+npm run mint-again:testnet
+npm run tx-status:testnet
+npm run parse-events:testnet
+npm run verify-train:testnet
 ```
 
 ### Fee Payment
 
 Scripts automatically select the fee payment method based on the environment:
 
-- **local-network / devnet**: `SponsoredFeePaymentMethod` (SponsoredFPC pays all fees)
+- **local-network / devnet**: `SponsoredFeePaymentMethod` (SponsoredFPC pays all fees — no setup needed)
 - **testnet**: Fee Juice bridged from L1 (Sepolia). The first transaction per account uses `FeeJuicePaymentMethodWithClaim` to claim bridged Fee Juice; subsequent transactions pay from existing balance automatically (the SDK's `PREEXISTING_FEE_JUICE` mode — no payment method needed, the account contract handles `set_as_fee_payer()` + `end_setup()`).
 
-### Testnet Workflow
+## Testing Workflows
 
-On testnet, accounts need Fee Juice (bridged from L1 Sepolia) to pay for transactions. This requires a specific order:
+### Local Network (Sandbox)
 
-```
-1. setup.ts (first run)    → generates keys, saves to .env
-2. bridgeFeeJuice.ts       → bridges Fee Juice from L1 to all accounts
-3. setup.ts (second run)   → deploys accounts + token (claims bridged Fee Juice)
-4. deployTrain.ts          → deploys Train contract
-5. userLock.ts, etc.       → all subsequent scripts pay from Fee Juice balance
-```
-
-On local-network/devnet, just run each script once — SponsoredFPC handles all fees.
-
-### 1. Setup (Wallets + Token)
+The simplest way to test. No Fee Juice bridging needed.
 
 ```bash
+# 1. Start the sandbox (in a separate terminal)
+aztec start --sandbox
+
+# 2. Set environment
+export AZTEC_ENV=local-network
+
+# 3. Setup: deploy accounts, token, mint and distribute tokens
 npx tsx setup.ts
-```
 
-Creates 3 accounts (user, solver, deployer), deploys a Token contract, mints and distributes tokens. Saves all keys/addresses to `.env`.
-
-On testnet, the first run only generates keys and exits. After bridging (step 2), re-run to deploy.
-
-### 2. Bridge Fee Juice (testnet only)
-
-```bash
-npx tsx bridgeFeeJuice.ts [amount]
-```
-
-Bridges Fee Juice from L1 (Sepolia) to L2 for all accounts in `.env`. Run once with a large amount to fund all future transactions. Requires `L1_PRIVATE_KEY` in `.env` with a Sepolia-funded account. Saves claim data to `.env` — the first transaction per account automatically claims the bridged Fee Juice.
-
-### 3. Deploy Train Contract
-
-```bash
+# 4. Deploy Train contract
 npx tsx deployTrain.ts
-```
 
-Deploys the Train contract. Saves `TRAIN_ADDRESS` to `.env`.
+# 5. Run the full HTLC flow
+npx tsx userLock.ts          # User locks funds → saves secret + hashlock to .env
+npx tsx solverLock.ts        # Solver locks matching funds → saves index to .env
+npx tsx userRedeem.ts        # User redeems user lock (reveals secret on-chain)
+npx tsx solverRedeem.ts      # User redeems solver lock (using revealed secret)
 
-### 4. User Lock (Initiate Swap)
-
-```bash
-npx tsx userLock.ts
-```
-
-Generates a random secret, computes SHA256 hashlock, and locks funds on-chain. Saves `USER_LOCK_SECRET`, `USER_LOCK_HASHLOCK` to `.env`.
-
-### 5. Solver Lock (Match Swap)
-
-```bash
-npx tsx solverLock.ts
-```
-
-Solver locks matching funds against the same hashlock. In production the solver reads the hashlock from the source chain's `UserLocked` event; the script reads it from `.env` for convenience. Saves `SOLVER_LOCK_INDEX` to `.env`.
-
-### 6. Redeem
-
-```bash
-npx tsx userRedeem.ts    # Solver redeems user lock (reveals secret on-chain)
-npx tsx solverRedeem.ts  # User redeems solver lock (using revealed secret)
-```
-
-### 7. Refund
-
-```bash
-npx tsx userRefund.ts    # After user lock timelock expires
-npx tsx solverRefund.ts  # After solver lock timelock expires
-```
-
-### 8. Query Locks
-
-```bash
+# 6. Query lock state
 npx tsx readLocks.ts
+
+# 7. (Optional) Test refund flow — run userLock first, then wait for timelock
+npx tsx userLock.ts
+npx tsx userRefund.ts        # Only works after timelock expires
 ```
 
-Reads user lock and all solver locks for the hashlock in `.env`.
+### Testnet
+
+Requires Fee Juice bridged from L1 (Sepolia). Follow this exact order:
+
+```bash
+# 1. Set environment for ALL commands
+export AZTEC_ENV=testnet
+
+# 2. First run of setup — generates account keys and saves to .env
+#    This will exit with an error about missing claim data. That's expected.
+npx tsx setup.ts
+
+# 3. Add your Sepolia private key to .env
+#    Edit .env and set: L1_PRIVATE_KEY=0x<your-sepolia-private-key>
+#    The Sepolia account needs ETH for the L1 bridge transaction.
+
+# 4. Bridge Fee Juice from L1 to L2 for all accounts
+#    Use a large amount to fund many future transactions (e.g., 100000000000000000 = 0.1 ETH worth)
+npx tsx bridgeFeeJuice.ts
+
+# 5. Second run of setup — deploys accounts + token (claims bridged Fee Juice)
+npx tsx setup.ts
+
+# 6. Deploy Train contract
+npx tsx deployTrain.ts
+
+# 7. Run the full HTLC flow (each script pays from Fee Juice balance)
+npx tsx userLock.ts          # User locks funds → saves secret + hashlock to .env
+npx tsx solverLock.ts        # Solver locks matching funds → saves index to .env
+npx tsx userRedeem.ts        # User redeems user lock (reveals secret on-chain)
+npx tsx solverRedeem.ts      # User redeems solver lock (using revealed secret)
+
+# 8. Query lock state
+npx tsx readLocks.ts
+
+# 9. (Optional) Mint more tokens if needed
+npx tsx mintAgain.ts
+
+# 10. (Optional) Verify contract on AztecScan
+npx tsx verifyTrainAztecScan.ts
+```
+
+**Important testnet notes:**
+- Step 2 (first `setup.ts`) will fail with "no claim data found" — this is expected. It generates the keys needed for step 4.
+- Step 4 (`bridgeFeeJuice.ts`) bridges once for all accounts. You only need to run this once.
+- After step 5, all subsequent scripts pay from existing Fee Juice balance — no more bridging needed.
+- Testnet transactions are slower (~30-60s per tx). Scripts have extended timeouts configured.
+- To run a fresh HTLC cycle, run `userLock.ts` again (generates a new secret/hashlock).
 
 ## Configuration
 
@@ -247,7 +281,7 @@ Environment-specific configs live in `scripts/config/`:
 
 ### Aztec -> Destination Chain
 
-1. **User** runs `userLock.ts` - locks funds on Aztec with hashlock
+1. **User** runs `userLock.ts` — locks funds on Aztec with hashlock
 2. **Solver** observes `UserLocked` event, runs `solverLock.ts` on destination chain
 3. **User** redeems on destination chain (reveals secret)
 4. **Solver** reads revealed secret, runs `userRedeem.ts` on Aztec

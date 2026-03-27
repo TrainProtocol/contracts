@@ -34,17 +34,19 @@
   "description": "",
   "dependencies": {
     "@aztec-artifacts/client": "latest",
-    "@aztec/accounts": "4.1.0-rc.2",
-    "@aztec/aztec.js": "4.1.0-rc.2",
-    "@aztec/noir-contracts.js": "4.1.0-rc.2",
-    "@aztec/wallets": "4.1.0-rc.2",
-    "@defi-wonderland/aztec-standards": "github:defi-wonderland/aztec-standards#chore/upgrade-4.1.0-rc.2",
+    "@aztec/accounts": "4.2.0-aztecnr-rc.2",
+    "@aztec/aztec.js": "4.2.0-aztecnr-rc.2",
+    "@aztec/noir-contracts.js": "4.2.0-aztecnr-rc.2",
+    "@aztec/wallets": "4.2.0-aztecnr-rc.2",
+    "@defi-wonderland/aztec-standards": "github:defi-wonderland/aztec-standards#chore/upgrade-4.2.0-aztecnr-rc.2",
     "aztec-scan-sdk": "github:aztec-scan/aztec-scan-sdk",
     "dotenv": "^16.5.0"
   },
   "overrides": {
-    "@aztec/foundation": "4.1.0-rc.2",
-    "@aztec/stdlib": "4.1.0-rc.2"
+    "@aztec/foundation": "4.2.0-aztecnr-rc.2",
+    "@aztec/stdlib": "4.2.0-aztecnr-rc.2",
+    "@aztec/aztec.js": "4.2.0-aztecnr-rc.2",
+    "@aztec/wallets": "4.2.0-aztecnr-rc.2"
   },
   "devDependencies": {
     "@types/node": "^22.14.1",

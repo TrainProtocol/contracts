@@ -15,7 +15,7 @@ use aztec::macros::aztec;
 pub contract Train {
     use std::meta::derive;
 
-    use aztec::macros::{events::event, functions::{external, initializer, view}, storage::storage};
+    use aztec::macros::{functions::{external, initializer, view}, storage::storage};
 
     use aztec::{
         protocol::{address::AztecAddress, traits::{Deserialize, Packable, Serialize}},
@@ -26,7 +26,7 @@ pub contract Train {
 
     use crate::lib::hashlock_to_fields;
 
-    #[event]
+    #[derive(Serialize)]
     struct UserLocked {
         hashlock: [u8; 32],
         sender: AztecAddress,
@@ -48,7 +48,7 @@ pub contract Train {
         solverData: [u8; 256],
     }
 
-    #[event]
+    #[derive(Serialize)]
     struct SolverLocked {
         hashlock: [u8; 32],
         sender: AztecAddress,
@@ -69,14 +69,14 @@ pub contract Train {
         data: [u8; 256],
     }
 
-    #[event]
+    #[derive(Serialize)]
     struct UserRedeemed {
         hashlock: [u8; 32],
         redeemer: AztecAddress,
         secret: [u8; 32],
     }
 
-    #[event]
+    #[derive(Serialize)]
     struct SolverRedeemed {
         hashlock: [u8; 32],
         index: Field,
@@ -84,16 +84,24 @@ pub contract Train {
         secret: [u8; 32],
     }
 
-    #[event]
+    #[derive(Serialize)]
     struct UserRefunded {
         hashlock: [u8; 32],
     }
 
-    #[event]
+    #[derive(Serialize)]
     struct SolverRefunded {
         hashlock: [u8; 32],
         index: Field,
     }
+
+    // Event type tags for off-chain indexing
+    global EVENT_USER_LOCKED: Field = 1;
+    global EVENT_SOLVER_LOCKED: Field = 2;
+    global EVENT_USER_REDEEMED: Field = 3;
+    global EVENT_SOLVER_REDEEMED: Field = 4;
+    global EVENT_USER_REFUNDED: Field = 5;
+    global EVENT_SOLVER_REFUNDED: Field = 6;
 
     global STATUS_EMPTY: u8 = 0;
     global STATUS_PENDING: u8 = 1;
@@ -186,7 +194,8 @@ pub contract Train {
             transfer_nonce,
         ));
 
-        self.emit(
+        self.context.emit_public_log_unsafe(
+            EVENT_USER_LOCKED,
             UserLocked {
                 hashlock,
                 sender,
@@ -299,7 +308,8 @@ pub contract Train {
             ));
         }
 
-        self.emit(
+        self.context.emit_public_log_unsafe(
+            EVENT_SOLVER_LOCKED,
             SolverLocked {
                 hashlock,
                 sender,
@@ -353,7 +363,7 @@ pub contract Train {
         ));
 
         let redeemer = self.msg_sender();
-        self.emit(UserRedeemed { hashlock, redeemer, secret });
+        self.context.emit_public_log_unsafe(EVENT_USER_REDEEMED, UserRedeemed { hashlock, redeemer, secret });
     }
 
     #[external("public")]
@@ -420,7 +430,7 @@ pub contract Train {
             }
         }
 
-        self.emit(SolverRedeemed { hashlock, index, redeemer, secret });
+        self.context.emit_public_log_unsafe(EVENT_SOLVER_REDEEMED, SolverRedeemed { hashlock, index, redeemer, secret });
     }
 
     #[external("public")]
@@ -455,7 +465,7 @@ pub contract Train {
             0,
         ));
 
-        self.emit(UserRefunded { hashlock });
+        self.context.emit_public_log_unsafe(EVENT_USER_REFUNDED, UserRefunded { hashlock });
     }
 
     #[external("public")]
@@ -510,7 +520,7 @@ pub contract Train {
             }
         }
 
-        self.emit(SolverRefunded { hashlock, index });
+        self.context.emit_public_log_unsafe(EVENT_SOLVER_REFUNDED, SolverRefunded { hashlock, index });
     }
 
     // ============ View Functions ============
