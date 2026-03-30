@@ -69,9 +69,11 @@ contract TrainFuzzTest is Test {
         timelockDelta: timelockDelta,
         rewardTimelockDelta: rewardTimelockDelta,
         quoteExpiry: quoteExpiry,
-        sender: initiator,
         recipient: receiver,
+        refundTo: initiator,
         token: tokenAddr,
+        payoutCurve: address(0),
+        payoutCurveData: '',
         rewardToken: 'ETH',
         rewardRecipient: 'rewardRecipient',
         srcChain: 'ETH'
@@ -95,11 +97,13 @@ contract TrainFuzzTest is Test {
         reward: reward,
         timelockDelta: timelockDelta,
         rewardTimelockDelta: rewardTimelockDelta,
-        sender: solver,
         recipient: receiver,
         rewardRecipient: rewardTo,
+        refundTo: solver,
         token: tokenAddr,
         rewardToken: rewardTokenAddr,
+        payoutCurve: address(0),
+        payoutCurveData: '',
         srcChain: 'ETH'
       });
   }

@@ -38,7 +38,7 @@ The `Train.sol` contract handles both native ETH and ERC20 tokens with a unified
 
 ### User Operations
 
-#### `userLock(params, dst, data)`
+#### `userLock(params, dst, userData, solverData)`
 
 Creates a user lock to initiate a cross-chain swap.
 
@@ -50,9 +50,11 @@ struct UserLockParams {
     uint48 timelockDelta;    // Seconds until timelock expires
     uint48 rewardTimelockDelta; // Seconds until reward goes to user
     uint48 quoteExpiry;      // Quote validity timestamp
-    address sender;          // Refund recipient
+    address refundTo;        // Refund recipient (if lock is refunded or decay excess)
     address recipient;       // Receives funds on redeem
     address token;           // Token address (0x0 for ETH)
+    address payoutCurve;     // Optional decay curve address (0x0 for none)
+    bytes payoutCurveData;   // ABI-encoded curve config (empty if no curve)
     string rewardToken;      // Reward token (logged only)
     string rewardRecipient;  // Reward recipient (logged only)
     string srcChain;         // Source chain identifier
@@ -66,6 +68,7 @@ struct UserLockParams {
 - `block.timestamp < quoteExpiry`
 - Token must be valid (ETH or contract with code)
 - Hashlock must not already exist
+- If `payoutCurve` is set, it must have code and implement `IPayoutCurve`
 
 #### `redeemUser(hashlock, secret)`
 
@@ -78,7 +81,7 @@ Redeems a user lock with the secret preimage. Anyone can call this.
 
 #### `refundUser(hashlock)`
 
-Refunds a user lock back to the sender.
+Refunds a user lock. Full amount is returned to `refundTo` (no decay applied on refund).
 
 **Access Control:**
 
@@ -98,11 +101,13 @@ struct SolverLockParams {
     uint256 reward;          // Solver incentive amount
     uint48 timelockDelta;    // Seconds until timelock
     uint48 rewardTimelockDelta; // Seconds until reward goes to redeemer
-    address sender;          // Refund recipient (solver)
+    address refundTo;        // Refund recipient (solver, if lock is refunded or decay excess)
     address recipient;       // User receiving funds
     address rewardRecipient; // Gets reward if redeemed early
     address token;           // Main token (0x0 for ETH)
     address rewardToken;     // Reward token (0x0 for ETH)
+    address payoutCurve;     // Optional decay curve address (0x0 for none)
+    bytes payoutCurveData;   // ABI-encoded curve config (empty if no curve)
     string srcChain;         // Source chain identifier
 }
 ```
@@ -132,32 +137,45 @@ Time: ──────────────────┼─────�
 
 #### `refundSolver(hashlock, index)`
 
-Refunds a solver lock (amount + reward) to the sender. Only callable after timelock expires.
+Refunds a solver lock (amount + reward) to `refundTo`. Only callable after timelock expires. No decay applied on refund.
 
-## Storage Slot Optimization
+## Storage Layout
 
-### UserLock (5 slots)
+### UserLock fields
 
-```
-Slot 0: [────────────────── secret (256 bits) ──────────────────]
-Slot 1: [────────────────── amount (256 bits) ──────────────────]
-Slot 2: [─ sender (160) ─][─ timelock (48) ─][─ status (8) ─][39 free]
-Slot 3: [─────────────────── recipient (160 bits) ───────────────][96 free]
-Slot 4: [───────────────────── token (160 bits) ─────────────────][96 free]
-```
+| Field | Type | Notes |
+|---|---|---|
+| `secret` | `uint256` | Set on redeem |
+| `amount` | `uint256` | Actual amount received (fee-on-transfer safe) |
+| `startTime` | `uint48` | Block timestamp at lock creation |
+| `timelock` | `uint48` | Absolute expiry timestamp |
+| `status` | `LockStatus` | `Pending` / `Redeemed` / `Refunded` |
+| `sender` | `address` | `msg.sender` at lock time (tracked in history) |
+| `refundTo` | `address` | Receives refunds and decay excess |
+| `recipient` | `address` | Receives payout on redeem |
+| `token` | `address` | `address(0)` for ETH |
+| `payoutCurve` | `address` | Optional decay curve library (`address(0)` = none) |
+| `payoutCurveData` | `bytes` | ABI-encoded curve config (dynamic) |
 
-### SolverLock (8 slots)
+### SolverLock fields
 
-```
-Slot 0: [────────────────── secret (256 bits) ──────────────────]
-Slot 1: [────────────────── amount (256 bits) ──────────────────]
-Slot 2: [────────────────── reward (256 bits) ──────────────────]
-Slot 3: [─ sender (160) ─][─ timelock (48) ─][─ rewardTimelock (48) ─]
-Slot 4: [─────── recipient (160) ───────][─ status (8) ─][88 free]
-Slot 5: [─────────────── rewardRecipient (160 bits) ─────────────][96 free]
-Slot 6: [───────────────────── token (160 bits) ─────────────────][96 free]
-Slot 7: [─────────────────── rewardToken (160 bits) ──────────────][96 free]
-```
+| Field | Type | Notes |
+|---|---|---|
+| `secret` | `uint256` | Set on redeem |
+| `amount` | `uint256` | Actual amount received |
+| `reward` | `uint256` | Actual reward received |
+| `startTime` | `uint48` | Block timestamp at lock creation |
+| `timelock` | `uint48` | Absolute expiry timestamp |
+| `rewardTimelock` | `uint48` | Reward recipient switches after this |
+| `status` | `LockStatus` | `Pending` / `Redeemed` / `Refunded` |
+| `sender` | `address` | `msg.sender` at lock time |
+| `refundTo` | `address` | Receives refunds and decay excess |
+| `recipient` | `address` | Receives amount on redeem |
+| `rewardRecipient` | `address` | Receives reward if redeemed before `rewardTimelock` |
+| `token` | `address` | `address(0)` for ETH |
+| `rewardToken` | `address` | `address(0)` for ETH |
+| `payoutCurve` | `address` | Optional decay curve library (`address(0)` = none) |
+| `payoutCurveData` | `bytes` | ABI-encoded curve config (dynamic) |
 
 ## Security Features
 
@@ -231,6 +249,8 @@ Emitted when a lock is refunded.
 | `RefundNotAllowed`      | Refund attempted too early               |
 | `InvalidToken`          | Token address has no code                |
 | `QuoteExpired`          | Quote expiry timestamp passed            |
+| `InvalidPayoutCurve`    | Curve has no code or does not implement `IPayoutCurve` |
+| `InvalidPayout`         | Curve returned 0 or more than amount     |
 
 ## Historical Swap Tracking
 
@@ -362,7 +382,7 @@ Train.UserLockParams memory params = Train.UserLockParams({
     timelockDelta: 3600,  // 1 hour
     rewardTimelockDelta: 1800,  // 30 minutes
     quoteExpiry: uint48(block.timestamp + 300),  // 5 minutes
-    sender: msg.sender,
+    refundTo: msg.sender,
     recipient: SOLVER_ADDRESS,
     token: address(0),  // ETH
     rewardToken: "ETH",
@@ -377,7 +397,7 @@ Train.DestinationInfo memory dst = Train.DestinationInfo({
     dstToken: "USDC"
 });
 
-train.userLock{value: 1 ether}(params, dst, "");
+train.userLock{value: 1 ether}(params, dst, "", "");
 
 // Store secret securely - needed to redeem on destination chain
 ```
@@ -393,7 +413,7 @@ Train.SolverLockParams memory params = Train.SolverLockParams({
     reward: 0.01 ether,
     timelockDelta: 1800,  // 30 minutes
     rewardTimelockDelta: 900,  // 15 minutes
-    sender: msg.sender,
+    refundTo: msg.sender,
     recipient: USER_ADDRESS,
     rewardRecipient: msg.sender,
     token: USDC,
@@ -412,6 +432,95 @@ train.redeemSolver(hashlock, index, secret);
 
 // Solver redeems user lock on source (after seeing secret from above)
 train.redeemUser(hashlock, secret);
+```
+
+## Payout Curves
+
+Locks can optionally specify a payout curve library that reduces the claimable amount over time after the grace period. When `payoutCurve` is set on a lock, the redeemer receives only `computePayout(...)` tokens, and any remainder is returned to `refundTo`. Refunds always return the full amount regardless of decay.
+
+### Interface
+
+All curve libraries implement `IPayoutCurve`:
+
+```solidity
+interface IPayoutCurve {
+    function computePayout(
+        uint256 amount,
+        uint48 startTime,
+        uint48 currentTime,
+        bytes calldata config
+    ) external view returns (uint256 payout);
+
+    function supportsInterface(bytes4 interfaceId) external pure returns (bool);
+}
+```
+
+Solidity emits `STATICCALL` at the call site for `external view` functions, so a curve library cannot modify Train's state. At deposit time, Train calls `supportsInterface(type(IPayoutCurve).interfaceId)` to verify the address is a valid curve — any contract that returns `false` or reverts is rejected with `InvalidPayoutCurve`.
+
+### Implementations
+
+#### `SqrtPayoutCurve` (library)
+
+Combined sqrt + linear decay. A and B are supplied directly as token-denominated coefficients.
+
+```
+P(t) = max(Pmin, amount - A*sqrt(Δt)/1e18 - B*Δt/1e18)
+```
+
+Config (128 bytes): `abi.encode(uint256 gracePeriod, uint256 A, uint256 B, uint256 Pmin)`
+
+| Field | Description |
+|-------|-------------|
+| `gracePeriod` | Seconds of full payout before decay begins |
+| `A` | Sqrt-term coefficient × 1e18 (token-wei / √s) |
+| `B` | Linear-term coefficient × 1e18 (token-wei / s) |
+| `Pmin` | Absolute floor in token-wei |
+
+#### `LinearPayoutCurve` (library)
+
+Simple linear decay at a fixed rate per second.
+
+```
+P(t) = max(Pmin, amount - rate*Δt/1e18)
+```
+
+Config (96 bytes): `abi.encode(uint256 gracePeriod, uint256 rate, uint256 Pmin)`
+
+| Field | Description |
+|-------|-------------|
+| `gracePeriod` | Seconds of full payout before decay begins |
+| `rate` | Decay rate × 1e18 (token-wei / s); e.g. `1e33` = 0.001 ether/s |
+| `Pmin` | Absolute floor in token-wei |
+
+#### `VolatilityDecayCurve` (library)
+
+Parameterised by market quantities rather than raw coefficients. A, B, and Pmin are derived from `amount` at call time, so the same config bytes apply to any lock size.
+
+```
+P(t) = max(Pmin, P0 - A*sqrt(Δt) - B*Δt)
+
+Pmin = r * amount
+A    = amount * σ_ann / sqrt(SECONDS_PER_YEAR)   [early-delay penalty]
+B    = (amount - Pmin) / H                        [sustained-delay penalty]
+```
+
+Config (128 bytes): `abi.encode(uint256 gracePeriod, uint256 sigmaAnn, uint256 H, uint256 r)`
+
+| Field | Description |
+|-------|-------------|
+| `gracePeriod` | Seconds of full payout before decay begins |
+| `sigmaAnn` | Annualised volatility × 1e18; e.g. `1.10e18` for 110% vol |
+| `H` | Decay horizon in seconds (time for linear term alone to exhaust `amount - Pmin`) |
+| `r` | Floor ratio × 1e18; must be `< 1e18`. Recommended range: `[0.80e18, 0.90e18]` |
+
+**Example config** (110% vol, 30-minute horizon, 85% floor):
+```solidity
+bytes memory config = abi.encode(
+    60,       // gracePeriod: 1-minute relay buffer
+    1.10e18,  // sigmaAnn: 110% annualised volatility
+    1800,     // H: 30-minute decay horizon
+    0.85e18   // r: 85% floor ratio
+);
 ```
 
 ## Build & Test
@@ -447,31 +556,14 @@ forge coverage
 - RPC endpoint for target network
 - Deployer private key with sufficient ETH for gas
 
-### Deploy Script
+### Deploy Scripts
 
-Create a deployment script at `script/Deploy.s.sol`:
+Two deployment scripts are provided under `script/`:
 
-```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity 0.8.30;
-
-import "forge-std/Script.sol";
-import "../src/Train.sol";
-
-contract DeployTrain is Script {
-    function run() external {
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-
-        vm.startBroadcast(deployerPrivateKey);
-
-        Train train = new Train();
-
-        vm.stopBroadcast();
-
-        console.log("Train deployed at:", address(train));
-    }
-}
-```
+| Script | Deploys |
+|--------|---------|
+| `script/Deploy.s.sol` | `Train` |
+| `script/DeployPayoutCurves.s.sol` | `SqrtPayoutCurve`, `LinearPayoutCurve`, `VolatilityDecayCurve` |
 
 ### Deploy Commands
 
@@ -480,11 +572,20 @@ contract DeployTrain is Script {
 export PRIVATE_KEY=<your-private-key>
 export RPC_URL=<network-rpc-url>
 
-# Deploy to network
-forge script script/Deploy.s.sol:DeployTrain --rpc-url $RPC_URL --broadcast
+# Deploy Train contract
+forge script script/Deploy.s.sol --rpc-url $RPC_URL --broadcast
 
-# Deploy with verification (Etherscan)
-forge script script/Deploy.s.sol:DeployTrain \
+# Deploy payout curve contracts
+forge script script/DeployPayoutCurves.s.sol --rpc-url $RPC_URL --broadcast
+
+# Deploy with Etherscan verification
+forge script script/Deploy.s.sol \
+    --rpc-url $RPC_URL \
+    --broadcast \
+    --verify \
+    --etherscan-api-key <your-api-key>
+
+forge script script/DeployPayoutCurves.s.sol \
     --rpc-url $RPC_URL \
     --broadcast \
     --verify \
