@@ -111,7 +111,7 @@ pub contract Train {
     pub struct UserLock {
         secret: [u8; 32],
         amount: u128,
-        sender: AztecAddress,
+        refund_to: AztecAddress,
         timelock: u64,
         status: u8,
         recipient: AztecAddress,
@@ -123,7 +123,7 @@ pub contract Train {
         secret: [u8; 32],
         amount: u128,
         reward: u128,
-        sender: AztecAddress,
+        refund_to: AztecAddress,
         timelock: u64,
         reward_timelock: u64,
         recipient: AztecAddress,
@@ -153,7 +153,7 @@ pub contract Train {
         timelock_delta: u64,
         reward_timelock_delta: u64,
         quote_expiry: u64,
-        sender: AztecAddress,
+        refund_to: AztecAddress,
         recipient: AztecAddress,
         token: AztecAddress,
         reward_token: [u8; 90],
@@ -166,6 +166,7 @@ pub contract Train {
         user_data: [u8; 256],
         solver_data: [u8; 256],
     ) {
+        let sender = self.msg_sender();
         assert(amount > 0, "ZeroAmount");
         assert(timelock_delta > 0, "InvalidTimelock");
         assert(self.context.timestamp() < quote_expiry, "QuoteExpired");
@@ -179,7 +180,7 @@ pub contract Train {
         let lock = UserLock {
             secret: [0u8; 32],
             amount,
-            sender,
+            refund_to,
             timelock,
             status: STATUS_PENDING,
             recipient,
@@ -228,7 +229,7 @@ pub contract Train {
         reward_transfer_nonce: Field,
         timelock_delta: u64,
         reward_timelock_delta: u64,
-        sender: AztecAddress,
+        refund_to: AztecAddress,
         recipient: AztecAddress,
         reward_recipient: AztecAddress,
         token: AztecAddress,
@@ -240,6 +241,7 @@ pub contract Train {
         dst_token: [u8; 90],
         data: [u8; 256],
     ) -> pub Field {
+        let sender = self.msg_sender();
         assert(amount > 0, "ZeroAmount");
         assert(timelock_delta > 0, "InvalidTimelock");
         if reward > 0 {
@@ -262,7 +264,7 @@ pub contract Train {
             secret: [0u8; 32],
             amount,
             reward,
-            sender,
+            refund_to,
             timelock,
             reward_timelock,
             recipient,
@@ -347,7 +349,7 @@ pub contract Train {
         let redeemed_lock = UserLock {
             secret,
             amount: lock.amount,
-            sender: lock.sender,
+            refund_to: lock.refund_to,
             timelock: lock.timelock,
             status: STATUS_REDEEMED,
             recipient: lock.recipient,
@@ -384,7 +386,7 @@ pub contract Train {
             secret,
             amount: lock.amount,
             reward: lock.reward,
-            sender: lock.sender,
+            refund_to: lock.refund_to,
             timelock: lock.timelock,
             reward_timelock: lock.reward_timelock,
             recipient: lock.recipient,
@@ -450,7 +452,7 @@ pub contract Train {
         let refunded_lock = UserLock {
             secret: lock.secret,
             amount: lock.amount,
-            sender: lock.sender,
+            refund_to: lock.refund_to,
             timelock: lock.timelock,
             status: STATUS_REFUNDED,
             recipient: lock.recipient,
@@ -460,7 +462,7 @@ pub contract Train {
 
         self.call(Token::at(lock.token).transfer_public_to_public(
             self.address,
-            lock.sender,
+            lock.refund_to,
             lock.amount,
             0,
         ));
@@ -484,7 +486,7 @@ pub contract Train {
             secret: lock.secret,
             amount: lock.amount,
             reward: lock.reward,
-            sender: lock.sender,
+            refund_to: lock.refund_to,
             timelock: lock.timelock,
             reward_timelock: lock.reward_timelock,
             recipient: lock.recipient,
@@ -495,25 +497,25 @@ pub contract Train {
         };
         self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(index).write(refunded_lock);
 
-        // Return amount + reward to sender
+        // Return amount + reward to refund_to
         if (lock.reward > 0) & (lock.token == lock.reward_token) {
             self.call(Token::at(lock.token).transfer_public_to_public(
                 self.address,
-                lock.sender,
+                lock.refund_to,
                 lock.amount + lock.reward,
                 0,
             ));
         } else {
             self.call(Token::at(lock.token).transfer_public_to_public(
                 self.address,
-                lock.sender,
+                lock.refund_to,
                 lock.amount,
                 0,
             ));
             if lock.reward > 0 {
                 self.call(Token::at(lock.reward_token).transfer_public_to_public(
                     self.address,
-                    lock.sender,
+                    lock.refund_to,
                     lock.reward,
                     0,
                 ));

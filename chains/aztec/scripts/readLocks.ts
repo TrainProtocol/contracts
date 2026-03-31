@@ -39,7 +39,7 @@ async function main(): Promise<void> {
   console.log('\n=== User Lock ===');
   console.log(`UserLock status: ${decodeLockStatus(userLock.status)}`);
   console.log(`UserLock amount: ${userLock.amount}`);
-  console.log(`UserLock sender: ${userLock.sender.toString()}`);
+  console.log(`UserLock refund_to: ${userLock.refund_to.toString()}`);
   console.log(`UserLock recipient: ${userLock.recipient.toString()}`);
   console.log(`UserLock token: ${userLock.token.toString()}`);
   console.log(`UserLock timelock: ${userLock.timelock}`);
@@ -61,7 +61,7 @@ async function main(): Promise<void> {
     console.log(`SolverLock status: ${decodeLockStatus(solverLock.status)}`);
     console.log(`SolverLock amount: ${solverLock.amount}`);
     console.log(`SolverLock reward: ${solverLock.reward}`);
-    console.log(`SolverLock sender: ${solverLock.sender.toString()}`);
+    console.log(`SolverLock refund_to: ${solverLock.refund_to.toString()}`);
     console.log(`SolverLock recipient: ${solverLock.recipient.toString()}`);
     console.log(`SolverLock token: ${solverLock.token.toString()}`);
     console.log(`SolverLock reward token: ${solverLock.reward_token.toString()}`);
