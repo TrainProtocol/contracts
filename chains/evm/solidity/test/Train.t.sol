@@ -71,7 +71,7 @@ contract TrainTest is Test {
         timelockDelta: timelockDelta,
         rewardTimelockDelta: rewardTimelockDelta,
         quoteExpiry: uint48(block.timestamp + 60),
-        sender: initiator,
+        refundTo: address(0),
         recipient: receiver,
         token: tokenAddr,
         rewardToken: 'ETH',
@@ -94,7 +94,7 @@ contract TrainTest is Test {
         reward: reward,
         timelockDelta: timelockDelta,
         rewardTimelockDelta: rewardTimelockDelta,
-        sender: solver,
+        refundTo: address(0),
         recipient: receiver,
         rewardRecipient: rewardRecipient,
         token: tokenAddr,
@@ -613,6 +613,7 @@ contract TrainTest is Test {
       hashlock,
       initiator,
       receiver,
+      initiator,
       'ETH',
       NATIVE_ETH,
       amount,
@@ -647,6 +648,7 @@ contract TrainTest is Test {
       hashlock,
       solver,
       receiver,
+      solver,
       1,
       'ETH',
       NATIVE_ETH,
@@ -1108,7 +1110,6 @@ contract TrainTest is Test {
 
     // solver creates a different lock
     Train.UserLockParams memory params2 = _defaultUserParams(2 ether, NATIVE_ETH);
-    params2.sender = solver;
 
     vm.prank(solver);
     train.userLock{ value: 2 ether }(params2, _defaultDestination(), '', '');
@@ -1486,6 +1487,7 @@ contract TrainTest is Test {
       hashlock,
       initiator,
       receiver,
+      initiator,
       'ETH',
       NATIVE_ETH,
       amount,
@@ -1521,6 +1523,7 @@ contract TrainTest is Test {
       hashlock,
       solver,
       receiver,
+      solver,
       1,
       'ETH',
       NATIVE_ETH,

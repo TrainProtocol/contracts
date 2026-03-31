@@ -73,11 +73,11 @@ contract Train is ReentrancyGuard {
   }
 
   /// @notice User-initiated lock storage structure
-  /// @dev Optimized for 5 storage slots
   struct UserLock {
     uint256 secret;
     uint256 amount;
     address sender;
+    address refundTo;
     uint48 timelock;
     LockStatus status;
     address recipient;
@@ -85,12 +85,12 @@ contract Train is ReentrancyGuard {
   }
 
   /// @notice Solver-initiated lock storage structure
-  /// @dev Optimized for 8 storage slots
   struct SolverLock {
     uint256 secret;
     uint256 amount;
     uint256 reward;
     address sender;
+    address refundTo;
     uint48 timelock;
     uint48 rewardTimelock;
     address recipient;
@@ -105,6 +105,7 @@ contract Train is ReentrancyGuard {
     bytes32 indexed hashlock,
     address indexed sender,
     address indexed recipient,
+    address refundTo,
     string srcChain,
     address token,
     uint256 amount,
@@ -127,6 +128,7 @@ contract Train is ReentrancyGuard {
     bytes32 indexed hashlock,
     address indexed sender,
     address indexed recipient,
+    address refundTo,
     uint256 index,
     string srcChain,
     address token,
@@ -171,7 +173,7 @@ contract Train is ReentrancyGuard {
     uint48 timelockDelta;
     uint48 rewardTimelockDelta;
     uint48 quoteExpiry;
-    address sender;
+    address refundTo;
     address recipient;
     address token;
     string rewardToken;
@@ -186,7 +188,7 @@ contract Train is ReentrancyGuard {
     uint256 reward;
     uint48 timelockDelta;
     uint48 rewardTimelockDelta;
-    address sender;
+    address refundTo;
     address recipient;
     address rewardRecipient;
     address token;
@@ -226,18 +228,18 @@ contract Train is ReentrancyGuard {
     uint48 timelock = uint48(block.timestamp) + params.timelockDelta;
 
     UserLock storage lock = userLocks[params.hashlock];
-    lock.sender = params.sender;
-    lock.amount = params.amount;
+    lock.sender = msg.sender;
+    lock.refundTo = params.refundTo == address(0) ? msg.sender : params.refundTo;
     lock.recipient = params.recipient;
     lock.timelock = timelock;
     lock.status = LockStatus.Pending;
     lock.token = params.token;
 
     // Track hashlock for this user
-    userLockHashes[params.sender].push(params.hashlock);
+    userLockHashes[msg.sender].push(params.hashlock);
 
-    _transferIn(params.token, params.amount);
-    _emitUserLocked(params, dst, timelock, userData, solverData);
+    lock.amount = _transferIn(params.token, params.amount);
+    _emitUserLocked(params, dst, timelock, msg.sender, lock.refundTo, userData, solverData);
   }
 
   /// @notice Create a solver lock to fulfill a swap
@@ -263,10 +265,9 @@ contract Train is ReentrancyGuard {
 
     index = ++solverLockCount[params.hashlock];
     SolverLock storage lock = solverLocks[params.hashlock][index];
-    lock.sender = params.sender;
-    lock.amount = params.amount;
+    lock.sender = msg.sender;
+    lock.refundTo = params.refundTo == address(0) ? msg.sender : params.refundTo;
     lock.recipient = params.recipient;
-    lock.reward = params.reward;
     lock.rewardRecipient = params.rewardRecipient;
     lock.timelock = timelock;
     lock.rewardTimelock = rewardTimelock;
@@ -274,8 +275,8 @@ contract Train is ReentrancyGuard {
     lock.status = LockStatus.Pending;
     lock.rewardToken = params.rewardToken;
 
-    _transferInMixed(params.token, params.amount, params.rewardToken, params.reward);
-    _emitSolverLocked(params, dst, index, timelock, rewardTimelock, data);
+    (lock.amount, lock.reward) = _transferInMixed(params.token, params.amount, params.rewardToken, params.reward);
+    _emitSolverLocked(params, dst, index, timelock, rewardTimelock, msg.sender, lock.refundTo, data);
   }
 
   /// @notice Refund a user lock
@@ -291,11 +292,11 @@ contract Train is ReentrancyGuard {
     }
 
     lock.status = LockStatus.Refunded;
-    _transferOut(lock.token, payable(sender), lock.amount);
+    _transferOut(lock.token, payable(lock.refundTo), lock.amount);
     emit UserRefunded(hashlock);
   }
 
-  /// @notice Refund a solver lock (amount + reward returned to sender)
+  /// @notice Refund a solver lock (amount + reward returned to refundTo)
   /// @dev Only callable after timelock expires
   /// @param hashlock The hashlock identifying the lock
   /// @param index The index of the solver lock
@@ -307,7 +308,14 @@ contract Train is ReentrancyGuard {
     if (lock.timelock > block.timestamp) revert RefundNotAllowed();
 
     lock.status = LockStatus.Refunded;
-    _transferOutMixed(lock.token, lock.amount, payable(sender), lock.rewardToken, lock.reward, payable(sender));
+    _transferOutMixed(
+      lock.token,
+      lock.amount,
+      payable(lock.refundTo),
+      lock.rewardToken,
+      lock.reward,
+      payable(lock.refundTo)
+    );
     emit SolverRefunded(hashlock, index);
   }
 
@@ -490,22 +498,34 @@ contract Train is ReentrancyGuard {
 
   /// @dev Transfer ETH or ERC20 into the contract
   /// @param token Token address (NATIVE_ETH for ETH)
-  /// @param amount Amount to transfer
-  function _transferIn(address token, uint256 amount) internal {
+  /// @param amount Amount requested by the caller
+  /// @return received Actual amount received; equals amount for ETH, may be less for fee-on-transfer ERC20s
+  function _transferIn(address token, uint256 amount) internal returns (uint256 received) {
     if (token == NATIVE_ETH) {
       if (msg.value != amount) revert MsgValueMismatch();
+      return amount;
     } else {
       if (msg.value != 0) revert MsgValueMismatch();
+      uint256 before = IERC20(token).balanceOf(address(this));
       IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+      return IERC20(token).balanceOf(address(this)) - before;
     }
   }
 
   /// @dev Transfer amount and reward tokens into the contract
   /// @param token Main token address
-  /// @param amount Main amount to transfer
+  /// @param amount Main amount requested
   /// @param rewardToken Reward token address
-  /// @param reward Reward amount to transfer
-  function _transferInMixed(address token, uint256 amount, address rewardToken, uint256 reward) internal {
+  /// @param reward Reward amount requested
+  /// @return receivedAmount Actual main amount received; may be less than amount for fee-on-transfer tokens
+  /// @return receivedReward Actual reward amount received; may be less than reward for fee-on-transfer tokens.
+  ///         When token == rewardToken, the fee is split proportionally between amount and reward.
+  function _transferInMixed(
+    address token,
+    uint256 amount,
+    address rewardToken,
+    uint256 reward
+  ) internal returns (uint256 receivedAmount, uint256 receivedReward) {
     uint256 expectedEth;
     if (token == NATIVE_ETH) {
       expectedEth = amount;
@@ -517,15 +537,28 @@ contract Train is ReentrancyGuard {
     }
     if (msg.value != expectedEth) revert MsgValueMismatch();
 
+    // ETH amounts are always exact
+    if (token == NATIVE_ETH) receivedAmount = amount;
+    if (reward > 0 && rewardToken == NATIVE_ETH) receivedReward = reward;
+
     if (token != NATIVE_ETH) {
-      uint256 totalAmount = amount;
-      if (reward > 0 && rewardToken == token) {
-        totalAmount += reward;
-      }
+      bool sameToken = reward > 0 && rewardToken == token;
+      uint256 totalAmount = sameToken ? amount + reward : amount;
+      uint256 before = IERC20(token).balanceOf(address(this));
       IERC20(token).safeTransferFrom(msg.sender, address(this), totalAmount);
+      uint256 actualTotal = IERC20(token).balanceOf(address(this)) - before;
+      if (sameToken) {
+        // Proportional split preserving the requested ratio
+        receivedAmount = (actualTotal * amount) / totalAmount;
+        receivedReward = actualTotal - receivedAmount;
+      } else {
+        receivedAmount = actualTotal;
+      }
     }
     if (reward > 0 && rewardToken != NATIVE_ETH && rewardToken != token) {
+      uint256 before = IERC20(rewardToken).balanceOf(address(this));
       IERC20(rewardToken).safeTransferFrom(msg.sender, address(this), reward);
+      receivedReward = IERC20(rewardToken).balanceOf(address(this)) - before;
     }
   }
 
@@ -567,18 +600,22 @@ contract Train is ReentrancyGuard {
     }
   }
 
-  /// @dev Emit UserLocked event (separated to avoid stack too deep)
+  /// @dev Emit UserLocked event (separated to avoid stack too deep).
+  ///      amount in the event reflects params.amount (requested), not lock.amount (actually received).
   function _emitUserLocked(
     UserLockParams calldata params,
     DestinationInfo calldata dst,
     uint48 timelock,
+    address sender,
+    address refundTo,
     bytes calldata userData,
     bytes calldata solverData
   ) internal {
     emit UserLocked(
       params.hashlock,
-      params.sender,
+      sender,
       params.recipient,
+      refundTo,
       params.srcChain,
       params.token,
       params.amount,
@@ -597,19 +634,23 @@ contract Train is ReentrancyGuard {
     );
   }
 
-  /// @dev Emit SolverLocked event (separated to avoid stack too deep)
+  /// @dev Emit SolverLocked event (separated to avoid stack too deep).
+  ///      amount/reward in the event reflect params values (requested), not lock values (actually received).
   function _emitSolverLocked(
     SolverLockParams calldata params,
     DestinationInfo calldata dst,
     uint256 index,
     uint48 timelock,
     uint48 rewardTimelock,
+    address sender,
+    address refundTo,
     bytes calldata data
   ) internal {
     emit SolverLocked(
       params.hashlock,
-      params.sender,
+      sender,
       params.recipient,
+      refundTo,
       index,
       params.srcChain,
       params.token,
