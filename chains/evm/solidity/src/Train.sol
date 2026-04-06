@@ -15,12 +15,36 @@ import { IERC20 } from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import { SafeERC20 } from '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
 import { ReentrancyGuard } from '@openzeppelin/contracts/utils/ReentrancyGuard.sol';
 
+/// @notice Subset of EIP-3009 used by Train for gasless ERC20 redemptions via isValidSignature
+interface IERC3009 {
+  function DOMAIN_SEPARATOR() external view returns (bytes32);
+  function authorizationState(address authorizer, bytes32 nonce) external view returns (bool);
+  function transferWithAuthorization(
+    address from,
+    address to,
+    uint256 value,
+    uint256 validAfter,
+    uint256 validBefore,
+    bytes32 nonce,
+    bytes calldata signature
+  ) external;
+}
+
 /// @title Train Protocol - Cross-Chain HTLC Bridge
 /// @author Train Protocol
 /// @notice Trustless cross-chain bridge using Hashed Time-Locked Contracts
 /// @dev Supports native ETH (token=address(0)) and ERC20 tokens. Hashlock = sha256(secret).
 contract Train is ReentrancyGuard {
   using SafeERC20 for IERC20;
+
+  /// @notice EIP-3009 TransferWithAuthorization typehash
+  bytes32 private constant TRANSFER_WITH_AUTHORIZATION_TYPEHASH =
+    keccak256(
+      'TransferWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)'
+    );
+
+  /// @notice EIP-1271 magic value returned when a signature is valid
+  bytes4 private constant EIP1271_MAGIC_VALUE = 0x1626ba7e;
 
   /// @notice Gas limit for ETH transfers to prevent griefing attacks
   uint256 constant GAS_STIPEND = 10_000;
@@ -305,6 +329,8 @@ contract Train is ReentrancyGuard {
     address sender = lock.sender;
     if (sender == address(0)) revert LockNotFound();
     if (lock.status != LockStatus.Pending) revert LockNotPending();
+    _syncGaslessRedemption(lock, hashlock, index);
+    if (lock.status != LockStatus.Pending) revert LockNotPending();
     if (lock.timelock > block.timestamp) revert RefundNotAllowed();
 
     lock.status = LockStatus.Refunded;
@@ -344,6 +370,8 @@ contract Train is ReentrancyGuard {
     if (lock.sender == address(0)) revert LockNotFound();
     if (hashlock != sha256(abi.encodePacked(secret))) revert HashlockMismatch();
     if (lock.status != LockStatus.Pending) revert LockNotPending();
+    _syncGaslessRedemption(lock, hashlock, index);
+    if (lock.status != LockStatus.Pending) revert LockNotPending();
 
     lock.status = LockStatus.Redeemed;
     lock.secret = secret;
@@ -358,6 +386,70 @@ contract Train is ReentrancyGuard {
       payable(rewardTo)
     );
     emit SolverRedeemed(hashlock, index, msg.sender, secret);
+  }
+
+  /// @dev If the lock's ERC-3009 gasless transfer was already executed (deterministic nonce is spent),
+  ///      mark the lock as Redeemed to prevent double-spend via refundSolver or redeemSolver.
+  ///      Security assumption: the token MUST mark the nonce as used only AFTER a successful
+  ///      isValidSignature check (i.e., on transfer success). Tokens that mark nonces before
+  ///      calling isValidSignature allow a griever to burn the nonce with a failed transfer,
+  ///      causing authorizationState to return true without tokens having moved.
+  ///      USDC and other compliant ERC-3009 tokens mark nonces only on success and are safe.
+  ///      NOTE: SolverRedeemed event is NOT emitted here — the ERC-3009 transferWithAuthorization
+  ///      transaction on the token contract serves as the on-chain redemption record.
+  function _syncGaslessRedemption(SolverLock storage lock, bytes32 hashlock, uint256 index) internal {
+    if (lock.token == NATIVE_ETH) return;
+    bytes32 nonce = keccak256(abi.encode(hashlock, index));
+    if (IERC3009(lock.token).authorizationState(address(this), nonce)) {
+      lock.status = LockStatus.Redeemed;
+    }
+  }
+
+  /// @notice EIP-1271 callback — called by an ERC-3009 token during transferWithAuthorization
+  /// @dev View / STATICCALL compatible. Compatible with tokens that call isValidSignature via STATICCALL.
+  ///      Callers MUST use the deterministic nonce: keccak256(abi.encode(hashlock, index)).
+  ///      This binds the authorization uniquely to one lock and prevents cross-lock replay.
+  ///      signature = abi.encode(hashlock, index, secret, validAfter, validBefore)
+  ///      The digest is reconstructed from the token's DOMAIN_SEPARATOR to verify to == lock.recipient
+  ///      and value == lock.amount, preventing wrong-recipient attacks.
+  /// @param digest EIP-3009 digest computed by the token
+  /// @param signature abi.encode(bytes32 hashlock, uint256 index, uint256 secret, uint256 validAfter, uint256 validBefore)
+  /// @return EIP1271_MAGIC_VALUE if valid, 0xffffffff otherwise
+  function isValidSignature(bytes32 digest, bytes memory signature) external view returns (bytes4) {
+    if (signature.length != 160) return bytes4(0xffffffff);
+
+    (bytes32 hashlock, uint256 index, uint256 secret, uint256 validAfter, uint256 validBefore) = abi.decode(
+      signature,
+      (bytes32, uint256, uint256, uint256, uint256)
+    );
+
+    SolverLock storage lock = solverLocks[hashlock][index];
+    if (lock.sender == address(0)) return bytes4(0xffffffff);
+    if (msg.sender != lock.token) return bytes4(0xffffffff);
+    if (lock.status != LockStatus.Pending) return bytes4(0xffffffff);
+    if (hashlock != sha256(abi.encodePacked(secret))) return bytes4(0xffffffff);
+
+    bytes32 nonce = keccak256(abi.encode(hashlock, index));
+    bytes32 expectedDigest = keccak256(
+      abi.encodePacked(
+        '\x19\x01',
+        IERC3009(msg.sender).DOMAIN_SEPARATOR(),
+        keccak256(
+          abi.encode(
+            TRANSFER_WITH_AUTHORIZATION_TYPEHASH,
+            address(this),
+            lock.recipient,
+            lock.amount,
+            validAfter,
+            validBefore,
+            nonce
+          )
+        )
+      )
+    );
+    if (digest != expectedDigest) return bytes4(0xffffffff);
+
+    return EIP1271_MAGIC_VALUE;
   }
 
   /// @notice Get user lock details
@@ -380,6 +472,24 @@ contract Train is ReentrancyGuard {
   /// @return The count of solver locks
   function getSolverLockCount(bytes32 hashlock) external view returns (uint256) {
     return solverLockCount[hashlock];
+  }
+
+  /// @notice Check whether a token supports the gasless ERC-3009 redemption path
+  /// @dev Probes for the bytes-signature variant of transferWithAuthorization
+  ///      (selector 0xe3ee160e). Tokens implementing only the (v,r,s) ECDSA variant are
+  ///      incompatible — they never call isValidSignature and will silently fail.
+  ///      This is a best-effort check: a call with only the selector and no args is sent;
+  ///      a non-empty revert means the function exists (bad-args panic), an empty revert means
+  ///      the selector is unknown. Does not protect against proxy patterns that accept any selector.
+  /// @param token ERC-3009 token address to check
+  /// @return True if the bytes-signature variant appears to be present
+  function supportsGaslessRedemption(address token) external view returns (bool) {
+    if (token == NATIVE_ETH || token.code.length == 0) return false;
+    bytes4 selector = bytes4(
+      keccak256('transferWithAuthorization(address,address,uint256,uint256,uint256,bytes32,bytes)')
+    );
+    (, bytes memory ret) = token.staticcall(abi.encodePacked(selector));
+    return ret.length > 0;
   }
 
   /// @notice Get all hashlocks for user locks created by an address with optional filtering and pagination

@@ -197,6 +197,74 @@ bytes32 hashlock = sha256(abi.encodePacked(secret));
 
 Where `secret` is a `uint256` value.
 
+## Gasless ERC20 Redemption (EIP-1271 + ERC-3009)
+
+Solver locks funded with ERC-3009 compatible tokens (e.g. USDC) support a gasless redemption path. The recipient can redeem without holding any gas on the destination chain by having a relayer call `transferWithAuthorization` directly on the ERC20 token.
+
+### What `isValidSignature` does
+
+Train implements [EIP-1271](https://eips.ethereum.org/EIPS/eip-1271) so that it can act as the authorizing signer for an ERC-3009 transfer. When `transferWithAuthorization(from=Train, ...)` is called on a compatible token, the token calls back into `Train.isValidSignature(digest, signature)` to verify consent. Inside that call Train:
+
+1. Decodes the 160-byte signature payload: `abi.decode(signature, (bytes32 hashlock, uint256 index, uint256 secret, uint256 validAfter, uint256 validBefore))`
+2. Looks up the `SolverLock` at `(hashlock, index)` and verifies it is `Pending`
+3. Verifies `sha256(secret) == hashlock`
+4. Reconstructs the expected EIP-3009 digest using the token's own `DOMAIN_SEPARATOR()`, the deterministic nonce `keccak256(abi.encode(hashlock, index))`, and the exact `to = lock.recipient` and `value = lock.amount` stored in the lock
+5. Returns `0x1626ba7e` (EIP-1271 magic value) only if the reconstructed digest matches the one passed by the token
+
+Because `isValidSignature` is `view`, it is STATICCALL-compatible and makes no state changes. State is reconciled lazily: the next call to `redeemSolver` or `refundSolver` calls `_syncGaslessRedemption`, which checks `authorizationState(Train, nonce)` and transitions the lock to `Redeemed` if the transfer already occurred.
+
+### Full relayer flow
+
+```
+nonce     = keccak256(abi.encode(hashlock, index))
+signature = abi.encode(hashlock, index, secret, validAfter, validBefore)  // 160 bytes
+
+ERC20.transferWithAuthorization(
+    from        = Train,           // contract signer
+    to          = lock.recipient,
+    value       = lock.amount,
+    validAfter  = ...,
+    validBefore = ...,
+    nonce       = nonce,
+    signature   = signature
+)
+```
+
+Use the helper script [`script/gasless-redeem-params.js`](./script/gasless-redeem-params.js) to compute `nonce` and `signature` from the lock parameters:
+
+```bash
+node script/gasless-redeem-params.js \
+  --hashlock 0x...  \
+  --index    1      \
+  --secret   0x...  \
+  --validAfter  0   \
+  --validBefore 9999999999
+```
+
+### ERC-3009 token compatibility
+
+Not every ERC20 token supports this path. All four requirements below must be met:
+
+| Requirement | Detail |
+|---|---|
+| `transferWithAuthorization` with `bytes` signature | The token must implement the variant that accepts a `bytes` calldata signature (selector `0xe3ee160e`), not only the `(v, r, s)` ECDSA variant. USDC (Centre/Circle) implements both. |
+| `isValidSignature` called via STATICCALL | The token must invoke the EIP-1271 callback as a view/static call. Tokens using a regular CALL also work, but tokens that skip the callback entirely for contract signers are incompatible. |
+| Nonce marked only after successful transfer | The token must record the nonce as used only after `isValidSignature` returns the magic value and the transfer succeeds. If the nonce is marked before the callback, a griever could burn it with a failed transfer, causing `authorizationState` to return `true` without funds having moved. USDC marks nonces correctly. |
+| `authorizationState(address, bytes32) → bool` | Required for the lazy `_syncGaslessRedemption` check inside `redeemSolver` and `refundSolver`. |
+
+`Train.supportsGaslessRedemption(token)` provides a best-effort on-chain check — it probes for the `bytes`-signature selector but cannot verify STATICCALL behaviour or nonce ordering.
+
+**Native ETH locks (`token == address(0)`) are not supported** — `isValidSignature` returns `0xffffffff` immediately for them, and `_syncGaslessRedemption` skips the check.
+
+### Security properties
+
+| Property | Mechanism |
+|---|---|
+| Wrong-recipient prevention | Digest is reconstructed from the token's own `DOMAIN_SEPARATOR()`. An attacker cannot replay a valid secret with a different `to` or `value`. |
+| Cross-lock replay prevention | Nonce is deterministic: `keccak256(abi.encode(hashlock, index))`. Two locks always have different nonces; spending one cannot satisfy the `authorizationState` check of the other. |
+| Double-spend / refund prevention | `_syncGaslessRedemption` runs at the top of `redeemSolver` and `refundSolver`. If the nonce is already spent the lock is immediately marked `Redeemed` and the call reverts with `LockNotPending`. |
+| No reward leakage | The gasless path does not distribute a reward (reward is 0 for gasless-intended locks). The relayer's incentive comes from an off-chain agreement, not from the lock reward mechanism. |
+
 ## Events
 
 ### UserLocked
