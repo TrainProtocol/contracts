@@ -249,7 +249,7 @@ Not every ERC20 token supports this path. All four requirements below must be me
 |---|---|
 | `transferWithAuthorization` with `bytes` signature | The token must implement the variant that accepts a `bytes` calldata signature (selector `0xe3ee160e`), not only the `(v, r, s)` ECDSA variant. USDC (Centre/Circle) implements both. |
 | `isValidSignature` called via STATICCALL | The token must invoke the EIP-1271 callback as a view/static call. Tokens using a regular CALL also work, but tokens that skip the callback entirely for contract signers are incompatible. |
-| Nonce marked only after successful transfer | The token must record the nonce as used only after `isValidSignature` returns the magic value and the transfer succeeds. If the nonce is marked before the callback, a griever could burn it with a failed transfer, causing `authorizationState` to return `true` without funds having moved. USDC marks nonces correctly. |
+| Nonce marked only after `isValidSignature` succeeds | The token must mark the nonce as used only **after** `isValidSignature` returns the magic value. If the nonce is marked before the callback and the call fails, the gasless path is permanently broken — `transferWithAuthorization` will always be rejected (nonce already used). `redeemSolver`/`refundSolver` remain usable as a fallback. USDC marks nonces correctly. |
 | `authorizationState(address, bytes32) → bool` | Required for the lazy `_syncGaslessRedemption` check inside `redeemSolver` and `refundSolver`. |
 
 `Train.supportsGaslessRedemption(token)` provides a best-effort on-chain check — it probes for the `bytes`-signature selector but cannot verify STATICCALL behaviour or nonce ordering.

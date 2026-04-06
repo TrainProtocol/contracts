@@ -390,11 +390,12 @@ contract Train is ReentrancyGuard {
 
   /// @dev If the lock's ERC-3009 gasless transfer was already executed (deterministic nonce is spent),
   ///      mark the lock as Redeemed to prevent double-spend via refundSolver or redeemSolver.
-  ///      Security assumption: the token MUST mark the nonce as used only AFTER a successful
-  ///      isValidSignature check (i.e., on transfer success). Tokens that mark nonces before
-  ///      calling isValidSignature allow a griever to burn the nonce with a failed transfer,
-  ///      causing authorizationState to return true without tokens having moved.
-  ///      USDC and other compliant ERC-3009 tokens mark nonces only on success and are safe.
+  ///      Security assumption: the token MUST mark the nonce as used only AFTER isValidSignature
+  ///      returns the magic value — not before calling it. If the nonce is marked first and the
+  ///      call then fails, the gasless path is permanently broken: every subsequent
+  ///      transferWithAuthorization is rejected (nonce already used) and isValidSignature returns
+  ///      0xffffffff once this function sets the lock to Redeemed. redeemSolver/refundSolver
+  ///      are unaffected and remain usable unless the nonce was burned. USDC marks nonces correctly.
   ///      NOTE: SolverRedeemed event is NOT emitted here — the ERC-3009 transferWithAuthorization
   ///      transaction on the token contract serves as the on-chain redemption record.
   function _syncGaslessRedemption(SolverLock storage lock, bytes32 hashlock, uint256 index) internal {
