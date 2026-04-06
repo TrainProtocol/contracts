@@ -17,7 +17,7 @@ use anchor_spl::{
 };
 use sha2::{Digest, Sha256};
 
-declare_id!("ADwgQuJzWCrxEgsBR5EwGmvqD12xLbAW316KG8L2f8BL");
+declare_id!("2cQYFAiud2LBg3r6MxKPJ1oS83yyrRwDsgxQSwhL97LJ");
 
 // Status constants (mirrors Solidity LockStatus enum)
 const STATUS_EMPTY: u8 = 0;
@@ -101,9 +101,9 @@ pub mod train_htlc {
         src_chain: String,
         dst_chain: String,
         dst_address: String,
-        dst_amount: u64,
+        dst_amount: u128,
         dst_token: String,
-        reward_amount: u64,
+        reward_amount: u128,
         reward_token: String,
         reward_recipient: String,
         reward_timelock_delta: u64,
@@ -173,9 +173,9 @@ pub mod train_htlc {
         src_chain: String,
         dst_chain: String,
         dst_address: String,
-        dst_amount: u64,
+        dst_amount: u128,
         dst_token: String,
-        reward_amount: u64,
+        reward_amount: u128,
         reward_token: String,
         reward_recipient: String,
         reward_timelock_delta: u64,
@@ -251,7 +251,7 @@ pub mod train_htlc {
         src_chain: String,
         dst_chain: String,
         dst_address: String,
-        dst_amount: u64,
+        dst_amount: u128,
         dst_token: String,
         data: Vec<u8>,
     ) -> Result<()> {
@@ -337,7 +337,7 @@ pub mod train_htlc {
         src_chain: String,
         dst_chain: String,
         dst_address: String,
-        dst_amount: u64,
+        dst_amount: u128,
         dst_token: String,
         data: Vec<u8>,
     ) -> Result<()> {
@@ -426,7 +426,7 @@ pub mod train_htlc {
         src_chain: String,
         dst_chain: String,
         dst_address: String,
-        dst_amount: u64,
+        dst_amount: u128,
         dst_token: String,
         data: Vec<u8>,
     ) -> Result<()> {
@@ -1273,22 +1273,22 @@ pub struct SolverLockTokenDiffReward<'info> {
     )]
     pub solver_lock: Box<Account<'info, SolverLock>>,
 
-    pub token_mint: InterfaceAccount<'info, Mint>,
-    pub reward_token_mint: InterfaceAccount<'info, Mint>,
+    pub token_mint: Box<InterfaceAccount<'info, Mint>>,
+    pub reward_token_mint: Box<InterfaceAccount<'info, Mint>>,
 
     #[account(
         mut,
         constraint = sender_token_account.owner == signer.key() @ TrainError::WrongToken,
         constraint = sender_token_account.mint == token_mint.key() @ TrainError::WrongToken,
     )]
-    pub sender_token_account: InterfaceAccount<'info, TokenAccount>,
+    pub sender_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         mut,
         constraint = sender_reward_token_account.owner == signer.key() @ TrainError::WrongToken,
         constraint = sender_reward_token_account.mint == reward_token_mint.key() @ TrainError::WrongToken,
     )]
-    pub sender_reward_token_account: InterfaceAccount<'info, TokenAccount>,
+    pub sender_reward_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         init,
@@ -1299,7 +1299,7 @@ pub struct SolverLockTokenDiffReward<'info> {
         token::authority = solver_lock,
         token::token_program = token_program,
     )]
-    pub vault: InterfaceAccount<'info, TokenAccount>,
+    pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         init,
@@ -1310,7 +1310,7 @@ pub struct SolverLockTokenDiffReward<'info> {
         token::authority = solver_lock,
         token::token_program = token_program,
     )]
-    pub reward_vault: InterfaceAccount<'info, TokenAccount>,
+    pub reward_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
@@ -1483,7 +1483,7 @@ pub struct RefundSolverTokenDiffReward<'info> {
         bump,
         constraint = solver_lock.status == STATUS_PENDING @ TrainError::NotPending,
     )]
-    pub solver_lock: Account<'info, SolverLock>,
+    pub solver_lock: Box<Account<'info, SolverLock>>,
 
     /// CHECK: verified via solver_lock.sender
     #[account(
@@ -1758,7 +1758,7 @@ pub struct RedeemSolverTokenDiffReward<'info> {
         bump,
         constraint = solver_lock.status == STATUS_PENDING @ TrainError::NotPending,
     )]
-    pub solver_lock: Account<'info, SolverLock>,
+    pub solver_lock: Box<Account<'info, SolverLock>>,
 
     /// CHECK: verified via solver_lock.recipient
     #[account(
@@ -1775,26 +1775,26 @@ pub struct RedeemSolverTokenDiffReward<'info> {
     #[account(
         constraint = token_mint.key() == solver_lock.token_mint @ TrainError::WrongToken,
     )]
-    pub token_mint: InterfaceAccount<'info, Mint>,
+    pub token_mint: Box<InterfaceAccount<'info, Mint>>,
 
     #[account(
         constraint = reward_token_mint.key() == solver_lock.reward_token_mint @ TrainError::WrongToken,
     )]
-    pub reward_token_mint: InterfaceAccount<'info, Mint>,
+    pub reward_token_mint: Box<InterfaceAccount<'info, Mint>>,
 
     #[account(
         mut,
         seeds = [b"solver_vault", hashlock.as_ref(), &index.to_le_bytes()],
         bump,
     )]
-    pub vault: InterfaceAccount<'info, TokenAccount>,
+    pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         mut,
         seeds = [b"solver_reward_vault", hashlock.as_ref(), &index.to_le_bytes()],
         bump,
     )]
-    pub reward_vault: InterfaceAccount<'info, TokenAccount>,
+    pub reward_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         init_if_needed,
@@ -1803,7 +1803,7 @@ pub struct RedeemSolverTokenDiffReward<'info> {
         associated_token::authority = recipient,
         associated_token::token_program = token_program,
     )]
-    pub recipient_token_account: InterfaceAccount<'info, TokenAccount>,
+    pub recipient_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         init_if_needed,
@@ -1812,7 +1812,7 @@ pub struct RedeemSolverTokenDiffReward<'info> {
         associated_token::authority = reward_recipient,
         associated_token::token_program = token_program,
     )]
-    pub reward_recipient_token_account: InterfaceAccount<'info, TokenAccount>,
+    pub reward_recipient_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         init_if_needed,
@@ -1821,7 +1821,7 @@ pub struct RedeemSolverTokenDiffReward<'info> {
         associated_token::authority = caller,
         associated_token::token_program = token_program,
     )]
-    pub caller_reward_token_account: InterfaceAccount<'info, TokenAccount>,
+    pub caller_reward_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// CHECK: verified via solver_lock.sender
     #[account(
@@ -1904,9 +1904,9 @@ pub struct UserLocked {
     pub timelock:              u64,
     pub dst_chain:             String,
     pub dst_address:           String,
-    pub dst_amount:            u64,
+    pub dst_amount:            u128,
     pub dst_token:             String,
-    pub reward_amount:         u64,
+    pub reward_amount:         u128,
     pub reward_token:          String,
     pub reward_recipient:      String,
     pub reward_timelock_delta: u64,
@@ -1931,7 +1931,7 @@ pub struct SolverLocked {
     pub reward_timelock:   u64,
     pub dst_chain:         String,
     pub dst_address:       String,
-    pub dst_amount:        u64,
+    pub dst_amount:        u128,
     pub dst_token:         String,
     pub data:              Vec<u8>,
 }

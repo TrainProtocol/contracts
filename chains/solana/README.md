@@ -2,7 +2,7 @@
 
 A unified Solana program for Hash Time-Locked Contracts (HTLC) enabling cross-chain atomic swaps. Supports native SOL and SPL tokens (including Token-2022), with optional different reward tokens for solver locks.
 
-**Program ID (devnet):** `ADwgQuJzWCrxEgsBR5EwGmvqD12xLbAW316KG8L2f8BL`
+**Program ID (devnet):** `2cQYFAiud2LBg3r6MxKPJ1oS83yyrRwDsgxQSwhL97LJ`
 
 ## Architecture
 

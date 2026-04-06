@@ -6,16 +6,16 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-train_htlc = "ADwgQuJzWCrxEgsBR5EwGmvqD12xLbAW316KG8L2f8BL"
+train_htlc = "2cQYFAiud2LBg3r6MxKPJ1oS83yyrRwDsgxQSwhL97LJ"
 
 [programs.localnet]
-train_htlc = "ADwgQuJzWCrxEgsBR5EwGmvqD12xLbAW316KG8L2f8BL"
+train_htlc = "2cQYFAiud2LBg3r6MxKPJ1oS83yyrRwDsgxQSwhL97LJ"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "localnet"
+cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]

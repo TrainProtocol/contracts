@@ -13,7 +13,7 @@ dotenv.config({ path: path.join(__dirname, "..", ".env") });
 const idlPath = path.join(__dirname, "..", "target", "idl", "train_htlc.json");
 const idl = JSON.parse(fs.readFileSync(idlPath, "utf-8")) as Idl;
 
-export const PROGRAM_ID = new PublicKey('ADwgQuJzWCrxEgsBR5EwGmvqD12xLbAW316KG8L2f8BL');
+export const PROGRAM_ID = new PublicKey('2cQYFAiud2LBg3r6MxKPJ1oS83yyrRwDsgxQSwhL97LJ');
 
 // Wallet name → .env variable mapping
 const WALLET_ENV_MAP: Record<string, string> = {
