@@ -1,6 +1,6 @@
 import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
 import { TrainContract } from './Train.ts';
-import { setupWallet } from './utils/setupWallet.ts';
+import { setupWallet, toWallet } from './utils/setupWallet.ts';
 import { deployAccount, deploySchnorrAccount } from './utils/deployAccount.ts';
 import { getPaymentMethod } from './utils/feePayment.ts';
 import { getTimeouts, getEnv } from './utils/config.ts';
@@ -43,13 +43,13 @@ async function main() {
     const account = await wallet.createSchnorrAccount(
       Fr.fromString(deployerSecret),
       Fr.fromString(deployerSalt),
-      (GrumpkinScalar as any).fromString?.(deployerSigningKey) || GrumpkinScalar.random(),
+      (GrumpkinScalar as any).fromString(deployerSigningKey),
     );
     address = account.address;
     console.log(`Using existing account: ${address.toString()}`);
 
     // Check if account is already deployed
-    const metadata = await wallet.getContractMetadata(address);
+    const metadata = await toWallet(wallet).getContractMetadata(address);
     if (metadata.initializationStatus !== 'INITIALIZED') {
       console.log('Account not yet deployed, deploying...');
       // First tx: uses FeeJuicePaymentMethodWithClaim to claim bridged Fee Juice
@@ -74,10 +74,11 @@ async function main() {
   }
 
   // Deploy Train contract
-  const deployMethod = TrainContract.deploy(wallet);
+  const deployMethod = TrainContract.deploy(toWallet(wallet));
   const result = await deployMethod.send({
     from: address,
     fee: { paymentMethod },
+    additionalScopes: [],
     skipClassPublication: false,
     skipInstancePublication: false,
     skipInitialization: false,

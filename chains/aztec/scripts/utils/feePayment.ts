@@ -6,6 +6,7 @@ import { Fr } from '@aztec/aztec.js/fields';
 import { SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/SponsoredFPC';
 import type { EmbeddedWallet } from '@aztec/wallets/embedded';
 import { getSponsoredFPCInstance } from './sponsoredFpc.ts';
+import { toWallet } from './setupWallet.ts';
 import { getEnv } from './config.ts';
 import { updateEnvFile } from './utils.ts';
 
@@ -91,6 +92,6 @@ export async function getPaymentMethod(
 
   // Local/devnet: use SponsoredFPC
   const sponsoredFPC = await getSponsoredFPCInstance();
-  await wallet.registerContract(sponsoredFPC, SponsoredFPCContractArtifact);
+  await toWallet(wallet).registerContract(sponsoredFPC, SponsoredFPCContractArtifact);
   return new SponsoredFeePaymentMethod(sponsoredFPC.address);
 }

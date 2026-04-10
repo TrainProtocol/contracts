@@ -4,13 +4,19 @@ dotenv.config();
 import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
 import { createAztecNodeClient } from '@aztec/aztec.js/node';
 
+import type { Wallet } from '@aztec/aztec.js/wallet';
 import { EmbeddedWallet } from '@aztec/wallets/embedded';
 import { AccountManager } from '@aztec/aztec.js/wallet';
-import { TokenContract } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js';
+import { TokenContract } from '@defi-wonderland/aztec-standards/src/artifacts/Token.ts';
 import { updateEnvFile } from './utils/utils.ts';
 import { getAztecNodeUrl, getEnv, getTimeouts } from './utils/config.ts';
 import { getPaymentMethod } from './utils/feePayment.ts';
 import { deployAccount } from './utils/deployAccount.ts';
+
+/** Bridge EmbeddedWallet → Wallet for generated contract bindings (SDK type mismatch). */
+function toWallet(w: EmbeddedWallet): Wallet {
+  return w as unknown as Wallet;
+}
 
 async function createWallet(proverEnabled: boolean): Promise<EmbeddedWallet> {
   return EmbeddedWallet.create(createAztecNodeClient(getAztecNodeUrl()), {
@@ -42,9 +48,7 @@ function hasTestnetKeys(): boolean {
 function loadKeys(prefix: string): AccountKeys {
   const secret = Fr.fromString(process.env[`${prefix}_SECRET`]!);
   const salt = Fr.fromString(process.env[`${prefix}_SALT`]!);
-  const signingKey =
-    (GrumpkinScalar as any).fromString?.(process.env[`${prefix}_SIGNING_KEY`]!) ||
-    GrumpkinScalar.random();
+  const signingKey = (GrumpkinScalar as any).fromString(process.env[`${prefix}_SIGNING_KEY`]!);
   return { secret, salt, signingKey };
 }
 
@@ -170,7 +174,7 @@ async function main(): Promise<void> {
   ];
 
   for (const [account, wallet, label] of accounts) {
-    const metadata = await wallet.getContractMetadata(account.address);
+    const metadata = await toWallet(wallet).getContractMetadata(account.address);
     if (metadata.initializationStatus === 'INITIALIZED') {
       console.log(`${label} account already deployed, skipping.`);
       continue;
@@ -193,31 +197,32 @@ async function main(): Promise<void> {
   console.log('Deploying Token contract...');
   const tokenDeploy = TokenContract.deployWithOpts(
     {
-      wallet: walletDeployer,
+      wallet: toWallet(walletDeployer),
       method: 'constructor_with_minter',
     },
-    'ETH',
-    'ETH',
+    'Train',
+    'TRN',
     18,
     deployerAccount.address,
   );
   await tokenDeploy.send({
     from: deployerAccount.address,
     fee: { paymentMethod: payDeployer },
+    additionalScopes: [],
     wait: { timeout: timeouts.deployTimeout },
   });
   const tokenAddress = tokenDeploy.address!;
 
   // Register deployer as sender on other wallets
-  await walletUser.registerSender(deployerAccount.address, 'faucet');
-  await walletSolver.registerSender(deployerAccount.address, 'faucet');
+  await toWallet(walletUser).registerSender(deployerAccount.address, 'faucet');
+  await toWallet(walletSolver).registerSender(deployerAccount.address, 'faucet');
 
   // After Token deployment, deployer has Fee Juice balance — no payment method needed
   // (SDK uses PREEXISTING_FEE_JUICE mode automatically)
   const amount = 100000000000n;
-  const tokenForDeployer = TokenContract.at(tokenAddress, walletDeployer);
-  const tokenForUser = TokenContract.at(tokenAddress, walletUser);
-  const tokenForSolver = TokenContract.at(tokenAddress, walletSolver);
+  const tokenForDeployer = TokenContract.at(tokenAddress, toWallet(walletDeployer));
+  const tokenForUser = TokenContract.at(tokenAddress, toWallet(walletUser));
+  const tokenForSolver = TokenContract.at(tokenAddress, toWallet(walletSolver));
 
   console.log('Minting tokens...');
   const mintTx = await tokenForDeployer.methods

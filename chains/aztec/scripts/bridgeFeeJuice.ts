@@ -17,7 +17,7 @@ import { createExtendedL1Client } from '@aztec/ethereum/client';
 import { createEthereumChain } from '@aztec/ethereum/chain';
 import { createAztecNodeClient } from '@aztec/aztec.js/node';
 import { AztecAddress } from '@aztec/aztec.js/addresses';
-import { createLogger } from '@aztec/foundation/log';
+import { createLogger } from '@aztec/aztec.js/log';
 import { getAztecNodeUrl, getL1RpcUrl } from './utils/config.ts';
 import { requireEnv, updateEnvFile } from './utils/utils.ts';
 

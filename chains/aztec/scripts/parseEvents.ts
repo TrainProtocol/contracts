@@ -295,6 +295,7 @@ async function main(): Promise<void> {
 main()
   .then(() => process.exit(0))
   .catch((err) => {
-  console.error(`Error: ${err}`);
-  process.exit(1);
-});
+    console.error(`Error: ${err}`);
+    if (err instanceof Error && err.stack) console.error(err.stack);
+    process.exit(1);
+  });

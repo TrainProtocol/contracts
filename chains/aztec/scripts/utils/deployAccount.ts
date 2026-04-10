@@ -5,8 +5,8 @@ import { SponsoredFPCContractArtifact } from '@aztec/noir-contracts.js/Sponsored
 import { NO_FROM } from '@aztec/aztec.js/account';
 import { Fr } from '@aztec/aztec.js/fields';
 import { GrumpkinScalar } from '@aztec/foundation/curves/grumpkin';
-import { type Logger, createLogger } from '@aztec/foundation/log';
-import { setupWallet } from './setupWallet.ts';
+import { createLogger } from '@aztec/aztec.js/log';
+import { setupWallet, toWallet } from './setupWallet.ts';
 
 import { AccountManager } from '@aztec/aztec.js/wallet';
 import { EmbeddedWallet } from '@aztec/wallets/embedded';
@@ -57,6 +57,7 @@ export async function deployAccount(
   await deployMethod.send({
     from: NO_FROM,
     fee: { paymentMethod },
+    additionalScopes: [],
     skipClassPublication: false,
     skipInstancePublication: false,
     skipInitialization: false,
@@ -64,7 +65,7 @@ export async function deployAccount(
     wait: { timeout, returnReceipt: true, dontThrowOnRevert: true },
   });
 
-  const metadata = await wallet.getContractMetadata(account.address);
+  const metadata = await toWallet(wallet).getContractMetadata(account.address);
   console.log(`Deployment transaction for account ${account.address.toString()} completed. Checking deployment status...`);
   logger.info(
     `Account deployment metadata: initializationStatus=${metadata.initializationStatus}, published=${metadata.isContractPublished}`,
@@ -95,7 +96,7 @@ export async function deploySchnorrAccount(
   logger.info(`Sponsored FPC instance obtained at: ${sponsoredFPC.address}`);
 
   logger.info('Registering sponsored FPC contract with PXE...');
-  await activeWallet.registerContract(
+  await toWallet(activeWallet).registerContract(
     sponsoredFPC,
     SponsoredFPCContractArtifact,
   );

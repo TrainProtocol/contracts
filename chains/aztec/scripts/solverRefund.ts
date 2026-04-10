@@ -4,9 +4,9 @@ dotenv.config();
 import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
 import { createAztecNodeClient } from '@aztec/aztec.js/node';
-import { TokenContract } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js';
+import { TokenContract } from '@defi-wonderland/aztec-standards/src/artifacts/Token.ts';
 import { TrainContract } from './Train.ts';
-import { setupWallet } from './utils/setupWallet.ts';
+import { setupWallet, toWallet } from './utils/setupWallet.ts';
 import { getPaymentMethod } from './utils/feePayment.ts';
 import {
   decodeLockStatus,
@@ -29,8 +29,7 @@ async function main(): Promise<void> {
   const solverAccount = await wallet.createSchnorrAccount(
     Fr.fromString(requireEnv('SOLVER_SECRET')),
     Fr.fromString(requireEnv('SOLVER_SALT')),
-    (GrumpkinScalar as any).fromString?.(requireEnv('SOLVER_SIGNING_KEY')) ||
-      GrumpkinScalar.random(),
+    (GrumpkinScalar as any).fromString(requireEnv('SOLVER_SIGNING_KEY')),
   );
 
   if (solverAccount.address.toString() !== expectedSolverAddress) {
@@ -41,8 +40,8 @@ async function main(): Promise<void> {
 
   const paymentMethod = await getPaymentMethod(wallet, solverAccount.address);
 
-  const train = TrainContract.at(trainAddress, wallet);
-  const token = TokenContract.at(tokenAddress, wallet);
+  const train = TrainContract.at(trainAddress, toWallet(wallet));
+  const token = TokenContract.at(tokenAddress, toWallet(wallet));
 
   const { result: lockBefore } = await train.methods
     .get_solver_lock(hashlock, solverIndex)
@@ -108,6 +107,7 @@ async function main(): Promise<void> {
 main()
   .then(() => process.exit(0))
   .catch((err) => {
-  console.error(`Error: ${err}`);
-  process.exit(1);
-});
+    console.error(`Error: ${err}`);
+    if (err instanceof Error && err.stack) console.error(err.stack);
+    process.exit(1);
+  });

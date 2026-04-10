@@ -4,7 +4,7 @@ dotenv.config();
 import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
 import { TrainContract } from './Train.ts';
-import { setupWallet } from './utils/setupWallet.ts';
+import { setupWallet, toWallet } from './utils/setupWallet.ts';
 import { decodeLockStatus, parseHashlock, requireEnv } from './utils/utils.ts';
 
 async function main(): Promise<void> {
@@ -16,8 +16,7 @@ async function main(): Promise<void> {
   const userAccount = await wallet.createSchnorrAccount(
     Fr.fromString(requireEnv('USER_SECRET')),
     Fr.fromString(requireEnv('USER_SALT')),
-    (GrumpkinScalar as any).fromString?.(requireEnv('USER_SIGNING_KEY')) ||
-      GrumpkinScalar.random(),
+    (GrumpkinScalar as any).fromString(requireEnv('USER_SIGNING_KEY')),
   );
 
   if (userAccount.address.toString() !== expectedUserAddress) {
@@ -26,7 +25,7 @@ async function main(): Promise<void> {
     );
   }
 
-  const train = TrainContract.at(trainAddress, wallet);
+  const train = TrainContract.at(trainAddress, toWallet(wallet));
   const from = userAccount.address;
 
   const { result: userLock } = await train.methods.get_user_lock(hashlock).simulate({ from });
@@ -73,6 +72,7 @@ async function main(): Promise<void> {
 main()
   .then(() => process.exit(0))
   .catch((err) => {
-  console.error(`Error: ${err}`);
-  process.exit(1);
-});
+    console.error(`Error: ${err}`);
+    if (err instanceof Error && err.stack) console.error(err.stack);
+    process.exit(1);
+  });

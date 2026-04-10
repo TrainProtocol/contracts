@@ -4,7 +4,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "postinstall": "ln -sfn ../target node_modules/@defi-wonderland/aztec-standards/dist/target",
+    "postinstall": "ln -sfn ../target node_modules/@defi-wonderland/aztec-standards/dist/target && cd node_modules/aztec-scan-sdk && npm run build",
     "test": "echo \"Error: no test specified\" && exit 1",
     "mint-again": "tsx mintAgain.ts",
     "mint-again:devnet": "AZTEC_ENV=devnet tsx mintAgain.ts",
@@ -26,7 +26,9 @@
     "mint-again:testnet": "AZTEC_ENV=testnet tsx mintAgain.ts",
     "tx-status:testnet": "AZTEC_ENV=testnet tsx getTxStatus.ts",
     "parse-events:testnet": "AZTEC_ENV=testnet tsx parseEvents.ts",
-    "verify-train:testnet": "AZTEC_ENV=testnet tsx verifyTrainAztecScan.ts"
+    "verify-train:testnet": "AZTEC_ENV=testnet tsx verifyTrainAztecScan.ts",
+    "verify-token:testnet": "AZTEC_ENV=testnet tsx verifyTokenAztecScan.ts",
+    "mainnet-setup": "tsx mainnetSetup.ts"
   },
   "keywords": [],
   "author": "",
@@ -36,9 +38,10 @@
     "@aztec-artifacts/client": "latest",
     "@aztec/accounts": "4.2.0-aztecnr-rc.2",
     "@aztec/aztec.js": "4.2.0-aztecnr-rc.2",
+    "@aztec/ethereum": "4.2.0-aztecnr-rc.2",
     "@aztec/noir-contracts.js": "4.2.0-aztecnr-rc.2",
     "@aztec/wallets": "4.2.0-aztecnr-rc.2",
-    "@defi-wonderland/aztec-standards": "github:defi-wonderland/aztec-standards#chore/upgrade-4.2.0-aztecnr-rc.2",
+    "@defi-wonderland/aztec-standards": "4.2.0-aztecnr-rc.2",
     "aztec-scan-sdk": "github:aztec-scan/aztec-scan-sdk",
     "dotenv": "^16.5.0"
   },

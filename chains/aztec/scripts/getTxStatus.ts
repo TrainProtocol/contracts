@@ -49,19 +49,20 @@ async function main(): Promise<void> {
 main()
   .then(() => process.exit(0))
   .catch((err) => {
-  const message = String(err?.message ?? err);
-  if (message.includes('ECONNREFUSED')) {
-    console.error('Cannot connect to Aztec node.');
-    console.error(
-      'Current config is using local-network (http://localhost:8080).',
-    );
-    console.error(
-      'Either start your local Aztec node, or run with AZTEC_ENV=devnet.',
-    );
-    console.error(
-      'Example: AZTEC_ENV=devnet TX_HASH=0x... npm run tx-status',
-    );
-  }
-  console.error(`Error: ${err}`);
-  process.exit(1);
-});
+    const message = String(err?.message ?? err);
+    if (message.includes('ECONNREFUSED')) {
+      console.error('Cannot connect to Aztec node.');
+      console.error(
+        'Current config is using local-network (http://localhost:8080).',
+      );
+      console.error(
+        'Either start your local Aztec node, or run with AZTEC_ENV=devnet.',
+      );
+      console.error(
+        'Example: AZTEC_ENV=devnet TX_HASH=0x... npm run tx-status',
+      );
+    }
+    console.error(`Error: ${err}`);
+    if (err instanceof Error && err.stack) console.error(err.stack);
+    process.exit(1);
+  });

@@ -3,9 +3,9 @@ dotenv.config();
 
 import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
-import { TokenContract } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js';
+import { TokenContract } from '@defi-wonderland/aztec-standards/src/artifacts/Token.ts';
 import { TrainContract } from './Train.ts';
-import { setupWallet } from './utils/setupWallet.ts';
+import { setupWallet, toWallet } from './utils/setupWallet.ts';
 import { getPaymentMethod } from './utils/feePayment.ts';
 import {
   authorizePublicTransfer,
@@ -46,9 +46,7 @@ async function main(): Promise<void> {
 
   const secretKey = Fr.fromString(requireEnv('SOLVER_SECRET'));
   const salt = Fr.fromString(requireEnv('SOLVER_SALT'));
-  const signingKey =
-    (GrumpkinScalar as any).fromString?.(requireEnv('SOLVER_SIGNING_KEY')) ||
-    GrumpkinScalar.random();
+  const signingKey = (GrumpkinScalar as any).fromString(requireEnv('SOLVER_SIGNING_KEY'));
 
   const solverAccount = await wallet.createSchnorrAccount(
     secretKey,
@@ -61,8 +59,8 @@ async function main(): Promise<void> {
     );
   }
 
-  const train = TrainContract.at(trainAddress, wallet);
-  const token = TokenContract.at(tokenAddress, wallet);
+  const train = TrainContract.at(trainAddress, toWallet(wallet));
+  const token = TokenContract.at(tokenAddress, toWallet(wallet));
   const transferNonce = Fr.random();
   const rewardTransferNonce = Fr.random();
 
@@ -113,7 +111,7 @@ async function main(): Promise<void> {
     );
 
     if (reward > 0n && !rewardTokenAddress.equals(tokenAddress)) {
-      const rewardToken = TokenContract.at(rewardTokenAddress, wallet);
+      const rewardToken = TokenContract.at(rewardTokenAddress, toWallet(wallet));
       await authorizePublicTransfer(
         wallet,
         solverAccount.address,
@@ -189,6 +187,7 @@ async function main(): Promise<void> {
 main()
   .then(() => process.exit(0))
   .catch((err) => {
-  console.error(`Error: ${err}`);
-  process.exit(1);
-});
+    console.error(`Error: ${err}`);
+    if (err instanceof Error && err.stack) console.error(err.stack);
+    process.exit(1);
+  });

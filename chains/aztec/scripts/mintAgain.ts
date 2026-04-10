@@ -3,8 +3,8 @@ dotenv.config();
 
 import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
-import { TokenContract } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js';
-import { setupWallet } from './utils/setupWallet.ts';
+import { TokenContract } from '@defi-wonderland/aztec-standards/src/artifacts/Token.ts';
+import { setupWallet, toWallet } from './utils/setupWallet.ts';
 import { getPaymentMethod } from './utils/feePayment.ts';
 import { requireEnv, updateEnvFile } from './utils/utils.ts';
 import { getTimeouts } from './utils/config.ts';
@@ -15,14 +15,12 @@ function getMintAmount(): bigint {
 
   const fromEnv =
     process.env.MINT_AGAIN_AMOUNT ??
-    process.env.MINAT_AGAIN_AMOUNT ??
     process.env.MINT_AMOUNT ??
-    process.env.MINAT_AMOUNT ??
     process.env.AMOUNT;
   if (fromEnv) return BigInt(fromEnv);
 
   throw new Error(
-    'Missing mint amount. Pass as first arg, set MINT_AGAIN_AMOUNT (or MINAT_AGAIN_AMOUNT), MINT_AMOUNT (or MINAT_AMOUNT), or AMOUNT in .env',
+    'Missing mint amount. Pass as first arg, set MINT_AGAIN_AMOUNT, MINT_AMOUNT, or AMOUNT in .env',
   );
 }
 
@@ -39,8 +37,7 @@ async function main(): Promise<void> {
   const deployerAccount = await wallet.createSchnorrAccount(
     Fr.fromString(requireEnv('DEPLOYER_SECRET')),
     Fr.fromString(requireEnv('DEPLOYER_SALT')),
-    (GrumpkinScalar as any).fromString?.(requireEnv('DEPLOYER_SIGNING_KEY')) ||
-      GrumpkinScalar.random(),
+    (GrumpkinScalar as any).fromString(requireEnv('DEPLOYER_SIGNING_KEY')),
   );
 
   if (deployerAccount.address.toString() !== expectedDeployerAddress) {
@@ -49,7 +46,7 @@ async function main(): Promise<void> {
     );
   }
 
-  const token = TokenContract.at(tokenAddress, wallet);
+  const token = TokenContract.at(tokenAddress, toWallet(wallet));
 
   const { result: userBalBefore } = await token.methods
     .balance_of_public(userAddress)
@@ -70,7 +67,9 @@ async function main(): Promise<void> {
     .mint_to_public(userAddress, amountEach)
     .send({
       from: deployerAccount.address,
-      fee: { paymentMethod: await getPaymentMethod(wallet, deployerAccount.address) },
+      fee: {
+        paymentMethod: await getPaymentMethod(wallet, deployerAccount.address),
+      },
       wait: { timeout: timeouts.txTimeout, dontThrowOnRevert: true },
     });
 
@@ -84,7 +83,9 @@ async function main(): Promise<void> {
     .mint_to_public(solverAddress, amountEach)
     .send({
       from: deployerAccount.address,
-      fee: { paymentMethod: await getPaymentMethod(wallet, deployerAccount.address) },
+      fee: {
+        paymentMethod: await getPaymentMethod(wallet, deployerAccount.address),
+      },
       wait: { timeout: timeouts.txTimeout, dontThrowOnRevert: true },
     });
 
@@ -121,6 +122,7 @@ async function main(): Promise<void> {
 main()
   .then(() => process.exit(0))
   .catch((err) => {
-  console.error(`Error: ${err}`);
-  process.exit(1);
-});
+    console.error(`Error: ${err}`);
+    if (err instanceof Error && err.stack) console.error(err.stack);
+    process.exit(1);
+  });

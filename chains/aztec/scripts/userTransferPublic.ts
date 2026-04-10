@@ -3,8 +3,8 @@ dotenv.config();
 
 import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
-import { TokenContract } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js';
-import { setupWallet } from './utils/setupWallet.ts';
+import { TokenContract } from '@defi-wonderland/aztec-standards/src/artifacts/Token.ts';
+import { setupWallet, toWallet } from './utils/setupWallet.ts';
 import { getPaymentMethod } from './utils/feePayment.ts';
 import { requireEnv, updateEnvFile } from './utils/utils.ts';
 import { getTimeouts } from './utils/config.ts';
@@ -53,8 +53,7 @@ async function main(): Promise<void> {
   const userAccount = await wallet.createSchnorrAccount(
     Fr.fromString(requireEnv('USER_SECRET')),
     Fr.fromString(requireEnv('USER_SALT')),
-    (GrumpkinScalar as any).fromString?.(requireEnv('USER_SIGNING_KEY')) ||
-      GrumpkinScalar.random(),
+    (GrumpkinScalar as any).fromString(requireEnv('USER_SIGNING_KEY')),
   );
 
   if (userAccount.address.toString() !== expectedUserAddress) {
@@ -65,7 +64,7 @@ async function main(): Promise<void> {
 
   const paymentMethod = await getPaymentMethod(wallet, userAccount.address);
 
-  const token = TokenContract.at(tokenAddress, wallet);
+  const token = TokenContract.at(tokenAddress, toWallet(wallet));
   const transferNonce = Fr.random();
 
   const { result: senderBalBefore } = await token.methods
@@ -119,6 +118,7 @@ async function main(): Promise<void> {
 main()
   .then(() => process.exit(0))
   .catch((err) => {
-  console.error(`Error: ${err}`);
-  process.exit(1);
-});
+    console.error(`Error: ${err}`);
+    if (err instanceof Error && err.stack) console.error(err.stack);
+    process.exit(1);
+  });

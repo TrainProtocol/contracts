@@ -5,9 +5,9 @@ import crypto from 'crypto';
 import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { createAztecNodeClient } from '@aztec/aztec.js/node';
 import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
-import { TokenContract } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js';
+import { TokenContract } from '@defi-wonderland/aztec-standards/src/artifacts/Token.ts';
 import { TrainContract } from './Train.ts';
-import { setupWallet } from './utils/setupWallet.ts';
+import { setupWallet, toWallet } from './utils/setupWallet.ts';
 import { getPaymentMethod } from './utils/feePayment.ts';
 import {
   authorizePublicTransfer,
@@ -45,9 +45,7 @@ async function main(): Promise<void> {
 
   const secretKey = Fr.fromString(requireEnv('USER_SECRET'));
   const salt = Fr.fromString(requireEnv('USER_SALT'));
-  const signingKey =
-    (GrumpkinScalar as any).fromString?.(requireEnv('USER_SIGNING_KEY')) ||
-    GrumpkinScalar.random();
+  const signingKey = (GrumpkinScalar as any).fromString(requireEnv('USER_SIGNING_KEY'));
 
   // Setup script already deploys this account. Here we only recreate the manager.
   const account = await wallet.createSchnorrAccount(
@@ -61,8 +59,8 @@ async function main(): Promise<void> {
     );
   }
 
-  const token = TokenContract.at(tokenAddress, wallet);
-  const train = TrainContract.at(trainAddress, wallet);
+  const token = TokenContract.at(tokenAddress, toWallet(wallet));
+  const train = TrainContract.at(trainAddress, toWallet(wallet));
 
   const secret = crypto.randomBytes(32);
   const hashlock = crypto.createHash('sha256').update(secret).digest();
@@ -174,6 +172,7 @@ async function main(): Promise<void> {
 main()
   .then(() => process.exit(0))
   .catch((err) => {
-  console.error(`Error: ${err}`);
-  process.exit(1);
-});
+    console.error(`Error: ${err}`);
+    if (err instanceof Error && err.stack) console.error(err.stack);
+    process.exit(1);
+  });
