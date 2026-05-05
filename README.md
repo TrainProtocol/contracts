@@ -4,7 +4,7 @@ Read the protocol description and spec - [Train Documentation](https://docs.trai
 
 ## TL;DR
 
-- Introduces Train, an improved version of HTLC for practical atomic swaps
+- Implements HTLC-based cross-chain atomic swaps with solver coordination and incentives
 - Permissionless and trustless protocol without reliance on 3rd parties
 - Supports multi-hop transactions for bridging between indirectly connected chains
 - Alpha version available for testing on multiple testnets
@@ -56,14 +56,15 @@ Train is a revolutionary bridging protocol designed to address the challenges of
 
 ## How It Works
 
-Train introduces an improved version of HTLC that addresses key limitations:
+Train uses hash time-locked contracts (HTLCs) to coordinate trustless swaps between users and solvers.
 
-1. User creates a PreHTLC, committing funds for the selected Solver
-2. Solver detects the transaction, generates a Secret, and creates an HTLC on the destination chain
-3. User observes the destination transaction and converts their PreHTLC to an HTLC on the source chain
-4. Solver reveals the Secret on both chains to complete the transfer
+1. The user creates a lock on the source chain using a hashlock.
+2. A solver creates a corresponding lock on the destination chain using the same hashlock.
+3. The recipient redeems the destination lock by revealing the secret.
+4. The same secret is used to redeem the source-chain lock.
+5. If a swap does not complete before the timelock, funds can be refunded.
 
-This approach resolves issues with secret management, claim transactions on the destination chain, and liveness requirements.
+This design ensures that funds are either redeemed with the correct secret or safely refunded after timeout.
 
 ## Disclaimer: Development in Progress
 
