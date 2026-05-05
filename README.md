@@ -4,9 +4,9 @@ Read the protocol description and spec - [Train Documentation](https://docs.trai
 
 ## TL;DR
 
-- Implements HTLC-based cross-chain atomic swaps with solver coordination and incentives
+- Implements HTLC-based cross-chain atomic swaps with solver-provided liquidity and incentives
 - Permissionless and trustless protocol without reliance on 3rd parties
-- Supports multi-hop transactions for bridging between indirectly connected chains
+- Designed to support multi-hop routing across chains (future work)
 - Alpha version available for testing on multiple testnets
 
 ---
@@ -47,12 +47,12 @@ Train is a revolutionary bridging protocol designed to address the challenges of
 
 - **Trustless**: No reliance on oracle-based systems or 3rd parties
 - **Permissionless**: Open for any participant to join without compromising security
-- **Multi-hop Transactions**: Enables bridging between chains without direct Solver connections
+- **Multi-hop Routing (planned)**: Enables bridging between chains without direct liquidity pairs
 - **Censorship Resistant**: Decentralized design resistant to censorship attempts
 
 ## Architecture
 
-<img width="2312" alt="Diagram 1" src="https://github.com/user-attachments/assets/d004b399-bbe8-4138-ab01-56b8ee5a06c9" />
+<img width="1650" height="1719" alt="htlc" src="https://github.com/user-attachments/assets/3b19eaff-77df-4a28-b25b-270e0e3587db" />
 
 ## How It Works
 
