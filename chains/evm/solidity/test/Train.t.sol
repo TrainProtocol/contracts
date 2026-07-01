@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.30;
+pragma solidity 0.8.34;
 
 import 'forge-std/Test.sol';
 import '../src/Train.sol';
-import '../src/TestToken.sol';
+import './mocks/TestToken.sol';
 
 contract TrainTest is Test {
   Train public train;
@@ -621,6 +621,7 @@ contract TrainTest is Test {
       NATIVE_ETH,
       amount,
       expectedTimelock,
+      params.payoutCurve,
       'ETH',
       '0xDstAddr',
       1,
@@ -660,6 +661,7 @@ contract TrainTest is Test {
       rewardRecipient,
       expectedTimelock,
       expectedRewardTimelock,
+      params.payoutCurve,
       'ETH',
       '0xDstAddr',
       1,
@@ -932,7 +934,7 @@ contract TrainTest is Test {
     vm.prank(initiator);
     train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
 
-    (bytes32[] memory hashes, uint256 total) = train.getUserLockHashes(initiator, Train.LockStatus.Empty, 0, 10);
+    (bytes32[] memory hashes, uint256 total) = train.getUserLockHashes(initiator, 0, 10);
 
     assertEq(hashes.length, 1);
     assertEq(total, 1);
@@ -960,7 +962,7 @@ contract TrainTest is Test {
     train.userLock(params3, _defaultDestination(), '', '');
     vm.stopPrank();
 
-    (bytes32[] memory hashes, uint256 total) = train.getUserLockHashes(initiator, Train.LockStatus.Empty, 0, 10);
+    (bytes32[] memory hashes, uint256 total) = train.getUserLockHashes(initiator, 0, 10);
 
     assertEq(hashes.length, 3);
     assertEq(total, 3);
@@ -971,7 +973,7 @@ contract TrainTest is Test {
 
   function test_getUserLockHashes_EmptyForNewUser() public {
     address newUser = makeAddr('newUser');
-    (bytes32[] memory hashes, uint256 total) = train.getUserLockHashes(newUser, Train.LockStatus.Empty, 0, 10);
+    (bytes32[] memory hashes, uint256 total) = train.getUserLockHashes(newUser, 0, 10);
 
     assertEq(hashes.length, 0);
     assertEq(total, 0);
@@ -986,7 +988,7 @@ contract TrainTest is Test {
     vm.prank(relayer);
     train.redeemUser(hashlock, SECRET);
 
-    (bytes32[] memory hashes, uint256 total) = train.getUserLockHashes(initiator, Train.LockStatus.Empty, 0, 10);
+    (bytes32[] memory hashes, uint256 total) = train.getUserLockHashes(initiator, 0, 10);
 
     assertEq(hashes.length, 1);
     assertEq(total, 1);
@@ -1005,7 +1007,7 @@ contract TrainTest is Test {
     vm.prank(relayer);
     train.refundUser(hashlock);
 
-    (bytes32[] memory hashes, uint256 total) = train.getUserLockHashes(initiator, Train.LockStatus.Empty, 0, 10);
+    (bytes32[] memory hashes, uint256 total) = train.getUserLockHashes(initiator, 0, 10);
 
     assertEq(hashes.length, 1);
     assertEq(total, 1);
@@ -1018,7 +1020,7 @@ contract TrainTest is Test {
     vm.prank(initiator);
     train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
 
-    (Train.UserLock[] memory locks, uint256 total) = train.getUserLocks(initiator, Train.LockStatus.Empty, 0, 10);
+    (Train.UserLock[] memory locks, uint256 total) = train.getUserLocks(initiator, 0, 10);
 
     assertEq(locks.length, 1);
     assertEq(total, 1);
@@ -1045,7 +1047,7 @@ contract TrainTest is Test {
     train.userLock(params2, _defaultDestination(), '', '');
     vm.stopPrank();
 
-    (Train.UserLock[] memory locks, uint256 total) = train.getUserLocks(initiator, Train.LockStatus.Empty, 0, 10);
+    (Train.UserLock[] memory locks, uint256 total) = train.getUserLocks(initiator, 0, 10);
 
     assertEq(locks.length, 2);
     assertEq(total, 2);
@@ -1057,7 +1059,7 @@ contract TrainTest is Test {
 
   function test_getUserLocks_EmptyForNewUser() public {
     address newUser = makeAddr('newUser');
-    (Train.UserLock[] memory locks, uint256 total) = train.getUserLocks(newUser, Train.LockStatus.Empty, 0, 10);
+    (Train.UserLock[] memory locks, uint256 total) = train.getUserLocks(newUser, 0, 10);
 
     assertEq(locks.length, 0);
     assertEq(total, 0);
@@ -1072,7 +1074,7 @@ contract TrainTest is Test {
     vm.prank(relayer);
     train.redeemUser(hashlock, SECRET);
 
-    (Train.UserLock[] memory locks, uint256 total) = train.getUserLocks(initiator, Train.LockStatus.Empty, 0, 10);
+    (Train.UserLock[] memory locks, uint256 total) = train.getUserLocks(initiator, 0, 10);
 
     assertEq(locks.length, 1);
     assertEq(total, 1);
@@ -1092,7 +1094,7 @@ contract TrainTest is Test {
     vm.prank(relayer);
     train.refundUser(hashlock);
 
-    (Train.UserLock[] memory locks, uint256 total) = train.getUserLocks(initiator, Train.LockStatus.Empty, 0, 10);
+    (Train.UserLock[] memory locks, uint256 total) = train.getUserLocks(initiator, 0, 10);
 
     assertEq(locks.length, 1);
     assertEq(total, 1);
@@ -1120,7 +1122,6 @@ contract TrainTest is Test {
     // Check initiator's locks
     (Train.UserLock[] memory initiatorLocks, uint256 initiatorTotal) = train.getUserLocks(
       initiator,
-      Train.LockStatus.Empty,
       0,
       10
     );
@@ -1131,7 +1132,6 @@ contract TrainTest is Test {
     // Check solver's locks
     (Train.UserLock[] memory solverLocks, uint256 solverTotal) = train.getUserLocks(
       solver,
-      Train.LockStatus.Empty,
       0,
       10
     );
@@ -1142,7 +1142,6 @@ contract TrainTest is Test {
     // Check receiver has no locks (they are only recipient, not sender)
     (Train.UserLock[] memory receiverLocks, uint256 receiverTotal) = train.getUserLocks(
       receiver,
-      Train.LockStatus.Empty,
       0,
       10
     );
@@ -1178,30 +1177,18 @@ contract TrainTest is Test {
     vm.prank(relayer);
     train.redeemUser(hashlock2, secret2);
 
-    // Query only redeemed locks
-    (Train.UserLock[] memory redeemedLocks, uint256 redeemedTotal) = train.getUserLocks(
-      initiator,
-      Train.LockStatus.Redeemed,
-      0,
-      10
-    );
+    // Status filtering is now done off-chain on the returned page (the getter no longer filters).
+    (Train.UserLock[] memory allLocks, uint256 total) = train.getUserLocks(initiator, 0, 10);
+    assertEq(total, 3);
 
-    assertEq(redeemedLocks.length, 2);
-    assertEq(redeemedTotal, 2);
-    assertEq(uint8(redeemedLocks[0].status), uint8(Train.LockStatus.Redeemed));
-    assertEq(uint8(redeemedLocks[1].status), uint8(Train.LockStatus.Redeemed));
-
-    // Query only pending locks
-    (Train.UserLock[] memory pendingLocks, uint256 pendingTotal) = train.getUserLocks(
-      initiator,
-      Train.LockStatus.Pending,
-      0,
-      10
-    );
-
-    assertEq(pendingLocks.length, 1);
-    assertEq(pendingTotal, 1);
-    assertEq(uint8(pendingLocks[0].status), uint8(Train.LockStatus.Pending));
+    uint256 redeemedCount;
+    uint256 pendingCount;
+    for (uint256 i = 0; i < allLocks.length; i++) {
+      if (allLocks[i].status == Train.LockStatus.Redeemed) redeemedCount++;
+      else if (allLocks[i].status == Train.LockStatus.Pending) pendingCount++;
+    }
+    assertEq(redeemedCount, 2);
+    assertEq(pendingCount, 1);
   }
 
   function test_getUserLocks_WithPagination() public {
@@ -1218,22 +1205,22 @@ contract TrainTest is Test {
     }
 
     // Page 1: Get first 2
-    (Train.UserLock[] memory page1, uint256 total1) = train.getUserLocks(initiator, Train.LockStatus.Empty, 0, 2);
+    (Train.UserLock[] memory page1, uint256 total1) = train.getUserLocks(initiator, 0, 2);
     assertEq(page1.length, 2);
     assertEq(total1, 5);
 
     // Page 2: Get next 2
-    (Train.UserLock[] memory page2, uint256 total2) = train.getUserLocks(initiator, Train.LockStatus.Empty, 2, 2);
+    (Train.UserLock[] memory page2, uint256 total2) = train.getUserLocks(initiator, 2, 2);
     assertEq(page2.length, 2);
     assertEq(total2, 5);
 
     // Page 3: Get last 1
-    (Train.UserLock[] memory page3, uint256 total3) = train.getUserLocks(initiator, Train.LockStatus.Empty, 4, 2);
+    (Train.UserLock[] memory page3, uint256 total3) = train.getUserLocks(initiator, 4, 2);
     assertEq(page3.length, 1);
     assertEq(total3, 5);
 
     // Out of range
-    (Train.UserLock[] memory page4, uint256 total4) = train.getUserLocks(initiator, Train.LockStatus.Empty, 10, 2);
+    (Train.UserLock[] memory page4, uint256 total4) = train.getUserLocks(initiator, 10, 2);
     assertEq(page4.length, 0);
     assertEq(total4, 5);
   }
@@ -1258,27 +1245,13 @@ contract TrainTest is Test {
     vm.prank(relayer);
     train.redeemUser(hashlock1, secret1);
 
-    // Get only redeemed
-    (bytes32[] memory redeemedHashes, uint256 redeemedTotal) = train.getUserLockHashes(
-      initiator,
-      Train.LockStatus.Redeemed,
-      0,
-      10
-    );
-    assertEq(redeemedHashes.length, 1);
-    assertEq(redeemedTotal, 1);
-    assertEq(redeemedHashes[0], hashlock1);
+    // The hashes getter returns all hashlocks; resolve status off-chain via getUserLock.
+    (bytes32[] memory hashes, uint256 total) = train.getUserLockHashes(initiator, 0, 10);
+    assertEq(total, 2);
+    assertEq(hashes.length, 2);
 
-    // Get only pending
-    (bytes32[] memory pendingHashes, uint256 pendingTotal) = train.getUserLockHashes(
-      initiator,
-      Train.LockStatus.Pending,
-      0,
-      10
-    );
-    assertEq(pendingHashes.length, 1);
-    assertEq(pendingTotal, 1);
-    assertEq(pendingHashes[0], hashlock2);
+    assertEq(uint8(train.getUserLock(hashlock1).status), uint8(Train.LockStatus.Redeemed));
+    assertEq(uint8(train.getUserLock(hashlock2).status), uint8(Train.LockStatus.Pending));
   }
 
   // ============ Additional Event Tests ============
@@ -1289,8 +1262,8 @@ contract TrainTest is Test {
     vm.prank(initiator);
     train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
 
-    vm.expectEmit(true, false, false, false);
-    emit Train.UserRefunded(hashlock);
+    vm.expectEmit(true, false, false, true);
+    emit Train.UserRefunded(hashlock, initiator, 1 ether);
 
     vm.prank(receiver);
     train.refundUser(hashlock);
@@ -1305,8 +1278,8 @@ contract TrainTest is Test {
 
     vm.warp(block.timestamp + timelockDelta + 1);
 
-    vm.expectEmit(true, true, false, false);
-    emit Train.SolverRefunded(hashlock, index);
+    vm.expectEmit(true, true, false, true);
+    emit Train.SolverRefunded(hashlock, index, solver, 1 ether, 0.1 ether);
 
     vm.prank(relayer);
     train.refundSolver(hashlock, index);
@@ -1319,7 +1292,7 @@ contract TrainTest is Test {
     train.userLock{ value: 1 ether }(params, _defaultDestination(), '', '');
 
     vm.expectEmit(true, false, false, true);
-    emit Train.UserRedeemed(hashlock, relayer, SECRET);
+    emit Train.UserRedeemed(hashlock, relayer, SECRET, 1 ether, 0);
 
     vm.prank(relayer);
     train.redeemUser(hashlock, SECRET);
@@ -1332,7 +1305,7 @@ contract TrainTest is Test {
     uint256 index = train.solverLock{ value: 1.1 ether }(params, _defaultDestination(), '');
 
     vm.expectEmit(true, true, false, true);
-    emit Train.SolverRedeemed(hashlock, index, relayer, SECRET);
+    emit Train.SolverRedeemed(hashlock, index, relayer, SECRET, 1 ether, 0, rewardRecipient, 0.1 ether);
 
     vm.prank(relayer);
     train.redeemSolver(hashlock, index, SECRET);
@@ -1494,6 +1467,7 @@ contract TrainTest is Test {
       NATIVE_ETH,
       amount,
       expectedTimelock,
+      params.payoutCurve,
       'ETH',
       '0xDstAddr',
       1,
@@ -1534,6 +1508,7 @@ contract TrainTest is Test {
       rewardRecipient,
       expectedTimelock,
       expectedRewardTimelock,
+      params.payoutCurve,
       'ETH',
       '0xDstAddr',
       1,

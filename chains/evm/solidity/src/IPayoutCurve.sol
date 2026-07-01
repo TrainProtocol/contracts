@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.30;
+pragma solidity 0.8.34;
+
+import { IERC165 } from '@openzeppelin/contracts/utils/introspection/IERC165.sol';
 
 /// @title IPayoutCurve
 /// @notice Interface for time-based payout decay curves used by the HTLC.
@@ -10,7 +12,11 @@ pragma solidity 0.8.30;
 ///
 ///      `payoutCurveData` stored in each lock is passed as `config` directly —
 ///      no selector prefix is needed since the function is fixed by this interface.
-interface IPayoutCurve {
+///
+///      Extends EIP-165: a curve must answer `supportsInterface` true for both the ERC-165 id
+///      (`type(IERC165).interfaceId`) and `type(IPayoutCurve).interfaceId`. Train probes this via
+///      OpenZeppelin's `ERC165Checker` before trusting a curve (see `Train._validatePayoutCurve`).
+interface IPayoutCurve is IERC165 {
   /// @notice Compute the payout for a given lock at the current time.
   /// @param amount      The locked token amount.
   /// @param startTime   The timestamp when the lock was created.
@@ -23,8 +29,4 @@ interface IPayoutCurve {
     uint48 currentTime,
     bytes calldata config
   ) external view returns (uint256 payout);
-
-  /// @notice ERC-165-style interface check.
-  /// @return True if and only if interfaceId equals type(IPayoutCurve).interfaceId.
-  function supportsInterface(bytes4 interfaceId) external pure returns (bool);
 }

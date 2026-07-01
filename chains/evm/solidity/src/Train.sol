@@ -9,23 +9,30 @@
 //       @@@@@  @@@           @@@@@@@@@ @@@  @@@   @@@          @@@
 
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.30;
+pragma solidity 0.8.34;
 
 import { IERC20 } from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import { SafeERC20 } from '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
-import { ReentrancyGuard } from '@openzeppelin/contracts/utils/ReentrancyGuard.sol';
+import { ReentrancyGuardTransient } from '@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol';
+import { ERC165Checker } from '@openzeppelin/contracts/utils/introspection/ERC165Checker.sol';
 import { IPayoutCurve } from './IPayoutCurve.sol';
 
 /// @title Train Protocol - Cross-Chain HTLC Bridge
 /// @author Train Protocol
 /// @notice Trustless cross-chain bridge using Hashed Time-Locked Contracts
 /// @dev Supports native ETH (token=address(0)) and ERC20 tokens. Hashlock = sha256(secret).
-///      Supports optional external payout curves via staticcall for time-based decay.
+///      Supports an optional pluggable payout curve via STATICCALL (shipped ConstantPayoutCurve is a
+///      no-op returning the full amount; arbitrary curves are caller-supplied — see README trust notes).
 ///      Handles fee-on-transfer tokens by measuring actual received amounts.
-contract Train is ReentrancyGuard {
+///      Uses transient-storage reentrancy guard (EIP-1153, requires Cancun+).
+contract Train is ReentrancyGuardTransient {
   using SafeERC20 for IERC20;
+  using ERC165Checker for address;
 
-  /// @notice Gas limit for ETH transfers to prevent griefing attacks
+  /// @notice Gas forwarded with native-ETH transfers, to bound griefing via a recipient's fallback.
+  /// @dev Constraint: a contract `recipient`/`refundTo` whose receive()/fallback needs more than this
+  ///      makes the ETH send — and therefore the redeem/refund — revert. Use an EOA (or a cheap
+  ///      receiver) for native-ETH locks. ERC20 transfers are unaffected by this stipend.
   uint256 constant GAS_STIPEND = 10_000;
 
   /// @notice Sentinel value representing native ETH
@@ -73,6 +80,15 @@ contract Train is ReentrancyGuard {
   /// @notice Thrown when payout curve staticcall fails or returns invalid bounds (0 < payout <= amount)
   error InvalidPayout();
 
+  /// @notice Thrown when a provided user address is the zero address
+  error InvalidUser();
+
+  /// @notice Thrown when native ETH is used on a path that only supports ERC20 (e.g. userLockFor)
+  error NativeNotSupported();
+
+  /// @notice Thrown when a required address (recipient / refundTo / rewardRecipient) is the zero address
+  error ZeroAddress();
+
   /// @notice Lock lifecycle states
   enum LockStatus {
     Empty,
@@ -81,41 +97,64 @@ contract Train is ReentrancyGuard {
     Redeemed
   }
 
-  /// @notice User-initiated lock storage structure
+  /// @notice User-initiated lock storage structure.
+  /// @dev Field order is packing-aware: {sender,timelock,startTime} fill one slot and
+  ///      {status,recipient} the next; the trailing addresses take one slot each.
   struct UserLock {
-    uint256 secret;
-    uint256 amount;
-    address sender;
-    uint48 timelock;
-    uint48 startTime;
-    LockStatus status;
-    address recipient;
-    address refundTo;
-    address token;
-    address payoutCurve;
-    bytes payoutCurveData;
+    uint256 secret; //         slot 0
+    uint256 amount; //         slot 1
+    address sender; //         slot 2 [0:20]
+    uint48 timelock; //        slot 2 [20:26]
+    uint48 startTime; //       slot 2 [26:32]
+    LockStatus status; //      slot 3 [0:1]
+    address recipient; //      slot 3 [1:21]
+    address refundTo; //       slot 4
+    address token; //          slot 5
+    address payoutCurve; //    slot 6
+    bytes payoutCurveData; //  slot 7 (length) + data
   }
 
-  /// @notice Solver-initiated lock storage structure
+  /// @notice Solver-initiated lock storage structure.
+  /// @dev Field order is packing-aware: {sender,timelock,rewardTimelock} fill one slot and
+  ///      {startTime,recipient,status} the next; trailing addresses take one slot each.
   struct SolverLock {
-    uint256 secret;
-    uint256 amount;
-    uint256 reward;
-    address sender;
-    uint48 timelock;
-    uint48 rewardTimelock;
-    uint48 startTime;
-    address recipient;
-    LockStatus status;
-    address rewardRecipient;
-    address refundTo;
-    address token;
-    address rewardToken;
-    address payoutCurve;
-    bytes payoutCurveData;
+    uint256 secret; //          slot 0
+    uint256 amount; //          slot 1
+    uint256 reward; //          slot 2
+    address sender; //          slot 3 [0:20]
+    uint48 timelock; //         slot 3 [20:26]
+    uint48 rewardTimelock; //   slot 3 [26:32]
+    uint48 startTime; //        slot 4 [0:6]
+    address recipient; //       slot 4 [6:26]
+    LockStatus status; //       slot 4 [26:27]
+    address rewardRecipient; // slot 5
+    address refundTo; //        slot 6
+    address token; //           slot 7
+    address rewardToken; //     slot 8
+    address payoutCurve; //     slot 9
+    bytes payoutCurveData; //   slot 10 (length) + data
   }
 
-  /// @notice Emitted when user creates a lock
+  /// @notice Emitted when a user creates a lock.
+  /// @param hashlock The lock identifier (sha256 of the secret).
+  /// @param sender The lock owner of record (the user; on the `userLockFor` path the funder may be a router).
+  /// @param recipient The address that receives the payout on redeem.
+  /// @param srcChain The source chain identifier.
+  /// @param token The locked token (address(0) for native ETH).
+  /// @param amount The measured amount actually escrowed (fee-on-transfer safe).
+  /// @param timelock Absolute timestamp after which a non-recipient may refund.
+  /// @param payoutCurve The payout curve applied on redeem (address(0) if none).
+  /// @param dstChain Destination chain identifier (logged only).
+  /// @param dstAddress Destination recipient address as a string (logged only).
+  /// @param dstAmount Destination amount (logged only).
+  /// @param dstToken Destination token identifier (logged only).
+  /// @param rewardAmount Reward offered to the solver on the destination side (informational).
+  /// @param rewardToken Reward token identifier on the destination side (informational).
+  /// @param rewardRecipient Reward recipient identifier on the destination side (informational).
+  /// @param rewardTimelockDelta Reward timelock delta echoed for the solver (informational).
+  /// @param quoteExpiry Absolute timestamp after which the quote was no longer valid at creation.
+  /// @param userData Opaque user-supplied data (logged only).
+  /// @param solverData Opaque solver-supplied data (logged only).
   event UserLocked(
     bytes32 indexed hashlock,
     address indexed sender,
@@ -124,6 +163,7 @@ contract Train is ReentrancyGuard {
     address token,
     uint256 amount,
     uint48 timelock,
+    address payoutCurve,
     string dstChain,
     string dstAddress,
     uint256 dstAmount,
@@ -137,7 +177,25 @@ contract Train is ReentrancyGuard {
     bytes solverData
   );
 
-  /// @notice Emitted when solver creates a lock
+  /// @notice Emitted when a solver creates a lock.
+  /// @param hashlock The lock identifier (sha256 of the secret).
+  /// @param sender The solver that created and funded the lock.
+  /// @param recipient The address that receives the payout on redeem.
+  /// @param index The solver-lock index under this hashlock (1-based, monotonic).
+  /// @param srcChain The source chain identifier.
+  /// @param token The locked token (address(0) for native ETH).
+  /// @param amount The measured amount actually escrowed (fee-on-transfer safe).
+  /// @param reward The measured reward actually escrowed.
+  /// @param rewardToken The reward token (address(0) for native ETH).
+  /// @param rewardRecipient The reward recipient before rewardTimelock.
+  /// @param timelock Absolute timestamp after which the lock may be refunded.
+  /// @param rewardTimelock Absolute timestamp after which the reward routes to the redeemer instead.
+  /// @param payoutCurve The payout curve applied on redeem (address(0) if none).
+  /// @param dstChain Destination chain identifier (logged only).
+  /// @param dstAddress Destination recipient address as a string (logged only).
+  /// @param dstAmount Destination amount (logged only).
+  /// @param dstToken Destination token identifier (logged only).
+  /// @param data Opaque solver-supplied data (logged only).
   event SolverLocked(
     bytes32 indexed hashlock,
     address indexed sender,
@@ -151,6 +209,7 @@ contract Train is ReentrancyGuard {
     address rewardRecipient,
     uint48 timelock,
     uint48 rewardTimelock,
+    address payoutCurve,
     string dstChain,
     string dstAddress,
     uint256 dstAmount,
@@ -158,17 +217,47 @@ contract Train is ReentrancyGuard {
     bytes data
   );
 
-  /// @notice Emitted when user lock is refunded
-  event UserRefunded(bytes32 indexed hashlock);
+  /// @notice Emitted when a user lock is refunded (full amount returned to refundTo).
+  /// @param hashlock The lock identifier (sha256 of the secret).
+  /// @param refundTo The address the locked amount was returned to.
+  /// @param amount The amount returned.
+  event UserRefunded(bytes32 indexed hashlock, address refundTo, uint256 amount);
 
-  /// @notice Emitted when solver lock is refunded
-  event SolverRefunded(bytes32 indexed hashlock, uint256 indexed index);
+  /// @notice Emitted when a solver lock is refunded (amount + reward returned to refundTo).
+  /// @param hashlock The lock identifier (sha256 of the secret).
+  /// @param index The solver-lock index under this hashlock.
+  /// @param refundTo The address the amount and reward were returned to.
+  /// @param amount The principal amount returned.
+  /// @param reward The reward returned.
+  event SolverRefunded(bytes32 indexed hashlock, uint256 indexed index, address refundTo, uint256 amount, uint256 reward);
 
-  /// @notice Emitted when user lock is redeemed
-  event UserRedeemed(bytes32 indexed hashlock, address redeemer, uint256 secret);
+  /// @notice Emitted when a user lock is redeemed with the secret preimage.
+  /// @param hashlock The lock identifier (sha256 of the secret).
+  /// @param redeemer The caller that triggered the redemption (not necessarily the recipient).
+  /// @param secret The revealed preimage (sha256(secret) == hashlock).
+  /// @param payout Amount paid to the recipient (== amount when no payout curve).
+  /// @param excess Remainder returned to refundTo (amount - payout; 0 when no payout curve).
+  event UserRedeemed(bytes32 indexed hashlock, address redeemer, uint256 secret, uint256 payout, uint256 excess);
 
-  /// @notice Emitted when solver lock is redeemed
-  event SolverRedeemed(bytes32 indexed hashlock, uint256 indexed index, address redeemer, uint256 secret);
+  /// @notice Emitted when a solver lock is redeemed with the secret preimage.
+  /// @param hashlock The lock identifier (sha256 of the secret).
+  /// @param index The solver-lock index under this hashlock.
+  /// @param redeemer The caller that triggered the redemption.
+  /// @param secret The revealed preimage (sha256(secret) == hashlock).
+  /// @param payout Amount paid to the recipient (== amount when no payout curve).
+  /// @param excess Remainder returned to refundTo (amount - payout; 0 when no payout curve).
+  /// @param rewardTo Address that received the reward (rewardRecipient before rewardTimelock, else the redeemer).
+  /// @param reward Reward amount paid to rewardTo.
+  event SolverRedeemed(
+    bytes32 indexed hashlock,
+    uint256 indexed index,
+    address redeemer,
+    uint256 secret,
+    uint256 payout,
+    uint256 excess,
+    address rewardTo,
+    uint256 reward
+  );
 
   /// @notice Cross-chain destination details (logged only, not stored)
   struct DestinationInfo {
@@ -225,54 +314,72 @@ contract Train is ReentrancyGuard {
   /// @dev Historical hashlocks per user address
   mapping(address => bytes32[]) private userLockHashes;
 
-  /// @notice Create a user lock to initiate a cross-chain swap
+  /// @notice Create a user lock to initiate a cross-chain swap (caller funds the lock).
+  /// @dev Payable: send `params.amount` as msg.value for native-ETH locks; send 0 for ERC20 locks.
+  /// @param params Lock parameters: hashlock, amount, token, recipient, refundTo, timelock/quote bounds,
+  ///        optional payout curve, and destination reward metadata (the latter logged only).
+  /// @param dst Destination-chain details (logged only).
+  /// @param userData Opaque user-supplied data (logged only).
+  /// @param solverData Opaque solver-supplied data (logged only).
   function userLock(
     UserLockParams calldata params,
     DestinationInfo calldata dst,
     bytes calldata userData,
     bytes calldata solverData
   ) external payable nonReentrant {
-    if (params.amount == 0) revert ZeroAmount();
-    if (params.timelockDelta == 0) revert InvalidTimelock();
-    if (block.timestamp >= params.quoteExpiry) revert QuoteExpired();
-    if (params.token != NATIVE_ETH && params.token.code.length == 0) revert InvalidToken();
-    if (userLocks[params.hashlock].sender != address(0)) revert SwapAlreadyExists();
-    if (params.payoutCurve != address(0)) _validatePayoutCurve(params.payoutCurve);
-
-    uint48 timelock = uint48(block.timestamp) + params.timelockDelta;
-
-    uint256 actualAmount = _transferIn(params.token, params.amount);
-
-    UserLock storage lock = userLocks[params.hashlock];
-    lock.sender = msg.sender;
-    lock.amount = actualAmount;
-    lock.recipient = params.recipient;
-    lock.refundTo = params.refundTo;
-    lock.timelock = timelock;
-    lock.startTime = uint48(block.timestamp);
-    lock.status = LockStatus.Pending;
-    lock.token = params.token;
-    lock.payoutCurve = params.payoutCurve;
-    if (params.payoutCurveData.length > 0) lock.payoutCurveData = params.payoutCurveData;
-
-    userLockHashes[msg.sender].push(params.hashlock);
-
-    _emitUserLocked(params, dst, timelock, userData, solverData);
+    _validateUserLockParams(params);
+    uint256 received = _transferIn(params.token, params.amount);
+    _userLockCore(msg.sender, received, params, dst, userData, solverData);
   }
 
-  /// @notice Create a solver lock to fulfill a swap
+  /// @notice Create a user lock on behalf of `user`, funded by the caller.
+  /// @dev Permissionless gasless-intake entrypoint, intended for a TrainRouter that has already pulled
+  ///      `user`'s funds (via Permit2 / ERC-2612 / EIP-3009) and re-supplies them here.
+  ///      Security model for the address-less TrainRouter boundary:
+  ///        - Funds are pulled from `msg.sender` and the credited amount is the measured balance
+  ///          delta (see `_transferIn`), so Train trusts NO amount claim from the caller.
+  ///        - `user` is purely attributive: it sets the lock owner, the `userLockHashes` index, and
+  ///          the `UserLocked` event sender. It does NOT govern custody — `refundTo`/`recipient`
+  ///          come from `params`, and refund authorization keys off `recipient`, not `sender`.
+  ///          NOTE: a caller may attribute a lock to ANY `user` at GAS-ONLY cost (the 1-wei minimum
+  ///          is instantly reclaimable via `refundUser`, since an attacker can set itself as the
+  ///          recipient) and the entry is never pruned. This is a griefing vector only against the
+  ///          off-chain enumeration getters, which is why those read a bounded window. No funds are
+  ///          ever at risk.
+  ///        - Intent signature verification lives entirely in the calling TrainRouter, never here.
+  ///      Native ETH is unsupported on this path (non-payable; gasless standards are ERC20-only).
+  /// @param user The lock owner of record (custody is governed by params.recipient/refundTo, not this).
+  /// @param params Lock parameters; `params.token` must be an ERC20 (native ETH is rejected).
+  /// @param dst Destination-chain details (logged only).
+  /// @param userData Opaque user-supplied data (logged only).
+  /// @param solverData Opaque solver-supplied data (logged only).
+  function userLockFor(
+    address user,
+    UserLockParams calldata params,
+    DestinationInfo calldata dst,
+    bytes calldata userData,
+    bytes calldata solverData
+  ) external nonReentrant {
+    if (user == address(0)) revert InvalidUser();
+    if (params.token == NATIVE_ETH) revert NativeNotSupported();
+    _validateUserLockParams(params);
+    uint256 received = _transferIn(params.token, params.amount);
+    _userLockCore(user, received, params, dst, userData, solverData);
+  }
+
+  /// @notice Create a solver lock to fulfill a swap (solver funds the lock).
+  /// @dev Payable: send native ETH equal to the native legs of (amount, reward) as msg.value.
+  /// @param params Solver lock parameters: amount, optional reward (+ reward token/recipient/timelock),
+  ///        recipient, refundTo, token, and optional payout curve.
+  /// @param dst Destination-chain details (logged only).
+  /// @param data Opaque solver-supplied data (logged only).
+  /// @return index The 1-based solver-lock index assigned under params.hashlock.
   function solverLock(
     SolverLockParams calldata params,
     DestinationInfo calldata dst,
     bytes calldata data
   ) external payable nonReentrant returns (uint256 index) {
-    if (params.amount == 0) revert ZeroAmount();
-    if (params.timelockDelta == 0) revert InvalidTimelock();
-    if (params.token != NATIVE_ETH && params.token.code.length == 0) revert InvalidToken();
-    if (params.reward > 0 && params.rewardTimelockDelta >= params.timelockDelta) revert InvalidRewardTimelock();
-    if (params.reward > 0 && params.rewardToken != NATIVE_ETH && params.rewardToken.code.length == 0)
-      revert InvalidToken();
-    if (params.payoutCurve != address(0)) _validatePayoutCurve(params.payoutCurve);
+    _validateSolverLockParams(params);
 
     uint48 timelock = uint48(block.timestamp) + params.timelockDelta;
     uint48 rewardTimelock = uint48(block.timestamp) + params.rewardTimelockDelta;
@@ -283,6 +390,9 @@ contract Train is ReentrancyGuard {
       params.rewardToken,
       params.reward
     );
+    // An extreme fee-on-transfer token could floor the proportional split to 0; reject it rather
+    // than persist a zero-amount Pending lock.
+    if (actualAmount == 0) revert ZeroAmount();
 
     index = ++solverLockCount[params.hashlock];
     SolverLock storage lock = solverLocks[params.hashlock][index];
@@ -301,11 +411,12 @@ contract Train is ReentrancyGuard {
     lock.payoutCurve = params.payoutCurve;
     if (params.payoutCurveData.length > 0) lock.payoutCurveData = params.payoutCurveData;
 
-    _emitSolverLocked(params, dst, index, timelock, rewardTimelock, data);
+    _emitSolverLocked(params, actualAmount, actualReward, dst, index, timelock, rewardTimelock, data);
   }
 
-  /// @notice Refund a user lock
+  /// @notice Refund a user lock (returns the full amount to refundTo).
   /// @dev Recipient can refund anytime; others only after timelock expires. Full amount, no decay.
+  /// @param hashlock The lock identifier (sha256 of the secret).
   function refundUser(bytes32 hashlock) external nonReentrant {
     UserLock storage lock = userLocks[hashlock];
     address sender = lock.sender;
@@ -316,11 +427,16 @@ contract Train is ReentrancyGuard {
     }
 
     lock.status = LockStatus.Refunded;
-    _transferOut(lock.token, payable(lock.refundTo), lock.amount);
-    emit UserRefunded(hashlock);
+    address refundTo = lock.refundTo; // cache: read for the transfer and the event
+    uint256 amount = lock.amount; //    cache: read for the transfer and the event
+    _transferOut(lock.token, payable(refundTo), amount);
+    emit UserRefunded(hashlock, refundTo, amount);
   }
 
-  /// @notice Refund a solver lock (full amount + reward returned to sender, no decay)
+  /// @notice Refund a solver lock (full amount + reward returned to refundTo, no decay).
+  /// @dev Callable by anyone, but only after the timelock expires.
+  /// @param hashlock The lock identifier (sha256 of the secret).
+  /// @param index The solver-lock index under this hashlock.
   function refundSolver(bytes32 hashlock, uint256 index) external nonReentrant {
     SolverLock storage lock = solverLocks[hashlock][index];
     address sender = lock.sender;
@@ -329,12 +445,19 @@ contract Train is ReentrancyGuard {
     if (lock.timelock > block.timestamp) revert RefundNotAllowed();
 
     lock.status = LockStatus.Refunded;
-    _transferOutMixed(lock.token, lock.amount, payable(lock.refundTo), lock.rewardToken, lock.reward, payable(lock.refundTo));
-    emit SolverRefunded(hashlock, index);
+    address payable refundTo = payable(lock.refundTo); // cache: used as both amount and reward sink
+    uint256 amount = lock.amount; // cache: read for the transfer and the event
+    uint256 reward = lock.reward; // cache: read for the transfer and the event
+    _transferOutMixed(lock.token, amount, refundTo, lock.rewardToken, reward, refundTo);
+    emit SolverRefunded(hashlock, index, refundTo, amount, reward);
   }
 
-  /// @notice Redeem a user lock with the secret preimage
-  /// @dev If a payout curve is set, payout is computed via staticcall; excess returns to sender.
+  /// @notice Redeem a user lock with the secret preimage (pays the lock's recipient).
+  /// @dev Permissionless: any caller holding the secret can trigger it; the payout goes to the lock's
+  ///      recipient, never to the caller. If a payout curve is set, payout is computed via staticcall
+  ///      and any excess (amount - payout) is sent to `refundTo`.
+  /// @param hashlock The lock identifier (sha256 of the secret).
+  /// @param secret The preimage; must satisfy sha256(secret) == hashlock.
   function redeemUser(bytes32 hashlock, uint256 secret) external nonReentrant {
     UserLock storage lock = userLocks[hashlock];
     if (lock.sender == address(0)) revert LockNotFound();
@@ -344,20 +467,33 @@ contract Train is ReentrancyGuard {
     lock.status = LockStatus.Redeemed;
     lock.secret = secret;
 
-    uint256 payout = lock.amount;
+    uint256 amount = lock.amount; // cache: read for payout and excess
+    address token = lock.token; //  cache: read for both outbound transfers
+    uint256 payout = amount;
     if (lock.payoutCurve != address(0)) {
-      payout = _computePayout(lock.payoutCurve, lock.amount, lock.startTime, lock.payoutCurveData);
+      payout = _computePayout(lock.payoutCurve, amount, lock.startTime, lock.payoutCurveData);
     }
 
-    _transferOut(lock.token, payable(lock.recipient), payout);
-    uint256 excess = lock.amount - payout;
-    if (excess > 0) _transferOut(lock.token, payable(lock.refundTo), excess);
+    // _computePayout guarantees 0 < payout <= amount (and payout == amount when no curve), so the
+    // subtraction cannot underflow.
+    uint256 excess;
+    unchecked {
+      excess = amount - payout;
+    }
 
-    emit UserRedeemed(hashlock, msg.sender, secret);
+    _transferOut(token, payable(lock.recipient), payout);
+    if (excess > 0) _transferOut(token, payable(lock.refundTo), excess);
+
+    emit UserRedeemed(hashlock, msg.sender, secret, payout, excess);
   }
 
-  /// @notice Redeem a solver lock with the secret preimage
-  /// @dev Payout curve applies to main amount only. Reward unaffected by decay.
+  /// @notice Redeem a solver lock with the secret preimage (pays the recipient; routes the reward).
+  /// @dev Permissionless. The payout curve applies to the main amount only; any excess goes to
+  ///      `refundTo`. The reward routes to `rewardRecipient` before `rewardTimelock`, otherwise to the
+  ///      caller (the redeemer).
+  /// @param hashlock The lock identifier (sha256 of the secret).
+  /// @param index The solver-lock index under this hashlock.
+  /// @param secret The preimage; must satisfy sha256(secret) == hashlock.
   function redeemSolver(bytes32 hashlock, uint256 index, uint256 secret) external nonReentrant {
     SolverLock storage lock = solverLocks[hashlock][index];
     if (lock.sender == address(0)) revert LockNotFound();
@@ -367,140 +503,181 @@ contract Train is ReentrancyGuard {
     lock.status = LockStatus.Redeemed;
     lock.secret = secret;
 
-    uint256 payout = lock.amount;
+    uint256 amount = lock.amount; // cache: read for payout and excess
+    address token = lock.token; //  cache: read for both outbound transfers
+    uint256 reward = lock.reward; // cache: read for the guard, the transfer, and the event
+    uint256 payout = amount;
     if (lock.payoutCurve != address(0)) {
-      payout = _computePayout(lock.payoutCurve, lock.amount, lock.startTime, lock.payoutCurveData);
+      payout = _computePayout(lock.payoutCurve, amount, lock.startTime, lock.payoutCurveData);
     }
 
     address rewardTo = lock.rewardTimelock > block.timestamp ? lock.rewardRecipient : msg.sender;
 
-    _transferOut(lock.token, payable(lock.recipient), payout);
-    uint256 excess = lock.amount - payout;
-    if (excess > 0) _transferOut(lock.token, payable(lock.refundTo), excess);
-    if (lock.reward > 0) _transferOut(lock.rewardToken, payable(rewardTo), lock.reward);
+    // _computePayout guarantees 0 < payout <= amount (and payout == amount when no curve), so the
+    // subtraction cannot underflow.
+    uint256 excess;
+    unchecked {
+      excess = amount - payout;
+    }
 
-    emit SolverRedeemed(hashlock, index, msg.sender, secret);
+    _transferOut(token, payable(lock.recipient), payout);
+    if (excess > 0) _transferOut(token, payable(lock.refundTo), excess);
+    if (reward > 0) _transferOut(lock.rewardToken, payable(rewardTo), reward);
+
+    emit SolverRedeemed(hashlock, index, msg.sender, secret, payout, excess, rewardTo, reward);
   }
 
-  /// @notice Get user lock details
+  /// @notice Get user lock details.
+  /// @param hashlock The lock identifier (sha256 of the secret).
+  /// @return The stored UserLock (zero-valued if none exists).
   function getUserLock(bytes32 hashlock) external view returns (UserLock memory) {
     return userLocks[hashlock];
   }
 
-  /// @notice Get solver lock details
+  /// @notice Get solver lock details.
+  /// @param hashlock The lock identifier (sha256 of the secret).
+  /// @param index The solver-lock index under this hashlock.
+  /// @return The stored SolverLock (zero-valued if none exists).
   function getSolverLock(bytes32 hashlock, uint256 index) external view returns (SolverLock memory) {
     return solverLocks[hashlock][index];
   }
 
-  /// @notice Get the number of solver locks for a hashlock
+  /// @notice Get the number of solver locks for a hashlock.
+  /// @param hashlock The lock identifier (sha256 of the secret).
+  /// @return The count of solver locks (also the highest valid 1-based index).
   function getSolverLockCount(bytes32 hashlock) external view returns (uint256) {
     return solverLockCount[hashlock];
   }
 
-  /// @notice Get all hashlocks for user locks created by an address with optional filtering and pagination
+  /// @notice Paginated hashlocks of the user locks created by / attributed to `user`.
+  /// @dev Read-only enumeration intended for off-chain `eth_call`. It reads ONLY the requested
+  ///      window directly from storage and never copies the whole array into memory, so it stays
+  ///      callable at any array size. (Anyone can append to a `user`'s list via `userLockFor` at
+  ///      gas-only cost, but that can no longer push these getters past a node's `eth_call` gas
+  ///      cap.) Filter by `UserLock.status` off-chain on the returned data, or use `getUserLocks`.
+  /// @param user   The lock owner to enumerate.
+  /// @param offset Start index into the user's hashlock list.
+  /// @param limit  Maximum number of entries to return.
+  /// @return hashlocks The page in [offset, min(offset+limit, total)).
+  /// @return total     The full number of hashlocks for `user` (for client-side pagination).
   function getUserLockHashes(
     address user,
-    LockStatus status,
     uint256 offset,
     uint256 limit
   ) external view returns (bytes32[] memory hashlocks, uint256 total) {
-    bytes32[] memory allHashes = userLockHashes[user];
-
-    if (limit == 0) {
-      return (new bytes32[](0), 0);
+    bytes32[] storage all = userLockHashes[user];
+    total = all.length;
+    if (limit == 0 || offset >= total) {
+      return (new bytes32[](0), total);
     }
-
-    uint256 matchCount = 0;
-    for (uint256 i = 0; i < allHashes.length; i++) {
-      if (status == LockStatus.Empty || userLocks[allHashes[i]].status == status) {
-        matchCount++;
-      }
-    }
-
-    if (offset >= matchCount) {
-      return (new bytes32[](0), matchCount);
-    }
-
     uint256 end = offset + limit;
-    if (end > matchCount) {
-      end = matchCount;
-    }
+    if (end > total) end = total;
     uint256 size = end - offset;
-
-    bytes32[] memory result = new bytes32[](size);
-    uint256 resultIndex = 0;
-    uint256 currentIndex = 0;
-
-    for (uint256 i = 0; i < allHashes.length && resultIndex < size; i++) {
-      if (status == LockStatus.Empty || userLocks[allHashes[i]].status == status) {
-        if (currentIndex >= offset) {
-          result[resultIndex] = allHashes[i];
-          resultIndex++;
-        }
-        currentIndex++;
+    hashlocks = new bytes32[](size);
+    for (uint256 i = 0; i < size; ) {
+      hashlocks[i] = all[offset + i];
+      unchecked {
+        ++i;
       }
     }
-
-    return (result, matchCount);
   }
 
-  /// @notice Get all user lock details created by an address with optional filtering and pagination
+  /// @notice Paginated user-lock details created by / attributed to `user`.
+  /// @dev Same scale-safe design as `getUserLockHashes`: reads only the requested window from
+  ///      storage (no whole-array copy), so it remains callable at any size. Filter by
+  ///      `UserLock.status` off-chain on the returned data.
+  /// @param user   The lock owner to enumerate.
+  /// @param offset Start index into the user's lock list.
+  /// @param limit  Maximum number of locks to return.
+  /// @return locks The page in [offset, min(offset+limit, total)).
+  /// @return total The full number of locks for `user`.
   function getUserLocks(
     address user,
-    LockStatus status,
     uint256 offset,
     uint256 limit
   ) external view returns (UserLock[] memory locks, uint256 total) {
-    bytes32[] memory allHashes = userLockHashes[user];
-
-    if (limit == 0) {
-      return (new UserLock[](0), 0);
+    bytes32[] storage all = userLockHashes[user];
+    total = all.length;
+    if (limit == 0 || offset >= total) {
+      return (new UserLock[](0), total);
     }
-
-    uint256 matchCount = 0;
-    for (uint256 i = 0; i < allHashes.length; i++) {
-      if (status == LockStatus.Empty || userLocks[allHashes[i]].status == status) {
-        matchCount++;
-      }
-    }
-
-    if (offset >= matchCount) {
-      return (new UserLock[](0), matchCount);
-    }
-
     uint256 end = offset + limit;
-    if (end > matchCount) {
-      end = matchCount;
-    }
+    if (end > total) end = total;
     uint256 size = end - offset;
-
-    UserLock[] memory result = new UserLock[](size);
-    uint256 resultIndex = 0;
-    uint256 currentIndex = 0;
-
-    for (uint256 i = 0; i < allHashes.length && resultIndex < size; i++) {
-      if (status == LockStatus.Empty || userLocks[allHashes[i]].status == status) {
-        if (currentIndex >= offset) {
-          result[resultIndex] = userLocks[allHashes[i]];
-          resultIndex++;
-        }
-        currentIndex++;
+    locks = new UserLock[](size);
+    for (uint256 i = 0; i < size; ) {
+      locks[i] = userLocks[all[offset + i]];
+      unchecked {
+        ++i;
       }
     }
-
-    return (result, matchCount);
   }
 
   // ─── Internal Helpers ───────────────────────────────────────
 
-  /// @dev Reverts with InvalidPayoutCurve if `curve` has no code or does not implement IPayoutCurve.
+  /// @dev Shared validation for both user-lock entrypoints. Runs before any funds are pulled.
+  function _validateUserLockParams(UserLockParams calldata params) internal view {
+    if (params.amount == 0) revert ZeroAmount();
+    if (params.timelockDelta == 0) revert InvalidTimelock();
+    if (block.timestamp >= params.quoteExpiry) revert QuoteExpired();
+    if (params.token != NATIVE_ETH && params.token.code.length == 0) revert InvalidToken();
+    if (params.recipient == address(0) || params.refundTo == address(0)) revert ZeroAddress();
+    if (userLocks[params.hashlock].sender != address(0)) revert SwapAlreadyExists();
+    if (params.payoutCurve != address(0)) _validatePayoutCurve(params.payoutCurve);
+  }
+
+  /// @dev Validation for `solverLock`, mirroring `_validateUserLockParams`. Runs before any funds are
+  ///      pulled. Solver locks have no quote expiry and no uniqueness check (a hashlock may hold many
+  ///      indexed solver locks), but add reward-leg checks: a non-native reward token must have code,
+  ///      `rewardTimelockDelta < timelockDelta`, and a non-zero reward needs a non-zero rewardRecipient.
+  function _validateSolverLockParams(SolverLockParams calldata params) internal view {
+    if (params.amount == 0) revert ZeroAmount();
+    if (params.timelockDelta == 0) revert InvalidTimelock();
+    if (params.token != NATIVE_ETH && params.token.code.length == 0) revert InvalidToken();
+    if (params.reward > 0 && params.rewardTimelockDelta >= params.timelockDelta) revert InvalidRewardTimelock();
+    if (params.reward > 0 && params.rewardToken != NATIVE_ETH && params.rewardToken.code.length == 0)
+      revert InvalidToken();
+    if (params.recipient == address(0) || params.refundTo == address(0)) revert ZeroAddress();
+    if (params.reward > 0 && params.rewardRecipient == address(0)) revert ZeroAddress();
+    if (params.payoutCurve != address(0)) _validatePayoutCurve(params.payoutCurve);
+  }
+
+  /// @dev Write the user lock and emit. `user` is the lock owner of record; `received` is the
+  ///      measured amount already pulled into the contract by the caller. Assumes
+  ///      `_validateUserLockParams` has already run.
+  function _userLockCore(
+    address user,
+    uint256 received,
+    UserLockParams calldata params,
+    DestinationInfo calldata dst,
+    bytes calldata userData,
+    bytes calldata solverData
+  ) internal {
+    uint48 timelock = uint48(block.timestamp) + params.timelockDelta;
+
+    UserLock storage lock = userLocks[params.hashlock];
+    lock.sender = user;
+    lock.amount = received;
+    lock.recipient = params.recipient;
+    lock.refundTo = params.refundTo;
+    lock.timelock = timelock;
+    lock.startTime = uint48(block.timestamp);
+    lock.status = LockStatus.Pending;
+    lock.token = params.token;
+    lock.payoutCurve = params.payoutCurve;
+    if (params.payoutCurveData.length > 0) lock.payoutCurveData = params.payoutCurveData;
+
+    userLockHashes[user].push(params.hashlock);
+
+    _emitUserLocked(user, received, params, dst, timelock, userData, solverData);
+  }
+
+  /// @dev Reverts with InvalidPayoutCurve unless `curve` is a contract that advertises IPayoutCurve via
+  ///      EIP-165. ERC165Checker runs the full handshake (gas-capped probe, return-data-length check,
+  ///      IERC165 support + 0xffffffff rejection) and returns false — never reverts — for EOAs,
+  ///      non-ERC165 contracts, or reverting probes, so this single guard covers every rejection case.
   function _validatePayoutCurve(address curve) internal view {
-    if (curve.code.length == 0) revert InvalidPayoutCurve();
-    try IPayoutCurve(curve).supportsInterface(type(IPayoutCurve).interfaceId) returns (bool ok) {
-      if (!ok) revert InvalidPayoutCurve();
-    } catch {
-      revert InvalidPayoutCurve();
-    }
+    if (!curve.supportsInterface(type(IPayoutCurve).interfaceId)) revert InvalidPayoutCurve();
   }
 
   /// @dev Compute payout by calling IPayoutCurve(curve).computePayout().
@@ -608,8 +785,12 @@ contract Train is ReentrancyGuard {
     }
   }
 
-  /// @dev Emit UserLocked event (separated to avoid stack too deep)
+  /// @dev Emit UserLocked event (separated to avoid stack too deep). `user` is the lock owner and
+  ///      `lockedAmount` is the measured amount actually received (matches `lock.amount`), not the
+  ///      requested `params.amount`, so the event is accurate for fee-on-transfer tokens.
   function _emitUserLocked(
+    address user,
+    uint256 lockedAmount,
     UserLockParams calldata params,
     DestinationInfo calldata dst,
     uint48 timelock,
@@ -618,12 +799,13 @@ contract Train is ReentrancyGuard {
   ) internal {
     emit UserLocked(
       params.hashlock,
-      msg.sender,
+      user,
       params.recipient,
       params.srcChain,
       params.token,
-      params.amount,
+      lockedAmount,
       timelock,
+      params.payoutCurve,
       dst.dstChain,
       dst.dstAddress,
       dst.dstAmount,
@@ -638,9 +820,13 @@ contract Train is ReentrancyGuard {
     );
   }
 
-  /// @dev Emit SolverLocked event (separated to avoid stack too deep)
+  /// @dev Emit SolverLocked event (separated to avoid stack too deep). `lockedAmount`/`lockedReward`
+  ///      are the measured amounts actually received (match `lock.amount`/`lock.reward`), not the
+  ///      requested values, so the event is accurate for fee-on-transfer tokens.
   function _emitSolverLocked(
     SolverLockParams calldata params,
+    uint256 lockedAmount,
+    uint256 lockedReward,
     DestinationInfo calldata dst,
     uint256 index,
     uint48 timelock,
@@ -654,12 +840,13 @@ contract Train is ReentrancyGuard {
       index,
       params.srcChain,
       params.token,
-      params.amount,
-      params.reward,
+      lockedAmount,
+      lockedReward,
       params.rewardToken,
       params.rewardRecipient,
       timelock,
       rewardTimelock,
+      params.payoutCurve,
       dst.dstChain,
       dst.dstAddress,
       dst.dstAmount,

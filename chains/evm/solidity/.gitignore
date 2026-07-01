@@ -2,6 +2,7 @@
 out/
 cache/
 broadcast/
+.gas-snapshot
 
 # Dependencies
 lib/
@@ -14,3 +15,14 @@ lib/
 .env
 .env.local
 deployments/
+
+# Fuzzing runtime artifacts (regenerable)
+crytic-export/
+**/crytic-export/
+corpus/
+
+# Node (deploy-tron.js)
+node_modules/
+
+# Generated docs (forge doc)
+docs/
