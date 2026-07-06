@@ -229,5 +229,36 @@ Target an EVM with **Cancun** support (transient storage). Well-known addresses 
 scripts: Permit2 `0x000000000022D473030F116dDEE9F6B43aC78BA3` (canonical), Sepolia USDC
 `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`.
 
+### Deterministic multi-testnet deploy (same address on every chain)
+
+`script/DeployDeterministic.s.sol` deploys the three contracts via **CREATE2** through the Arachnid
+factory (`0x4e59b44847b379578588920cA78FbF26c0B4956C`), so the addresses depend only on the salt and
+the initcode — **not** on the deployer key or nonce. Every chain gets the same three addresses, the
+script is idempotent (already-deployed contracts are skipped), and deployment is permissionless:
+anyone re-running it can only land the exact same bytecode at the same address.
+
+`script/deploy-testnets.ps1` orchestrates it across 7 testnets — Sepolia, Arbitrum Sepolia,
+Base Sepolia, OP Sepolia, BSC Testnet, Linea Sepolia, Monad Testnet — using the public
+`[rpc_endpoints]` in `foundry.toml`, with explorer verification (Etherscan API v2 everywhere,
+including MonadScan for Monad testnet):
+
+```powershell
+# fund the deployer key on all target chains first, then:
+.\script\deploy-testnets.ps1 -DryRun            # simulate everywhere, broadcast nothing
+.\script\deploy-testnets.ps1 -Chains sepolia    # pilot one chain
+.\script\deploy-testnets.ps1                    # deploy + verify on all 7
+```
+
+Salt policy: addresses derive from `keccak256('train.protocol.v1')` (override with `CREATE2_SALT`).
+Same salt + same commit + same solc/settings ⇒ same address; **any source or compiler-settings
+change alters the initcode and therefore the address** — bump the salt string deliberately for a
+new release. A run summary (commit, addresses, per-chain status) is written to
+`deployments/testnets.json`.
+
+**Tron** cannot share these addresses (different address derivation, no CREATE2 factory) and is
+deployed separately with plain deploys via TronWeb — `npm install`, set `TRON_PRIVATE_KEY`, then
+`npm run deploy:tron:nile` (or `:shasta` / `:mainnet`). Requires TVM ≥ GreatVoyage-v4.8.0 (Kant)
+for transient storage; Nile/Shasta have it.
+
 > ⚠️ No guarantee of security is given. An independent audit and a bug bounty are recommended before
 > mainnet use.

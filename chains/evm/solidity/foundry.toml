@@ -37,8 +37,26 @@ remappings = [
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/"
 ]
 
+# Public testnet RPCs for the deterministic multi-chain deploy (script/deploy-testnets.ps1).
+[rpc_endpoints]
+sepolia          = "https://ethereum-sepolia-rpc.publicnode.com"
+arbitrum_sepolia = "https://arbitrum-sepolia-rpc.publicnode.com"
+base_sepolia     = "https://base-sepolia-rpc.publicnode.com"
+optimism_sepolia = "https://optimism-sepolia-rpc.publicnode.com"
+bsc_testnet      = "https://bsc-testnet-rpc.publicnode.com"
+linea_sepolia    = "https://rpc.sepolia.linea.build"
+monad_testnet    = "https://testnet-rpc.monad.xyz"
+
+# Etherscan API v2: one ETHERSCAN_API_KEY verifies on every chain below
+# (Monad testnet included — v2 covers chain 10143 via MonadScan).
 [etherscan]
-sepolia = { key = "${ETHERSCAN_API_KEY}", chain = 11155111 }
+sepolia          = { key = "${ETHERSCAN_API_KEY}", chain = 11155111 }
+arbitrum_sepolia = { key = "${ETHERSCAN_API_KEY}", chain = 421614 }
+base_sepolia     = { key = "${ETHERSCAN_API_KEY}", chain = 84532 }
+optimism_sepolia = { key = "${ETHERSCAN_API_KEY}", chain = 11155420 }
+bsc_testnet      = { key = "${ETHERSCAN_API_KEY}", chain = 97 }
+linea_sepolia    = { key = "${ETHERSCAN_API_KEY}", chain = 59141 }
+monad_testnet    = { key = "${ETHERSCAN_API_KEY}", chain = 10143, url = "https://api.etherscan.io/v2/api?chainid=10143" }
 
 [fmt]
 line_length = 120
