@@ -12,7 +12,7 @@ import { ConstantPayoutCurve } from '../src/ConstantPayoutCurve.sol';
 ///   export ETHERSCAN_API_KEY=...         # for --verify
 ///   forge script script/Deploy.s.sol \
 ///     --rpc-url $SEPOLIA_RPC_URL --broadcast \
-///     --verify --etherscan-api-key $ETHERSCAN_API_KEY
+///     --verify --verifier etherscan --etherscan-api-key $ETHERSCAN_API_KEY
 /// @dev Train, TrainRouter, and ConstantPayoutCurve are all deployed via `new`, so they auto-verify.
 contract DeployScript is Script {
   function run() external {

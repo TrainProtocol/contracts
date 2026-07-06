@@ -52,10 +52,11 @@ forge build
 ```bash
 forge script script/Deploy.s.sol \
   --rpc-url "$SEPOLIA_RPC_URL" --broadcast \
-  --verify --etherscan-api-key "$ETHERSCAN_API_KEY"
+  --verify --verifier etherscan --etherscan-api-key "$ETHERSCAN_API_KEY"
 ```
 
-Drop `--verify --etherscan-api-key ...` to skip verification.
+Drop `--verify --verifier etherscan --etherscan-api-key ...` to skip verification. (Recent forge
+versions default `--verify` to Sourcify — pass `--verifier etherscan` explicitly for Etherscan.)
 
 `Train`, `TrainRouter`, and `ConstantPayoutCurve` are all deployed via `new`, so `--verify` tracks and
 verifies all three automatically. (The test flows do not attach a curve; `ConstantPayoutCurve` is

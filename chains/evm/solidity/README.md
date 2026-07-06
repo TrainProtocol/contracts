@@ -14,8 +14,8 @@ unlocks both sides — or both refund after their timelocks.
 | [`IPayoutCurve.sol`](src/IPayoutCurve.sol) | Curve interface (called via `STATICCALL`). |
 | [`src/interfaces/`](src/interfaces/) | Minimal vendored `IERC3009`, `ISignatureTransfer` (Permit2), and `ITrain` (the `userLockFor` ABI the Router calls). |
 
-Toolchain: Solidity **0.8.34**, `evm_version = cancun`, `via_ir = true`, optimizer 200. Reentrancy is
-guarded with OpenZeppelin **`ReentrancyGuardTransient`** (EIP-1153 transient storage).
+Toolchain: Solidity **0.8.34**, `evm_version = cancun`, `via_ir = true`, optimizer runs 1,000,000.
+Reentrancy is guarded with OpenZeppelin **`ReentrancyGuardTransient`** (EIP-1153 transient storage).
 
 ---
 
@@ -222,7 +222,7 @@ real Permit2/USDC, refunds, the EIP-7702 signer caveat, and `--verify`), see
 
 ```bash
 forge script script/Deploy.s.sol --rpc-url $RPC_URL --broadcast \
-  --verify --etherscan-api-key $ETHERSCAN_API_KEY
+  --verify --verifier etherscan --etherscan-api-key $ETHERSCAN_API_KEY
 ```
 
 Target an EVM with **Cancun** support (transient storage). Well-known addresses used by the testnet
