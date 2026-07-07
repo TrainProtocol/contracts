@@ -253,7 +253,8 @@ Salt policy: addresses derive from `keccak256('train.protocol.v1')` (override wi
 Same salt + same commit + same solc/settings ⇒ same address; **any source or compiler-settings
 change alters the initcode and therefore the address** — bump the salt string deliberately for a
 new release. Each run also writes a local summary of that run to `deployments/testnets.json`
-(gitignored, overwritten per run); the canonical deployment record is kept off-repo.
+(gitignored, overwritten per run); the canonical deployment record lives in
+[`DEPLOYMENTS.md`](DEPLOYMENTS.md) — deployed addresses, chain IDs, and per-network status.
 
 **Tron** cannot share these addresses (different address derivation, no CREATE2 factory) and is
 deployed separately with plain deploys via TronWeb — `npm install`, set `TRON_PRIVATE_KEY`, then
