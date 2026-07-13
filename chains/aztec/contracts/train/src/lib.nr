@@ -38,3 +38,38 @@ pub fn hashlock_to_fields(hashlock: [u8; 32]) -> (Field, Field) {
 pub fn fields_to_hashlock(high: Field, low: Field) -> [u8; 32] {
     u128_limbs_to_bytes(high as u128, low as u128)
 }
+
+/// Packs 128 bytes into 5 fields (31-byte big-endian chunks + a 4-byte tail).
+/// Used by the manual Packable impls to keep public storage writes low: the
+/// derived impl would store one field per byte.
+pub fn bytes128_to_fields(bytes: [u8; 128]) -> [Field; 5] {
+    let mut out = [0; 5];
+    for i in 0..4 {
+        let mut acc: Field = 0;
+        for j in 0..31 {
+            acc = acc * 256 + (bytes[i * 31 + j] as Field);
+        }
+        out[i] = acc;
+    }
+    let mut acc: Field = 0;
+    for j in 0..4 {
+        acc = acc * 256 + (bytes[124 + j] as Field);
+    }
+    out[4] = acc;
+    out
+}
+
+pub fn fields_to_bytes128(fields: [Field; 5]) -> [u8; 128] {
+    let mut out = [0u8; 128];
+    for i in 0..4 {
+        let chunk: [u8; 31] = fields[i].to_be_bytes();
+        for j in 0..31 {
+            out[i * 31 + j] = chunk[j];
+        }
+    }
+    let tail: [u8; 4] = fields[4].to_be_bytes();
+    for j in 0..4 {
+        out[124 + j] = tail[j];
+    }
+    out
+}

@@ -3,7 +3,7 @@ dotenv.config();
 
 import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
-import { TokenContract } from '@defi-wonderland/aztec-standards/src/artifacts/Token.ts';
+import { TokenContract } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js';
 import { setupWallet, toWallet } from './utils/setupWallet.ts';
 import { getPaymentMethod } from './utils/feePayment.ts';
 import { requireEnv, updateEnvFile } from './utils/utils.ts';
@@ -43,9 +43,9 @@ function getInputAmount(): bigint {
 
 async function main(): Promise<void> {
   const timeouts = getTimeouts();
-  const tokenAddress = AztecAddress.fromString(requireEnv('TOKEN_ADDRESS'));
+  const tokenAddress = AztecAddress.fromStringUnsafe(requireEnv('TOKEN_ADDRESS'));
   const expectedUserAddress = requireEnv('USER_ADDRESS');
-  const toAddress = AztecAddress.fromString(getInputToAddress());
+  const toAddress = AztecAddress.fromStringUnsafe(getInputToAddress());
   const amount = getInputAmount();
 
   const wallet = await setupWallet();

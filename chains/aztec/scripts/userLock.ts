@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { createAztecNodeClient } from '@aztec/aztec.js/node';
 import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
-import { TokenContract } from '@defi-wonderland/aztec-standards/src/artifacts/Token.ts';
+import { TokenContract } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js';
 import { TrainContract } from './Train.ts';
 import { setupWallet, toWallet } from './utils/setupWallet.ts';
 import { getPaymentMethod } from './utils/feePayment.ts';
@@ -20,9 +20,9 @@ import { getAztecNodeUrl, getTimeouts } from './utils/config.ts';
 
 async function main(): Promise<void> {
   const timeouts = getTimeouts();
-  const trainAddress = AztecAddress.fromString(requireEnv('TRAIN_ADDRESS'));
-  const tokenAddress = AztecAddress.fromString(requireEnv('TOKEN_ADDRESS'));
-  const solverAddress = AztecAddress.fromString(requireEnv('SOLVER_ADDRESS'));
+  const trainAddress = AztecAddress.fromStringUnsafe(requireEnv('TRAIN_ADDRESS'));
+  const tokenAddress = AztecAddress.fromStringUnsafe(requireEnv('TOKEN_ADDRESS'));
+  const solverAddress = AztecAddress.fromStringUnsafe(requireEnv('SOLVER_ADDRESS'));
   const expectedUserAddress = requireEnv('USER_ADDRESS');
 
   const amount = BigInt(requireEnv('AMOUNT'));
@@ -67,7 +67,7 @@ async function main(): Promise<void> {
   const hashlockBytes = Array.from(hashlock);
 
   const node = createAztecNodeClient(getAztecNodeUrl());
-  const latestHeader = await node.getBlockHeader('latest');
+  const latestHeader = (await node.getBlockData('latest'))?.header;
   if (!latestHeader) {
     throw new Error('Could not fetch latest block header from node');
   }
@@ -124,6 +124,8 @@ async function main(): Promise<void> {
     account.address,
     solverAddress,
     tokenAddress,
+    AztecAddress.ZERO, // payout_curve: none
+    new Array(128).fill(0), // payout_curve_data
     rewardToken,
     rewardRecipient,
     srcChain,
@@ -140,7 +142,7 @@ async function main(): Promise<void> {
     wait: { timeout: timeouts.txTimeout, dontThrowOnRevert: true },
   });
   if (tx.receipt.hasExecutionReverted()) {
-    const latestAfter = await node.getBlockHeader('latest');
+    const latestAfter = (await node.getBlockData('latest'))?.header;
     const latestTs = latestAfter
       ? Number(latestAfter.globalVariables.timestamp)
       : undefined;

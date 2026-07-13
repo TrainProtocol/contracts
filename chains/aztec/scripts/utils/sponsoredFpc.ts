@@ -26,11 +26,16 @@ export async function getSponsoredFPCAddress() {
 
 export async function setupSponsoredFPC(deployer: Wallet, log: LogFn) {
   const [{ item: from }] = await deployer.getAccounts();
-  const deployed = await SponsoredFPCContract.deploy(deployer).send({
-    from,
-    contractAddressSalt: new Fr(SPONSORED_FPC_SALT),
-    universalDeploy: true,
-  });
+  // v5: salt/universalDeploy are instantiation options (fixed at construction), not send options
+  const deployed = await SponsoredFPCContract.deployWithOpts(
+    {
+      wallet: deployer,
+      instantiation: {
+        salt: new Fr(SPONSORED_FPC_SALT),
+        universalDeploy: true,
+      },
+    },
+  ).send({ from });
 
   log(`SponsoredFPC: ${deployed.receipt.txHash}`);
 }

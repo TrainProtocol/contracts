@@ -1,13 +1,14 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
 import { createAztecNodeClient } from '@aztec/aztec.js/node';
 
 import type { Wallet } from '@aztec/aztec.js/wallet';
 import { EmbeddedWallet } from '@aztec/wallets/embedded';
 import { AccountManager } from '@aztec/aztec.js/wallet';
-import { TokenContract } from '@defi-wonderland/aztec-standards/src/artifacts/Token.ts';
+import { TokenContract } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js';
 import { updateEnvFile } from './utils/utils.ts';
 import { getAztecNodeUrl, getEnv, getTimeouts } from './utils/config.ts';
 import { getPaymentMethod } from './utils/feePayment.ts';
@@ -200,18 +201,19 @@ async function main(): Promise<void> {
       wallet: toWallet(walletDeployer),
       method: 'constructor_with_minter',
     },
-    'Train',
-    'TRN',
+    'ETH',
+    'ETH',
     18,
     deployerAccount.address,
+    AztecAddress.ZERO, // auth_contract: ARC-403 hook disabled
   );
-  await tokenDeploy.send({
+  const tokenDeployResult = await tokenDeploy.send({
     from: deployerAccount.address,
     fee: { paymentMethod: payDeployer },
     additionalScopes: [],
     wait: { timeout: timeouts.deployTimeout },
   });
-  const tokenAddress = tokenDeploy.address!;
+  const tokenAddress = tokenDeployResult.contract.address;
 
   // Register deployer as sender on other wallets
   await toWallet(walletUser).registerSender(deployerAccount.address, 'faucet');

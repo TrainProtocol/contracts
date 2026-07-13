@@ -4,7 +4,7 @@ dotenv.config();
 import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
 import { createAztecNodeClient } from '@aztec/aztec.js/node';
-import { TokenContract } from '@defi-wonderland/aztec-standards/src/artifacts/Token.ts';
+import { TokenContract } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js';
 import { TrainContract } from './Train.ts';
 import { setupWallet, toWallet } from './utils/setupWallet.ts';
 import { getPaymentMethod } from './utils/feePayment.ts';
@@ -18,8 +18,8 @@ import { getAztecNodeUrl, getTimeouts } from './utils/config.ts';
 
 async function main(): Promise<void> {
   const timeouts = getTimeouts();
-  const trainAddress = AztecAddress.fromString(requireEnv('TRAIN_ADDRESS'));
-  const tokenAddress = AztecAddress.fromString(requireEnv('TOKEN_ADDRESS'));
+  const trainAddress = AztecAddress.fromStringUnsafe(requireEnv('TRAIN_ADDRESS'));
+  const tokenAddress = AztecAddress.fromStringUnsafe(requireEnv('TOKEN_ADDRESS'));
   const expectedSolverAddress = requireEnv('SOLVER_ADDRESS');
   const hashlock = parseHashlock(requireEnv('USER_LOCK_HASHLOCK'));
   const solverIndex = BigInt(requireEnv('SOLVER_LOCK_INDEX'));
@@ -48,7 +48,7 @@ async function main(): Promise<void> {
     .simulate({ from: solverAccount.address });
 
   const node = createAztecNodeClient(getAztecNodeUrl());
-  const latestHeader = await node.getBlockHeader('latest');
+  const latestHeader = (await node.getBlockData('latest'))?.header;
   if (!latestHeader) {
     throw new Error('Could not fetch latest block header from node');
   }

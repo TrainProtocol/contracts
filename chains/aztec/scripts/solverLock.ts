@@ -3,7 +3,7 @@ dotenv.config();
 
 import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
-import { TokenContract } from '@defi-wonderland/aztec-standards/src/artifacts/Token.ts';
+import { TokenContract } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js';
 import { TrainContract } from './Train.ts';
 import { setupWallet, toWallet } from './utils/setupWallet.ts';
 import { getPaymentMethod } from './utils/feePayment.ts';
@@ -18,10 +18,10 @@ import { getTimeouts } from './utils/config.ts';
 
 async function main(): Promise<void> {
   const timeouts = getTimeouts();
-  const trainAddress = AztecAddress.fromString(requireEnv('TRAIN_ADDRESS'));
-  const tokenAddress = AztecAddress.fromString(requireEnv('TOKEN_ADDRESS'));
+  const trainAddress = AztecAddress.fromStringUnsafe(requireEnv('TRAIN_ADDRESS'));
+  const tokenAddress = AztecAddress.fromStringUnsafe(requireEnv('TOKEN_ADDRESS'));
   const expectedSolverAddress = requireEnv('SOLVER_ADDRESS');
-  const userAddress = AztecAddress.fromString(requireEnv('USER_ADDRESS'));
+  const userAddress = AztecAddress.fromStringUnsafe(requireEnv('USER_ADDRESS'));
   const hashlock = parseHashlock(requireEnv('USER_LOCK_HASHLOCK'));
 
   const amount = BigInt(requireEnv('AMOUNT'));
@@ -40,7 +40,7 @@ async function main(): Promise<void> {
   const rewardTokenAddress =
     rewardTokenRaw === '0x0'
       ? tokenAddress
-      : AztecAddress.fromString(rewardTokenRaw);
+      : AztecAddress.fromStringUnsafe(rewardTokenRaw);
 
   const wallet = await setupWallet();
 
@@ -142,6 +142,8 @@ async function main(): Promise<void> {
       solverAccount.address,
       tokenAddress,
       rewardTokenAddress,
+      AztecAddress.ZERO, // payout_curve: none
+      new Array(128).fill(0), // payout_curve_data
       srcChain,
       dstChain,
       dstAddress,

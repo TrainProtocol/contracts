@@ -97,7 +97,7 @@ async function main() {
   const envUpdates: Record<string, string> = {};
 
   for (const { label, address } of addressEntries) {
-    const claimData = await bridgeToAddress(portal, node, AztecAddress.fromString(address), bridgeAmount, label);
+    const claimData = await bridgeToAddress(portal, node, AztecAddress.fromStringUnsafe(address), bridgeAmount, label);
     const prefix = label.toUpperCase();
     envUpdates[`${prefix}_CLAIM_SECRET`] = claimData.claimSecret;
     envUpdates[`${prefix}_CLAIM_AMOUNT`] = claimData.claimAmount;

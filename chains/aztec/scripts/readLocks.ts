@@ -8,7 +8,7 @@ import { setupWallet, toWallet } from './utils/setupWallet.ts';
 import { decodeLockStatus, parseHashlock, requireEnv } from './utils/utils.ts';
 
 async function main(): Promise<void> {
-  const trainAddress = AztecAddress.fromString(requireEnv('TRAIN_ADDRESS'));
+  const trainAddress = AztecAddress.fromStringUnsafe(requireEnv('TRAIN_ADDRESS'));
   const expectedUserAddress = requireEnv('USER_ADDRESS');
   const hashlock = parseHashlock(requireEnv('USER_LOCK_HASHLOCK'));
 

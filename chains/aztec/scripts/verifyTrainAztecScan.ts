@@ -20,7 +20,7 @@ function optionalString(name: string): string | undefined {
 
 async function main(): Promise<void> {
   const trainAddressString = requireEnv('TRAIN_ADDRESS');
-  const trainAddress = AztecAddress.fromString(trainAddressString);
+  const trainAddress = AztecAddress.fromStringUnsafe(trainAddressString);
   const artifactVersion = Number(process.env.TRAIN_ARTIFACT_VERSION ?? '1');
 
   const node = createAztecNodeClient(getAztecNodeUrl());

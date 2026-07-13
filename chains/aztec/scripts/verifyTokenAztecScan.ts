@@ -20,7 +20,7 @@ function optionalString(name: string): string | undefined {
 
 async function main(): Promise<void> {
   const tokenAddressString = requireEnv('TOKEN_ADDRESS');
-  const tokenAddress = AztecAddress.fromString(tokenAddressString);
+  const tokenAddress = AztecAddress.fromStringUnsafe(tokenAddressString);
   const artifactVersion = Number(process.env.TOKEN_ARTIFACT_VERSION ?? '1');
 
   const node = createAztecNodeClient(getAztecNodeUrl());

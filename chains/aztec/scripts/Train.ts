@@ -4,7 +4,7 @@
 /* eslint-disable */
 import { AztecAddress, CompleteAddress } from '@aztec/aztec.js/addresses';
 import { type AbiType, type AztecAddressLike, type ContractArtifact, EventSelector, decodeFromAbi, type EthAddressLike, type FieldLike, type FunctionSelectorLike, loadContractArtifact, loadContractArtifactForPublic, type NoirCompiledContract, type OptionLike, type U128Like, type WrappedFieldLike } from '@aztec/aztec.js/abi';
-import { Contract, ContractBase, ContractFunctionInteraction, type ContractMethod, type ContractStorageLayout, DeployMethod } from '@aztec/aztec.js/contracts';
+import { Contract, ContractBase, ContractFunctionInteraction, type ContractMethod, type ContractStorageLayout, type DeployInstantiationOptions, DeployMethod } from '@aztec/aztec.js/contracts';
 import { EthAddress } from '@aztec/aztec.js/addresses';
 import { Fr, Point } from '@aztec/aztec.js/fields';
 import { type PublicKey, PublicKeys } from '@aztec/aztec.js/keys';
@@ -13,6 +13,87 @@ import TrainContractArtifactJson from '../contracts/train/target/train-Train.jso
 export const TrainContractArtifact = loadContractArtifact(TrainContractArtifactJson as NoirCompiledContract);
 
 
+      export type UserRefunded = {
+        hashlock: (bigint | number)[]
+refund_to: AztecAddressLike
+amount: (bigint | number)
+      }
+    
+
+      export type UserRedeemed = {
+        hashlock: (bigint | number)[]
+redeemer: AztecAddressLike
+secret: (bigint | number)[]
+payout: (bigint | number)
+excess: (bigint | number)
+      }
+    
+
+      export type UserLocked = {
+        hashlock: (bigint | number)[]
+sender: AztecAddressLike
+recipient: AztecAddressLike
+src_chain: (bigint | number)[]
+token: AztecAddressLike
+amount: (bigint | number)
+timelock: (bigint | number)
+payout_curve: AztecAddressLike
+dst_chain: (bigint | number)[]
+dst_address: (bigint | number)[]
+dst_amount: (bigint | number)
+dst_token: (bigint | number)[]
+reward_amount: (bigint | number)
+reward_token: (bigint | number)[]
+reward_recipient: (bigint | number)[]
+reward_timelock_delta: (bigint | number)
+quote_expiry: (bigint | number)
+user_data: (bigint | number)[]
+solver_data: (bigint | number)[]
+      }
+    
+
+      export type SolverRefunded = {
+        hashlock: (bigint | number)[]
+index: FieldLike
+refund_to: AztecAddressLike
+amount: (bigint | number)
+reward: (bigint | number)
+      }
+    
+
+      export type SolverRedeemed = {
+        hashlock: (bigint | number)[]
+index: FieldLike
+redeemer: AztecAddressLike
+secret: (bigint | number)[]
+payout: (bigint | number)
+excess: (bigint | number)
+reward_to: AztecAddressLike
+reward: (bigint | number)
+      }
+    
+
+      export type SolverLocked = {
+        hashlock: (bigint | number)[]
+sender: AztecAddressLike
+recipient: AztecAddressLike
+index: FieldLike
+src_chain: (bigint | number)[]
+token: AztecAddressLike
+amount: (bigint | number)
+reward: (bigint | number)
+reward_token: AztecAddressLike
+reward_recipient: AztecAddressLike
+timelock: (bigint | number)
+reward_timelock: (bigint | number)
+payout_curve: AztecAddressLike
+dst_chain: (bigint | number)[]
+dst_address: (bigint | number)[]
+dst_amount: (bigint | number)
+dst_token: (bigint | number)[]
+data: (bigint | number)[]
+      }
+    
 
 /**
  * Type-safe interface for contract Train;
@@ -44,32 +125,37 @@ export class TrainContract extends ContractBase {
   
   /**
    * Creates a tx to deploy a new instance of this contract.
+   * @param instantiation - Optional address-affecting parameters (salt, deployer / universalDeploy, publicKeys).
+   *                       Salt defaults to a random value; the deployer is locked lazily from the first send-time `from`.
    */
-  public static deploy(wallet: Wallet, ) {
-    return new DeployMethod<TrainContract>(PublicKeys.default(), wallet, TrainContractArtifact, (instance, wallet) => TrainContract.at(instance.address, wallet), Array.from(arguments).slice(1));
-  }
-
-  /**
-   * Creates a tx to deploy a new instance of this contract using the specified public keys hash to derive the address.
-   */
-  public static deployWithPublicKeys(publicKeys: PublicKeys, wallet: Wallet, ) {
-    return new DeployMethod<TrainContract>(publicKeys, wallet, TrainContractArtifact, (instance, wallet) => TrainContract.at(instance.address, wallet), Array.from(arguments).slice(2));
+  public static deploy(wallet: Wallet, instantiation?: DeployInstantiationOptions) {
+    return DeployMethod.create<TrainContract>(
+      wallet,
+      {
+        artifact: TrainContractArtifact,
+        postDeployCtor: (instance, wallet) => TrainContract.at(instance.address, wallet),
+        args: [],
+      },
+      instantiation,
+    );
   }
 
   /**
    * Creates a tx to deploy a new instance of this contract using the specified constructor method.
    */
   public static deployWithOpts<M extends keyof TrainContract['methods']>(
-    opts: { publicKeys?: PublicKeys; method?: M; wallet: Wallet },
+    opts: { method?: M; wallet: Wallet; instantiation?: DeployInstantiationOptions },
     ...args: Parameters<TrainContract['methods'][M]>
   ) {
-    return new DeployMethod<TrainContract>(
-      opts.publicKeys ?? PublicKeys.default(),
+    return DeployMethod.create<TrainContract>(
       opts.wallet,
-      TrainContractArtifact,
-      (instance, wallet) => TrainContract.at(instance.address, wallet),
-      Array.from(arguments).slice(1),
-      opts.method ?? 'constructor',
+      {
+        artifact: TrainContractArtifact,
+        postDeployCtor: (instance, wallet) => TrainContract.at(instance.address, wallet),
+        args,
+        constructorNameOrArtifact: opts.method ?? 'constructor',
+      },
+      opts.instantiation,
     );
   }
   
@@ -90,7 +176,7 @@ export class TrainContract extends ContractBase {
   }
   
 
-  public static get storage(): ContractStorageLayout<'user_locks' | 'solver_locks' | 'solver_lock_count'> {
+  public static get storage(): ContractStorageLayout<'user_locks' | 'solver_locks' | 'solver_lock_count' | 'user_lock_hashes' | 'user_lock_count'> {
       return {
         user_locks: {
       slot: new Fr(1n),
@@ -100,8 +186,14 @@ solver_locks: {
     },
 solver_lock_count: {
       slot: new Fr(3n),
+    },
+user_lock_hashes: {
+      slot: new Fr(4n),
+    },
+user_lock_count: {
+      slot: new Fr(5n),
     }
-      } as ContractStorageLayout<'user_locks' | 'solver_locks' | 'solver_lock_count'>;
+      } as ContractStorageLayout<'user_locks' | 'solver_locks' | 'solver_lock_count' | 'user_lock_hashes' | 'user_lock_count'>;
     }
     
 
@@ -119,6 +211,12 @@ solver_lock_count: {
 
     /** get_user_lock(hashlock: array) */
     get_user_lock: ((hashlock: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** get_user_lock_count(user: struct) */
+    get_user_lock_count: ((user: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+
+    /** get_user_lock_hash_at(user: struct, index: field) */
+    get_user_lock_hash_at: ((user: AztecAddressLike, index: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** offchain_receive(messages: struct) */
     offchain_receive: ((messages: { ciphertext: FieldLike[], recipient: AztecAddressLike, tx_hash: OptionLike<FieldLike>, anchor_block_timestamp: (bigint | number) }[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
@@ -138,15 +236,727 @@ solver_lock_count: {
     /** refund_user(hashlock: array) */
     refund_user: ((hashlock: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** solver_lock(hashlock: array, amount: integer, transfer_nonce: field, reward: integer, reward_transfer_nonce: field, timelock_delta: integer, reward_timelock_delta: integer, refund_to: struct, recipient: struct, reward_recipient: struct, token: struct, reward_token: struct, src_chain: array, dst_chain: array, dst_address: array, dst_amount: integer, dst_token: array, data: array) */
-    solver_lock: ((hashlock: (bigint | number)[], amount: (bigint | number), transfer_nonce: FieldLike, reward: (bigint | number), reward_transfer_nonce: FieldLike, timelock_delta: (bigint | number), reward_timelock_delta: (bigint | number), refund_to: AztecAddressLike, recipient: AztecAddressLike, reward_recipient: AztecAddressLike, token: AztecAddressLike, reward_token: AztecAddressLike, src_chain: (bigint | number)[], dst_chain: (bigint | number)[], dst_address: (bigint | number)[], dst_amount: (bigint | number), dst_token: (bigint | number)[], data: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** solver_lock(hashlock: array, amount: integer, transfer_nonce: field, reward: integer, reward_transfer_nonce: field, timelock_delta: integer, reward_timelock_delta: integer, refund_to: struct, recipient: struct, reward_recipient: struct, token: struct, reward_token: struct, payout_curve: struct, payout_curve_data: array, src_chain: array, dst_chain: array, dst_address: array, dst_amount: integer, dst_token: array, data: array) */
+    solver_lock: ((hashlock: (bigint | number)[], amount: (bigint | number), transfer_nonce: FieldLike, reward: (bigint | number), reward_transfer_nonce: FieldLike, timelock_delta: (bigint | number), reward_timelock_delta: (bigint | number), refund_to: AztecAddressLike, recipient: AztecAddressLike, reward_recipient: AztecAddressLike, token: AztecAddressLike, reward_token: AztecAddressLike, payout_curve: AztecAddressLike, payout_curve_data: (bigint | number)[], src_chain: (bigint | number)[], dst_chain: (bigint | number)[], dst_address: (bigint | number)[], dst_amount: (bigint | number), dst_token: (bigint | number)[], data: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** sync_state(scope: struct) */
     sync_state: ((scope: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** user_lock(hashlock: array, amount: integer, transfer_nonce: field, reward_amount: integer, timelock_delta: integer, reward_timelock_delta: integer, quote_expiry: integer, refund_to: struct, recipient: struct, token: struct, reward_token: array, reward_recipient: array, src_chain: array, dst_chain: array, dst_address: array, dst_amount: integer, dst_token: array, user_data: array, solver_data: array) */
-    user_lock: ((hashlock: (bigint | number)[], amount: (bigint | number), transfer_nonce: FieldLike, reward_amount: (bigint | number), timelock_delta: (bigint | number), reward_timelock_delta: (bigint | number), quote_expiry: (bigint | number), refund_to: AztecAddressLike, recipient: AztecAddressLike, token: AztecAddressLike, reward_token: (bigint | number)[], reward_recipient: (bigint | number)[], src_chain: (bigint | number)[], dst_chain: (bigint | number)[], dst_address: (bigint | number)[], dst_amount: (bigint | number), dst_token: (bigint | number)[], user_data: (bigint | number)[], solver_data: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** user_lock(hashlock: array, amount: integer, transfer_nonce: field, reward_amount: integer, timelock_delta: integer, reward_timelock_delta: integer, quote_expiry: integer, refund_to: struct, recipient: struct, token: struct, payout_curve: struct, payout_curve_data: array, reward_token: array, reward_recipient: array, src_chain: array, dst_chain: array, dst_address: array, dst_amount: integer, dst_token: array, user_data: array, solver_data: array) */
+    user_lock: ((hashlock: (bigint | number)[], amount: (bigint | number), transfer_nonce: FieldLike, reward_amount: (bigint | number), timelock_delta: (bigint | number), reward_timelock_delta: (bigint | number), quote_expiry: (bigint | number), refund_to: AztecAddressLike, recipient: AztecAddressLike, token: AztecAddressLike, payout_curve: AztecAddressLike, payout_curve_data: (bigint | number)[], reward_token: (bigint | number)[], reward_recipient: (bigint | number)[], src_chain: (bigint | number)[], dst_chain: (bigint | number)[], dst_address: (bigint | number)[], dst_amount: (bigint | number), dst_token: (bigint | number)[], user_data: (bigint | number)[], solver_data: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
   };
 
+  
+    public static get events(): { UserRefunded: {abiType: AbiType, eventSelector: EventSelector, fieldNames: string[] }, UserRedeemed: {abiType: AbiType, eventSelector: EventSelector, fieldNames: string[] }, UserLocked: {abiType: AbiType, eventSelector: EventSelector, fieldNames: string[] }, SolverRefunded: {abiType: AbiType, eventSelector: EventSelector, fieldNames: string[] }, SolverRedeemed: {abiType: AbiType, eventSelector: EventSelector, fieldNames: string[] }, SolverLocked: {abiType: AbiType, eventSelector: EventSelector, fieldNames: string[] } } {
+    return {
+      UserRefunded: {
+        abiType: {
+    "kind": "struct",
+    "fields": [
+        {
+            "name": "hashlock",
+            "type": {
+                "kind": "array",
+                "length": 32,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        },
+        {
+            "name": "refund_to",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "inner",
+                        "type": {
+                            "kind": "field"
+                        }
+                    }
+                ],
+                "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
+            }
+        },
+        {
+            "name": "amount",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 128
+            }
+        }
+    ],
+    "path": "Train::UserRefunded"
+},
+        eventSelector: EventSelector.fromString("0x206370ce"),
+        fieldNames: ["hashlock","refund_to","amount"],
+      },
+UserRedeemed: {
+        abiType: {
+    "kind": "struct",
+    "fields": [
+        {
+            "name": "hashlock",
+            "type": {
+                "kind": "array",
+                "length": 32,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        },
+        {
+            "name": "redeemer",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "inner",
+                        "type": {
+                            "kind": "field"
+                        }
+                    }
+                ],
+                "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
+            }
+        },
+        {
+            "name": "secret",
+            "type": {
+                "kind": "array",
+                "length": 32,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        },
+        {
+            "name": "payout",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 128
+            }
+        },
+        {
+            "name": "excess",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 128
+            }
+        }
+    ],
+    "path": "Train::UserRedeemed"
+},
+        eventSelector: EventSelector.fromString("0xf4931291"),
+        fieldNames: ["hashlock","redeemer","secret","payout","excess"],
+      },
+UserLocked: {
+        abiType: {
+    "kind": "struct",
+    "fields": [
+        {
+            "name": "hashlock",
+            "type": {
+                "kind": "array",
+                "length": 32,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        },
+        {
+            "name": "sender",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "inner",
+                        "type": {
+                            "kind": "field"
+                        }
+                    }
+                ],
+                "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
+            }
+        },
+        {
+            "name": "recipient",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "inner",
+                        "type": {
+                            "kind": "field"
+                        }
+                    }
+                ],
+                "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
+            }
+        },
+        {
+            "name": "src_chain",
+            "type": {
+                "kind": "array",
+                "length": 30,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        },
+        {
+            "name": "token",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "inner",
+                        "type": {
+                            "kind": "field"
+                        }
+                    }
+                ],
+                "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
+            }
+        },
+        {
+            "name": "amount",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 128
+            }
+        },
+        {
+            "name": "timelock",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 64
+            }
+        },
+        {
+            "name": "payout_curve",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "inner",
+                        "type": {
+                            "kind": "field"
+                        }
+                    }
+                ],
+                "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
+            }
+        },
+        {
+            "name": "dst_chain",
+            "type": {
+                "kind": "array",
+                "length": 30,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        },
+        {
+            "name": "dst_address",
+            "type": {
+                "kind": "array",
+                "length": 90,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        },
+        {
+            "name": "dst_amount",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 128
+            }
+        },
+        {
+            "name": "dst_token",
+            "type": {
+                "kind": "array",
+                "length": 90,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        },
+        {
+            "name": "reward_amount",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 128
+            }
+        },
+        {
+            "name": "reward_token",
+            "type": {
+                "kind": "array",
+                "length": 90,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        },
+        {
+            "name": "reward_recipient",
+            "type": {
+                "kind": "array",
+                "length": 90,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        },
+        {
+            "name": "reward_timelock_delta",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 64
+            }
+        },
+        {
+            "name": "quote_expiry",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 64
+            }
+        },
+        {
+            "name": "user_data",
+            "type": {
+                "kind": "array",
+                "length": 256,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        },
+        {
+            "name": "solver_data",
+            "type": {
+                "kind": "array",
+                "length": 256,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        }
+    ],
+    "path": "Train::UserLocked"
+},
+        eventSelector: EventSelector.fromString("0xcd782ad9"),
+        fieldNames: ["hashlock","sender","recipient","src_chain","token","amount","timelock","payout_curve","dst_chain","dst_address","dst_amount","dst_token","reward_amount","reward_token","reward_recipient","reward_timelock_delta","quote_expiry","user_data","solver_data"],
+      },
+SolverRefunded: {
+        abiType: {
+    "kind": "struct",
+    "fields": [
+        {
+            "name": "hashlock",
+            "type": {
+                "kind": "array",
+                "length": 32,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        },
+        {
+            "name": "index",
+            "type": {
+                "kind": "field"
+            }
+        },
+        {
+            "name": "refund_to",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "inner",
+                        "type": {
+                            "kind": "field"
+                        }
+                    }
+                ],
+                "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
+            }
+        },
+        {
+            "name": "amount",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 128
+            }
+        },
+        {
+            "name": "reward",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 128
+            }
+        }
+    ],
+    "path": "Train::SolverRefunded"
+},
+        eventSelector: EventSelector.fromString("0x834ab4fc"),
+        fieldNames: ["hashlock","index","refund_to","amount","reward"],
+      },
+SolverRedeemed: {
+        abiType: {
+    "kind": "struct",
+    "fields": [
+        {
+            "name": "hashlock",
+            "type": {
+                "kind": "array",
+                "length": 32,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        },
+        {
+            "name": "index",
+            "type": {
+                "kind": "field"
+            }
+        },
+        {
+            "name": "redeemer",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "inner",
+                        "type": {
+                            "kind": "field"
+                        }
+                    }
+                ],
+                "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
+            }
+        },
+        {
+            "name": "secret",
+            "type": {
+                "kind": "array",
+                "length": 32,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        },
+        {
+            "name": "payout",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 128
+            }
+        },
+        {
+            "name": "excess",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 128
+            }
+        },
+        {
+            "name": "reward_to",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "inner",
+                        "type": {
+                            "kind": "field"
+                        }
+                    }
+                ],
+                "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
+            }
+        },
+        {
+            "name": "reward",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 128
+            }
+        }
+    ],
+    "path": "Train::SolverRedeemed"
+},
+        eventSelector: EventSelector.fromString("0x71e8f48e"),
+        fieldNames: ["hashlock","index","redeemer","secret","payout","excess","reward_to","reward"],
+      },
+SolverLocked: {
+        abiType: {
+    "kind": "struct",
+    "fields": [
+        {
+            "name": "hashlock",
+            "type": {
+                "kind": "array",
+                "length": 32,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        },
+        {
+            "name": "sender",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "inner",
+                        "type": {
+                            "kind": "field"
+                        }
+                    }
+                ],
+                "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
+            }
+        },
+        {
+            "name": "recipient",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "inner",
+                        "type": {
+                            "kind": "field"
+                        }
+                    }
+                ],
+                "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
+            }
+        },
+        {
+            "name": "index",
+            "type": {
+                "kind": "field"
+            }
+        },
+        {
+            "name": "src_chain",
+            "type": {
+                "kind": "array",
+                "length": 30,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        },
+        {
+            "name": "token",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "inner",
+                        "type": {
+                            "kind": "field"
+                        }
+                    }
+                ],
+                "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
+            }
+        },
+        {
+            "name": "amount",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 128
+            }
+        },
+        {
+            "name": "reward",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 128
+            }
+        },
+        {
+            "name": "reward_token",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "inner",
+                        "type": {
+                            "kind": "field"
+                        }
+                    }
+                ],
+                "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
+            }
+        },
+        {
+            "name": "reward_recipient",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "inner",
+                        "type": {
+                            "kind": "field"
+                        }
+                    }
+                ],
+                "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
+            }
+        },
+        {
+            "name": "timelock",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 64
+            }
+        },
+        {
+            "name": "reward_timelock",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 64
+            }
+        },
+        {
+            "name": "payout_curve",
+            "type": {
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "inner",
+                        "type": {
+                            "kind": "field"
+                        }
+                    }
+                ],
+                "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
+            }
+        },
+        {
+            "name": "dst_chain",
+            "type": {
+                "kind": "array",
+                "length": 30,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        },
+        {
+            "name": "dst_address",
+            "type": {
+                "kind": "array",
+                "length": 90,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        },
+        {
+            "name": "dst_amount",
+            "type": {
+                "kind": "integer",
+                "sign": "unsigned",
+                "width": 128
+            }
+        },
+        {
+            "name": "dst_token",
+            "type": {
+                "kind": "array",
+                "length": 90,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        },
+        {
+            "name": "data",
+            "type": {
+                "kind": "array",
+                "length": 256,
+                "type": {
+                    "kind": "integer",
+                    "sign": "unsigned",
+                    "width": 8
+                }
+            }
+        }
+    ],
+    "path": "Train::SolverLocked"
+},
+        eventSelector: EventSelector.fromString("0xd27364d7"),
+        fieldNames: ["hashlock","sender","recipient","index","src_chain","token","amount","reward","reward_token","reward_recipient","timelock","reward_timelock","payout_curve","dst_chain","dst_address","dst_amount","dst_token","data"],
+      }
+    };
+  }
   
 }
