@@ -28,7 +28,8 @@
     "parse-events:testnet": "AZTEC_ENV=testnet tsx parseEvents.ts",
     "verify-train:testnet": "AZTEC_ENV=testnet tsx verifyTrainAztecScan.ts",
     "verify-token:testnet": "AZTEC_ENV=testnet tsx verifyTokenAztecScan.ts",
-    "mainnet-setup": "tsx mainnetSetup.ts"
+    "mainnet-setup": "tsx mainnetSetup.ts",
+    "e2e:testnet": "AZTEC_ENV=testnet tsx e2eTestnet.ts"
   },
   "keywords": [],
   "author": "",
@@ -36,20 +37,20 @@
   "description": "",
   "dependencies": {
     "@aztec-artifacts/client": "latest",
-    "@aztec/accounts": "5.0.0-rc.2",
-    "@aztec/aztec.js": "5.0.0-rc.2",
-    "@aztec/ethereum": "5.0.0-rc.2",
-    "@aztec/noir-contracts.js": "5.0.0-rc.2",
-    "@aztec/wallets": "5.0.0-rc.2",
+    "@aztec/accounts": "5.0.0",
+    "@aztec/aztec.js": "5.0.0",
+    "@aztec/ethereum": "5.0.0",
+    "@aztec/noir-contracts.js": "5.0.0",
+    "@aztec/wallets": "5.0.0",
     "@defi-wonderland/aztec-standards": "5.0.0-rc.2",
     "aztec-scan-sdk": "github:aztec-scan/aztec-scan-sdk",
     "dotenv": "^16.5.0"
   },
   "overrides": {
-    "@aztec/foundation": "5.0.0-rc.2",
-    "@aztec/stdlib": "5.0.0-rc.2",
-    "@aztec/aztec.js": "5.0.0-rc.2",
-    "@aztec/wallets": "5.0.0-rc.2"
+    "@aztec/foundation": "5.0.0",
+    "@aztec/stdlib": "5.0.0",
+    "@aztec/aztec.js": "5.0.0",
+    "@aztec/wallets": "5.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.1",

@@ -2,7 +2,38 @@
 
 HTLC (Hash Time Locked Contract) implementation for cross-chain atomic swaps on Aztec Network.
 
-Built with Aztec Noir contracts and Aztec.js SDK `v4.2.0-aztecnr-rc.2`.
+Built with Aztec Noir contracts and Aztec.js SDK `v5.0.0`.
+
+## v5.0.0 status (2026-07-13)
+
+The stack targets **Aztec v5.0.0 final**, matching the freshly reset public testnet
+(`https://v5.testnet.rpc.aztec-labs.com`). The full E2E matrix was verified on-chain —
+see [docs/e2e-testnet-v5.0.0-report.md](docs/e2e-testnet-v5.0.0-report.md)
+(48 txs: all happy flows, view/enumeration probes, failure cases, and a mined
+on-chain revert). Mainnet still runs 4.4.0; mainnet deployment waits for its v5 upgrade.
+
+### Temporary: token dependency patch
+
+The token standard's home repo (`defi-wonderland/aztec-standards`) is archived; its last
+release (`v5.0.0-rc.2`) pins aztec-nr rc.2, which cannot work on the v5.0.0 network
+(incompatible canonical AuthRegistry address). Until the official successor —
+[`alejoamiras/ecosystem-tooling`](https://github.com/alejoamiras/ecosystem-tooling)
+(`packages/aztec-standards`) — tags **v5.0.0**, run once after cloning (and after any
+`npm install` in `scripts/`):
+
+```bash
+bash contracts/patch-token-v5.sh
+```
+
+It rebuilds the unchanged token source against aztec-nr v5.0.0 and refreshes the artifact
+in `scripts/node_modules`. When the successor release lands: point `contracts/train/Nargo.toml`
+and `scripts/package.json` at it and delete the patch script.
+
+### Fresh-chain seeding
+
+On a newly reset network the standard AuthRegistry is not published yet, and every
+authwit-based transfer fails until it is: `AZTEC_ENV=testnet npx tsx publishAuthRegistry.ts`
+(idempotent).
 
 ## Project Structure
 

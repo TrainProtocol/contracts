@@ -5,7 +5,12 @@ authors = [""]
 compiler_version = ">=1.0.0"
 
 [dependencies]
-aztec = { git = "https://github.com/AztecProtocol/aztec-packages/", tag = "v5.0.0-rc.2", directory = "noir-projects/aztec-nr/aztec" }
+aztec = { git = "https://github.com/AztecProtocol/aztec-packages/", tag = "v5.0.0", directory = "noir-projects/aztec-nr/aztec" }
+# TEMPORARY: upstream aztec-standards is archived and its v5.0.0-rc.2 tag pins aztec-nr rc.2,
+# which is incompatible with the v5.0.0 network (different AuthRegistry address baked in).
+# Run contracts/patch-token-v5.sh once after cloning to rebuild the cached checkout against
+# aztec-nr v5.0.0. Switch this to the successor release when it exists:
+# https://github.com/alejoamiras/ecosystem-tooling (packages/aztec-standards, watch for a v5.0.0 tag)
 token = { git = "https://github.com/defi-wonderland/aztec-standards", tag = "v5.0.0-rc.2", directory = "src/token_contract" }
 sha256 = { tag = "v0.3.0", git = "https://github.com/noir-lang/sha256" }
 payout_curve = { path = "../payout_curve" }

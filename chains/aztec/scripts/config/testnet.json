@@ -2,13 +2,13 @@
   "name": "testnet",
   "environment": "testnet",
   "network": {
-    "nodeUrl": "https://rpc.testnet.aztec-labs.com",
+    "nodeUrl": "https://v5.testnet.rpc.aztec-labs.com",
     "l1RpcUrl": "https://0xrpc.io/sep",
     "l1ChainId": 11155111
   },
   "settings": {
     "skipLocalNetwork": true,
-    "version": "4.2.0-aztecnr-rc.2"
+    "version": "5.0.0"
   },
   "timeouts": {
     "deployTimeout": 1200000,
