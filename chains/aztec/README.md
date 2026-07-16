@@ -140,11 +140,17 @@ When redeeming a solver lock:
 - **Before `reward_timelock`**: reward goes to `reward_recipient` (typically the solver)
 - **After `reward_timelock`**: reward goes to the redeemer
 
-## Deployed Contract
+## Deployed Contracts (testnet, v5.0.0 — 2026-07-15)
 
-| Network | Address |
+| Contract | Address |
 |---|---|
-| Testnet | `0x2233bce6ff669363662dd88749129cae32a626203667df82a9151ad28964c3e9` |
+| Train | `0x3055f51378381769adb3f9f76b70e6e39b4c9a2a6565acdc5c2d1783e7c21216` |
+| Token (test ETH) | `0x264fcdbf3c025c9c7be4e4a593ea688b02158afeca4000a6f6542cf1b71f828f` |
+| Token2 (test RWD) | `0x1658d0a9343374b90096da485a7a6c3998a0c2a70e68b5ad0b06255c5aa02046` |
+| ConstantPayoutCurve | `0x063ae60e12de5e6a34cc1e39d440a018463ea73f46fc73cd3c1c30c942f705ea` |
+
+(Deployments from the verified E2E run — see [docs/e2e-testnet-v5.0.0-report.md](docs/e2e-testnet-v5.0.0-report.md).
+Earlier addresses from the pre-reset testnet are defunct; the network was redeployed for v5.)
 
 ## Compile Contract
 
