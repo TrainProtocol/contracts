@@ -22,7 +22,7 @@ import { ConstantPayoutCurve } from '../src/ConstantPayoutCurve.sol';
 contract DeployDeterministicScript is Script {
   // Bump the string to rotate all addresses for a new release,
   // or override per-run with CREATE2_SALT (bytes32 hex).
-  bytes32 internal constant DEFAULT_SALT = keccak256('train.protocol.v1');
+  bytes32 internal constant DEFAULT_SALT = keccak256('train.protocol.v2');
 
   function run() external {
     uint256 pk = vm.envUint('PRIVATE_KEY');

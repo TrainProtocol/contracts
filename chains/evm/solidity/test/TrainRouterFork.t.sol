@@ -85,7 +85,7 @@ contract TrainRouterForkTest is Test {
     internal view returns (bytes memory)
   {
     (uint8 v, bytes32 r, bytes32 s) =
-      vm.sign(userPk, router.intentDigest(user, t, token, amount, keccak256(cd)));
+      vm.sign(userPk, router.intentDigest(user, t, token, amount, keccak256(cd), 0, type(uint256).max));
     return abi.encodePacked(r, s, v);
   }
 
@@ -106,7 +106,7 @@ contract TrainRouterForkTest is Test {
       nonce: 0,
       deadline: block.timestamp + 1000
     });
-    bytes32 witness = router.hashIntent(user, address(train), address(testToken), amount, keccak256(cd));
+    bytes32 witness = router.hashIntent(user, address(train), address(testToken), amount, keccak256(cd), 0, type(uint256).max);
 
     // Sign exactly as the real Permit2 PermitHash computes it (spender = the TrainRouter).
     bytes32 typeHash = keccak256(abi.encodePacked(PERMIT2_STUB, router.WITNESS_TYPE_STRING()));
@@ -115,7 +115,7 @@ contract TrainRouterForkTest is Test {
     bytes32 digest = keccak256(abi.encodePacked('\x19\x01', _permit2Domain(), structHash));
     (uint8 v, bytes32 r, bytes32 s) = vm.sign(userPk, digest);
 
-    router.forwardWithPermit2(user, address(testToken), amount, address(train), cd, PERMIT2, permit, abi.encodePacked(r, s, v));
+    router.forwardWithPermit2(user, address(testToken), amount, address(train), cd, 0, type(uint256).max, PERMIT2, permit, abi.encodePacked(r, s, v));
 
     assertEq(train.getUserLock(hashlock).sender, user);
     assertEq(testToken.balanceOf(address(train)), amount);
@@ -132,14 +132,14 @@ contract TrainRouterForkTest is Test {
     ITrain.UserLockParams memory p = _params(address(USDC), amount);
     ITrain.DestinationInfo memory d = _dst();
     bytes memory cd = _callData(p, d);
-    bytes32 nonce = router.hashIntent(user, address(train), address(USDC), amount, keccak256(cd));
+    bytes32 nonce = router.hashIntent(user, address(train), address(USDC), amount, keccak256(cd), 0, type(uint256).max);
 
     bytes32 structHash =
       keccak256(abi.encode(RECEIVE_TYPEHASH, user, address(router), amount, uint256(0), type(uint256).max, nonce));
     bytes32 digest = keccak256(abi.encodePacked('\x19\x01', _usdcDomain(), structHash));
     (uint8 v, bytes32 r, bytes32 s) = vm.sign(userPk, digest);
 
-    router.forwardWithAuthorization(user, address(USDC), amount, address(train), cd,
+    router.forwardWithAuthorization(user, address(USDC), amount, address(train), cd, 0, type(uint256).max,
       TrainRouter.Authorization3009({ validAfter: 0, validBefore: type(uint256).max, v: v, r: r, s: s }));
 
     assertEq(train.getUserLock(hashlock).sender, user);
@@ -164,7 +164,7 @@ contract TrainRouterForkTest is Test {
     (uint8 v, bytes32 r, bytes32 s) = vm.sign(userPk, digest);
     bytes memory intentSig = _signIntent(address(USDC), amount, cd, address(train));
 
-    router.forwardWithPermit(user, address(USDC), amount, address(train), cd,
+    router.forwardWithPermit(user, address(USDC), amount, address(train), cd, 0, type(uint256).max,
       TrainRouter.Permit2612({ value: amount, deadline: type(uint256).max, v: v, r: r, s: s }), intentSig);
 
     assertEq(train.getUserLock(hashlock).sender, user);

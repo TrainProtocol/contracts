@@ -1,42 +1,49 @@
 # Train Protocol — Contract Deployments
 
-**Last updated:** 2026-07-07
-**Deployed from commit:** `c182e0c`
+**Current release:** v2 (`train.protocol.v2`)
+**Last updated:** 2026-07-16
+**Deployed from:** branch `main-add-evm`, working tree atop `6ab0cc9` (intent-replay + pagination fix commit pending)
 **CREATE2 factory:** `0x4e59b44847b379578588920cA78FbF26c0B4956C` (Arachnid)
-**CREATE2 salt:** `0x5d7885c1f4cd41bf8dc1e01bc410bd87b5deea2f59186528a1021e520116fad6` = `keccak256('train.protocol.v1')`
+**CREATE2 salt:** `0x2cb3c3cf140b71dedade9bbce0490f1ce1423b1c7ed61f35b83f24c982cf63b1` = `keccak256('train.protocol.v2')`
 **Compiler:** solc 0.8.34, via-ir, optimizer runs 1,000,000, evm_version cancun
 
-## EVM Contract Addresses (identical on every EVM chain)
+> **Why v2:** v2 adds single-use intent replay protection to `TrainRouter` (per-intent `nonce` + `deadline`
+> + `consumedIntent`, enforced across all three gasless paths) and fixes an `offset + limit` overflow in
+> `Train`'s paginated getters. Both contracts changed, so all CREATE2 addresses moved. The v1 addresses
+> below are retained for historical reference and should be treated as deprecated.
 
-Same on all EVM networks below, and will also be identical on the EVM mainnets provided
-deployment uses the same commit, salt, and compiler settings. Tron uses different addresses —
-see the Tron tables further down.
+## EVM Contract Addresses — v2 (identical on every EVM chain)
+
+Same on all EVM networks below, and identical on any EVM mainnet if deployed from the same commit,
+salt, and compiler settings. Tron uses different addresses — see the Tron tables further down.
 
 | Contract | Address |
 | --- | --- |
-| ConstantPayoutCurve | `0xa46966484B1eB2c650333Db72de07f667dF76765` |
-| Train | `0x9d81344fd19C2e1B29eCe4372D79EAe637df7E64` |
-| TrainRouter | `0xCa04b09CCA22A4C872247303aa94FF7Ad700b6a9` |
+| ConstantPayoutCurve | `0xFF9d783c6cB8294a4fa4d1556752c3EAF3E20DEE` |
+| Train | `0x877a7629BA8EfA6dd79057ab9105FdE3aDe93d75` |
+| TrainRouter | `0x0d117b12744E1A8b4980c3BdC3542Ad53C27E33a` |
 
-## Testnets
+## Testnets — v2
+
+All contracts deployed and source-verified (Etherscan API v2).
 
 | Network | Chain ID | Status | Verified | Explorer |
 | --- | --- | --- | --- | --- |
-| Ethereum Sepolia | 11155111 | Deployed | Yes | [sepolia.etherscan.io](https://sepolia.etherscan.io/address/0x9d81344fd19C2e1B29eCe4372D79EAe637df7E64) |
-| Arbitrum Sepolia | 421614 | Deployed | Yes | [sepolia.arbiscan.io](https://sepolia.arbiscan.io/address/0x9d81344fd19C2e1B29eCe4372D79EAe637df7E64) |
-| Base Sepolia | 84532 | Deployed | Yes | [sepolia.basescan.org](https://sepolia.basescan.org/address/0x9d81344fd19C2e1B29eCe4372D79EAe637df7E64) |
-| OP Sepolia | 11155420 | Deployed | Yes | [sepolia-optimism.etherscan.io](https://sepolia-optimism.etherscan.io/address/0x9d81344fd19C2e1B29eCe4372D79EAe637df7E64) |
-| BSC Testnet | 97 | Deployed | Yes | [testnet.bscscan.com](https://testnet.bscscan.com/address/0x9d81344fd19C2e1B29eCe4372D79EAe637df7E64) |
-| Linea Sepolia | 59141 | Deployed | Yes | [sepolia.lineascan.build](https://sepolia.lineascan.build/address/0x9d81344fd19C2e1B29eCe4372D79EAe637df7E64) |
-| Monad Testnet | 10143 | Deployed | Yes (MonadScan) | [testnet.monadscan.com](https://testnet.monadscan.com/address/0x9d81344fd19C2e1B29eCe4372D79EAe637df7E64) |
-| Tron Nile | 3448148188 (0xcd8690dc) | Deployed | No (manual on Tronscan, optional) | [nile.tronscan.org](https://nile.tronscan.org/#/contract/THVyZWFSabRbjBZXDUMBQaa2Wbxq11b145) |
+| Ethereum Sepolia | 11155111 | Deployed | Yes | [sepolia.etherscan.io](https://sepolia.etherscan.io/address/0x877a7629BA8EfA6dd79057ab9105FdE3aDe93d75) |
+| Arbitrum Sepolia | 421614 | Deployed | Yes | [sepolia.arbiscan.io](https://sepolia.arbiscan.io/address/0x877a7629BA8EfA6dd79057ab9105FdE3aDe93d75) |
+| Base Sepolia | 84532 | Deployed | Yes | [sepolia.basescan.org](https://sepolia.basescan.org/address/0x877a7629BA8EfA6dd79057ab9105FdE3aDe93d75) |
+| OP Sepolia | 11155420 | Deployed | Yes | [sepolia-optimism.etherscan.io](https://sepolia-optimism.etherscan.io/address/0x877a7629BA8EfA6dd79057ab9105FdE3aDe93d75) |
+| BSC Testnet | 97 | Deployed | Yes | [testnet.bscscan.com](https://testnet.bscscan.com/address/0x877a7629BA8EfA6dd79057ab9105FdE3aDe93d75) |
+| Linea Sepolia | 59141 | Deployed | Yes | [sepolia.lineascan.build](https://sepolia.lineascan.build/address/0x877a7629BA8EfA6dd79057ab9105FdE3aDe93d75) |
+| Monad Testnet | 10143 | Deployed | Yes (MonadScan) | [testnet.monadscan.com](https://testnet.monadscan.com/address/0x877a7629BA8EfA6dd79057ab9105FdE3aDe93d75) |
+| Tron Nile | 3448148188 (0xcd8690dc) | Deployed | No (manual on Tronscan, optional) | [nile.tronscan.org](https://nile.tronscan.org/#/contract/TKPCfMErMoBpr7YWcWJyNM2aG7EcAn6srj) |
 
 Explorer links open the Train contract page on each network. The Tron chain ID shown is the one
 reported by Tron's EVM-compatible JSON-RPC; Tron addresses differ from the EVM set (see below).
 
-## Mainnets (not yet deployed)
+## Mainnets — v2 (not yet deployed)
 
-Same three EVM addresses expected if deployed from commit `c182e0c` with salt `train.protocol.v1`.
+Same three EVM addresses expected if deployed from this commit with salt `train.protocol.v2`.
 Tron mainnet will get new, unrelated addresses.
 
 | Network | Chain ID | Status | Explorer |
@@ -50,16 +57,16 @@ Tron mainnet will get new, unrelated addresses.
 | Monad | 143 | Not deployed | [monadscan.com](https://monadscan.com) |
 | Tron | 728126428 (0x2b6653dc) | Not deployed | [tronscan.org](https://tronscan.org) |
 
-## Tron Addresses — Nile Testnet (deployed)
+## Tron Addresses — Nile Testnet — v2 (deployed)
 
 Addresses differ from EVM by design (no CREATE2 on Tron, 0x41 address derivation).
-Smoke-tested on-chain: `computePayout` returns correctly (Cancun/TVM compatible, GreatVoyage 4.8.0+).
+Deployer: `TFkCi38K7h7xicgoP7MNuSsnDQAg1YwbvD`.
 
 | Contract | Address (base58) | Address (hex) |
 | --- | --- | --- |
-| ConstantPayoutCurve | [`TQUDuMYbtjXimHMeFLh9kFnsCYUeqABbSm`](https://nile.tronscan.org/#/contract/TQUDuMYbtjXimHMeFLh9kFnsCYUeqABbSm) | `419f0e93976a679555f506cd6207bfdefbab6df6fd` |
-| Train | [`THVyZWFSabRbjBZXDUMBQaa2Wbxq11b145`](https://nile.tronscan.org/#/contract/THVyZWFSabRbjBZXDUMBQaa2Wbxq11b145) | `41529a8e4033bcdf10c0998a72288aaef78076b368` |
-| TrainRouter | [`TQQ4dYHYGvYdZhXsi9amayBMsQKtDPt8a3`](https://nile.tronscan.org/#/contract/TQQ4dYHYGvYdZhXsi9amayBMsQKtDPt8a3) | `419e452c186891f1a433eaaaca2288c77d5c0fcde4` |
+| ConstantPayoutCurve | [`TSHgwbab9XGjcGdQLdDAEQMgXy6QpnKE97`](https://nile.tronscan.org/#/contract/TSHgwbab9XGjcGdQLdDAEQMgXy6QpnKE97) | `41b300d2c0773e6f5c5c91a0dcec4d06d1a6dc98da` |
+| Train | [`TKPCfMErMoBpr7YWcWJyNM2aG7EcAn6srj`](https://nile.tronscan.org/#/contract/TKPCfMErMoBpr7YWcWJyNM2aG7EcAn6srj) | `416742d4db7d0e14e2722874a57f1d38d080170e74` |
+| TrainRouter | [`TY6hNw9Kvx6AcRJAAk9M9mCxZzuaSbQ3fG`](https://nile.tronscan.org/#/contract/TY6hNw9Kvx6AcRJAAk9M9mCxZzuaSbQ3fG) | `41f2bd5df61b877ef57764de3ed41030aeecf3d7c2` |
 
 ## Tron Addresses — Mainnet (not deployed)
 
@@ -75,9 +82,10 @@ Fill in after `npm run deploy:tron:mainnet`.
 
 - Reproducibility: same salt + same commit + same compiler settings gives the same EVM address on
   any chain (Arachnid CREATE2 factory). Any change to contract source or compiler config changes the
-  addresses — bump the salt to `train.protocol.v2` for the next release and add a new section here.
+  addresses — bump the salt string deliberately for a new release and add a new section here.
 - Deployment is permissionless and idempotent: anyone can re-run the deploy; only identical bytecode
-  can occupy these addresses. Re-runs skip already-deployed contracts.
+  can occupy these addresses. Re-runs skip already-deployed contracts (this is how the Sepolia v2
+  deploy was resumed after a partial run).
 - Verification: a single Etherscan API v2 key covers all EVM chains above, including Monad
   (MonadScan). TrainRouter runtime bytecode differs slightly per chain on purpose (EIP-712 chain-id
   immutable); explorers cross-match it automatically. The CREATE2 address is unaffected (keyed on initcode).
@@ -87,3 +95,20 @@ Fill in after `npm run deploy:tron:mainnet`.
   [`script/deploy-testnets.ps1`](script/deploy-testnets.ps1) (multi-chain orchestrator),
   [`script/deploy-tron.js`](script/deploy-tron.js) (TronWeb). See the
   [deploy section of the README](README.md#deploy--on-chain-testnet-flow) for usage.
+
+---
+
+## Historical — v1 (`train.protocol.v1`), DEPRECATED
+
+Deployed from commit `c182e0c`, salt `keccak256('train.protocol.v1')`
+(`0x5d7885c1f4cd41bf8dc1e01bc410bd87b5deea2f59186528a1021e520116fad6`). Superseded by v2. The v1
+`TrainRouter` lacks intent replay protection and the v1 `Train` paginated getters can revert on
+`offset + limit` overflow; prefer the v2 addresses above.
+
+EVM (all chains): ConstantPayoutCurve `0xa46966484B1eB2c650333Db72de07f667dF76765`,
+Train `0x9d81344fd19C2e1B29eCe4372D79EAe637df7E64`,
+TrainRouter `0xCa04b09CCA22A4C872247303aa94FF7Ad700b6a9`.
+Deployed on the same 7 testnets (Sepolia, Arbitrum/Base/OP/Linea Sepolia, BSC, Monad).
+
+Tron Nile (v1): ConstantPayoutCurve `TQUDuMYbtjXimHMeFLh9kFnsCYUeqABbSm`,
+Train `THVyZWFSabRbjBZXDUMBQaa2Wbxq11b145`, TrainRouter `TQQ4dYHYGvYdZhXsi9amayBMsQKtDPt8a3`.

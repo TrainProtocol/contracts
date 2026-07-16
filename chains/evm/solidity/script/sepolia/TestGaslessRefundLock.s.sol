@@ -39,7 +39,7 @@ contract TestGaslessRefundLock is SepoliaConfig {
     uint256 userBefore = USDC.balanceOf(user);
     vm.startBroadcast(relayerPk);
     router.forwardWithPermit(
-      user, address(USDC), AMOUNT, address(train), cd,
+      user, address(USDC), AMOUNT, address(train), cd, INTENT_NONCE, INTENT_DEADLINE,
       TrainRouter.Permit2612({ value: AMOUNT, deadline: type(uint256).max, v: v, r: r, s: s }),
       intentSig
     );

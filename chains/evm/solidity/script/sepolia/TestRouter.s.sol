@@ -32,7 +32,7 @@ contract TestRouter is SepoliaConfig {
 
     vm.startBroadcast(relayerPk);
     router.forwardWithPermit(
-      user, address(USDC), AMOUNT, address(train), cd,
+      user, address(USDC), AMOUNT, address(train), cd, INTENT_NONCE, INTENT_DEADLINE,
       TrainRouter.Permit2612({ value: AMOUNT, deadline: type(uint256).max, v: v, r: r, s: s }),
       intentSig
     );
@@ -54,11 +54,11 @@ contract TestRouter is SepoliaConfig {
       nonce: uint256(keccak256(abi.encodePacked(vm.unixTime(), 'p2-nonce'))),
       deadline: type(uint256).max
     });
-    bytes32 witness = router.hashIntent(user, address(train), address(USDC), AMOUNT, keccak256(cd));
+    bytes32 witness = router.hashIntent(user, address(train), address(USDC), AMOUNT, keccak256(cd), INTENT_NONCE, INTENT_DEADLINE);
     bytes memory sig = _signPermit2(permit, witness);
 
     vm.startBroadcast(relayerPk);
-    router.forwardWithPermit2(user, address(USDC), AMOUNT, address(train), cd, PERMIT2, permit, sig);
+    router.forwardWithPermit2(user, address(USDC), AMOUNT, address(train), cd, INTENT_NONCE, INTENT_DEADLINE, PERMIT2, permit, sig);
     train.redeemUser(hl, secret);
     vm.stopBroadcast();
     console.log('[permit2] TrainRouter -> Train -> redeem OK');
@@ -72,12 +72,12 @@ contract TestRouter is SepoliaConfig {
     ITrain.UserLockParams memory p = _userParamsI(hl, AMOUNT, 3600);
     ITrain.DestinationInfo memory d = _dstI();
     bytes memory cd = _callData(p, d);
-    bytes32 nonce = router.hashIntent(user, address(train), address(USDC), AMOUNT, keccak256(cd));
+    bytes32 nonce = router.hashIntent(user, address(train), address(USDC), AMOUNT, keccak256(cd), INTENT_NONCE, INTENT_DEADLINE);
     (uint8 v, bytes32 r, bytes32 s) = _sign3009(AMOUNT, nonce);
 
     vm.startBroadcast(relayerPk);
     router.forwardWithAuthorization(
-      user, address(USDC), AMOUNT, address(train), cd,
+      user, address(USDC), AMOUNT, address(train), cd, INTENT_NONCE, INTENT_DEADLINE,
       TrainRouter.Authorization3009({ validAfter: 0, validBefore: type(uint256).max, v: v, r: r, s: s })
     );
     train.redeemUser(hl, secret);

@@ -39,7 +39,7 @@ For end users who shouldn't pay gas, a relayer submits the user's **signed inten
 which pulls the user's tokens and forwards them into Train:
 
 ```
- user signs intent  ──►  relayer calls TrainRouter.forwardWith{Permit,Permit2,Authorization}(user, token, amount, train, callData, …)
+ user signs intent  ──►  relayer calls TrainRouter.forwardWith{Permit,Permit2,Authorization}(user, token, amount, train, callData, nonce, deadline, …)
                               │  pulls user's ERC20 (Permit2 / 2612 / 3009)
                               │  forceApprove(train, amount); train.call(callData); forceApprove(train, 0)
                               ▼
@@ -53,8 +53,8 @@ which pulls the user's tokens and forwards them into Train:
 The Router is **target-agnostic and fully abstract**: no owner, no stored addresses, and **no knowledge
 of the target's ABI**. The caller ABI-encodes the destination call off-chain as opaque `callData`; the
 Router only pulls funds and forwards that call. The signed intent commits to
-`(user, train, token, amount, keccak256(callData))`, so the signature fixes exactly *where* funds go and
-*what* call executes — a relayer can only run the precise call the user authorized.
+`(user, train, token, amount, keccak256(callData), nonce, deadline)`, so the signature fixes exactly
+*where* funds go and *what* call executes — a relayer can only run the precise call the user authorized.
 
 - **Exact-amount approve + forward.** The Router pulls the user's tokens, `forceApprove`s the
   (untrusted) `train` for **exactly** `amount`, low-level-`call`s `callData` (bubbling any revert), then
@@ -68,11 +68,14 @@ Router only pulls funds and forwards that call. The signed intent commits to
   forwarded call is `Train.userLockFor`, which additionally re-measures its own `balanceOf` delta.)
 - **Intent binding per standard:**
   - **ERC-2612** — a separate EIP-712 intent signature (verified with `SignatureChecker`, so EOAs and
-    ERC-1271 smart accounts both work) binds `hashIntent(user, train, token, amount, callHash)`.
+    ERC-1271 smart accounts both work) binds `hashIntent(user, train, token, amount, callHash, nonce, deadline)`.
   - **Permit2** — the intent hash is the `permitWitnessTransferFrom` **witness** (one signature).
-  - **EIP-3009** — the intent hash is forced as the **nonce** (one signature; also replay protection).
-- **Replay** — blocked by the per-standard nonce (2612 nonce / Permit2 nonce / 3009 nonce) **and** the
-  unique-hashlock check in Train.
+  - **EIP-3009** — the intent hash is forced as the **nonce** (one signature).
+- **Replay** — every intent carries a user-chosen `nonce` and a `deadline`; the Router records its struct
+  hash in `consumedIntent` and rejects re-use across **all three paths** (`IntentAlreadyConsumed`), and
+  rejects an intent past its `deadline` (`IntentExpired`). A signed intent therefore executes at most once
+  — vary the `nonce` to authorize a deliberate repeat of the same call. Train's unique-hashlock check
+  remains as defense-in-depth behind the Router guard.
 
 The Router's EIP-712 domain is `("TrainRouter", "1")`. `hashIntent`, `intentDigest`, `DOMAIN_SEPARATOR`,
 and `WITNESS_TYPE_STRING` are exposed for off-chain signers.
@@ -137,13 +140,14 @@ These are **documented, accepted** behaviors — read before integrating.
   filter was removed so these never hit a node's `eth_call` gas cap regardless of list size).
 
 ### TrainRouter
-- `forwardWithPermit(user, token, amount, train, callData, permitData, intentSig)`
-- `forwardWithPermit2(user, token, amount, train, callData, permit2, permit, sig)`
-- `forwardWithAuthorization(user, token, amount, train, callData, auth)`
+- `forwardWithPermit(user, token, amount, train, callData, nonce, deadline, permitData, intentSig)`
+- `forwardWithPermit2(user, token, amount, train, callData, nonce, deadline, permit2, permit, sig)`
+- `forwardWithAuthorization(user, token, amount, train, callData, nonce, deadline, auth)`
 - Each pulls `amount` of `token` gaslessly and forwards `callData` (e.g. an encoded `Train.userLockFor`)
-  to `train`, then emits `IntentForwarded(user, train, callHash, relayer, token, amount)`.
-- views: `hashIntent(user, train, token, amount, callHash)`, `intentDigest(...)`, `DOMAIN_SEPARATOR()`,
-  `WITNESS_TYPE_STRING()`
+  to `train`, then emits `IntentForwarded(user, train, callHash, relayer, token, amount)`. The intent's
+  `nonce`+`deadline` give single-use replay protection (`consumedIntent`) across all three paths.
+- views: `hashIntent(user, train, token, amount, callHash, nonce, deadline)`, `intentDigest(...)`,
+  `consumedIntent(intentHash)`, `DOMAIN_SEPARATOR()`, `WITNESS_TYPE_STRING()`
 
 ---
 
@@ -249,7 +253,7 @@ including MonadScan for Monad testnet):
 .\script\deploy-testnets.ps1                    # deploy + verify on all 7
 ```
 
-Salt policy: addresses derive from `keccak256('train.protocol.v1')` (override with `CREATE2_SALT`).
+Salt policy: addresses derive from `keccak256('train.protocol.v2')` (override with `CREATE2_SALT`).
 Same salt + same commit + same solc/settings ⇒ same address; **any source or compiler-settings
 change alters the initcode and therefore the address** — bump the salt string deliberately for a
 new release. Each run also writes a local summary of that run to `deployments/testnets.json`

@@ -15,7 +15,7 @@ import { IERC20Permit } from '@openzeppelin/contracts/token/ERC20/extensions/IER
 import { IERC20 } from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 
 /// @notice End-to-end tests for the target-agnostic gasless TrainRouter across all three standards, plus
-///         the trust-boundary negatives (intent binding, replay, native, zero-user, conservation,
+///         the trust-boundary negatives (intent binding, replay, expiry, native, zero-user, conservation,
 ///         reentrancy). The router forwards a user-signed `callData` (here an encoded Train.userLockFor)
 ///         to `train`; ITrain is used only to encode that calldata.
 contract TrainRouterTest is Test {
@@ -33,6 +33,10 @@ contract TrainRouterTest is Test {
   uint256 constant SECRET = 7;
   bytes32 hashlock;
   uint256 constant AMOUNT = 100 ether;
+
+  // Fixed intent nonce/deadline used by the helpers so most tests re-use one signed intent shape.
+  uint256 constant INTENT_NONCE = 1;
+  uint256 constant INTENT_DEADLINE = type(uint256).max;
 
   bytes32 constant PERMIT_TYPEHASH =
     keccak256('Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)');
@@ -87,7 +91,8 @@ contract TrainRouterTest is Test {
   function _signIntent(address tokenAddr, bytes memory callData, address trainAddr)
     internal view returns (bytes memory)
   {
-    bytes32 digest = router.intentDigest(user, trainAddr, tokenAddr, AMOUNT, keccak256(callData));
+    bytes32 digest =
+      router.intentDigest(user, trainAddr, tokenAddr, AMOUNT, keccak256(callData), INTENT_NONCE, INTENT_DEADLINE);
     (uint8 v, bytes32 r, bytes32 s) = vm.sign(userPk, digest);
     return abi.encodePacked(r, s, v);
   }
@@ -146,7 +151,7 @@ contract TrainRouterTest is Test {
     bytes memory intentSig = _signIntent(address(token), cd, address(train));
 
     vm.prank(relayer);
-    router.forwardWithPermit(user, address(token), AMOUNT, address(train), cd,
+    router.forwardWithPermit(user, address(token), AMOUNT, address(train), cd, INTENT_NONCE, INTENT_DEADLINE,
       TrainRouter.Permit2612({ value: AMOUNT, deadline: type(uint256).max, v: v, r: r, s: s }), intentSig);
 
     _assertLanded(address(token));
@@ -159,7 +164,7 @@ contract TrainRouterTest is Test {
 
     vm.prank(relayer);
     vm.expectRevert(TrainRouter.InvalidIntentSignature.selector);
-    router.forwardWithPermit(user, address(token), AMOUNT, address(0xDEAD), cd, // ...forwarded elsewhere
+    router.forwardWithPermit(user, address(token), AMOUNT, address(0xDEAD), cd, INTENT_NONCE, INTENT_DEADLINE, // ...forwarded elsewhere
       TrainRouter.Permit2612({ value: AMOUNT, deadline: type(uint256).max, v: v, r: r, s: s }), intentSig);
   }
 
@@ -170,8 +175,24 @@ contract TrainRouterTest is Test {
     bytes memory intentSig = _signIntent(address(token), cd, address(train));
 
     vm.prank(relayer);
-    vm.expectRevert(); // permit nonce consumed + allowance spent → transferFrom reverts
-    router.forwardWithPermit(user, address(token), AMOUNT, address(train), cd,
+    vm.expectRevert(TrainRouter.IntentAlreadyConsumed.selector); // router consumed this intent on the happy path
+    router.forwardWithPermit(user, address(token), AMOUNT, address(train), cd, INTENT_NONCE, INTENT_DEADLINE,
+      TrainRouter.Permit2612({ value: AMOUNT, deadline: type(uint256).max, v: v, r: r, s: s }), intentSig);
+  }
+
+  function test_permit_RevertsOnExpiredIntent() public {
+    uint256 deadline = block.timestamp + 100;
+    bytes memory cd = _callData(_params(address(token)), _dst());
+    (uint8 v, bytes32 r, bytes32 s) = _signPermit(address(router), AMOUNT, type(uint256).max);
+    bytes32 digest =
+      router.intentDigest(user, address(train), address(token), AMOUNT, keccak256(cd), INTENT_NONCE, deadline);
+    (uint8 iv, bytes32 ir, bytes32 isig) = vm.sign(userPk, digest);
+    bytes memory intentSig = abi.encodePacked(ir, isig, iv);
+
+    vm.warp(deadline + 1);
+    vm.prank(relayer);
+    vm.expectRevert(TrainRouter.IntentExpired.selector);
+    router.forwardWithPermit(user, address(token), AMOUNT, address(train), cd, INTENT_NONCE, deadline,
       TrainRouter.Permit2612({ value: AMOUNT, deadline: type(uint256).max, v: v, r: r, s: s }), intentSig);
   }
 
@@ -179,7 +200,7 @@ contract TrainRouterTest is Test {
     bytes memory cd = _callData(_params(address(0)), _dst());
     vm.prank(relayer);
     vm.expectRevert(TrainRouter.NativeNotSupported.selector);
-    router.forwardWithPermit(user, address(0), AMOUNT, address(train), cd,
+    router.forwardWithPermit(user, address(0), AMOUNT, address(train), cd, INTENT_NONCE, INTENT_DEADLINE,
       TrainRouter.Permit2612({ value: AMOUNT, deadline: type(uint256).max, v: 0, r: 0, s: 0 }), '');
   }
 
@@ -187,7 +208,7 @@ contract TrainRouterTest is Test {
     bytes memory cd = _callData(_params(address(token)), _dst());
     vm.prank(relayer);
     vm.expectRevert(TrainRouter.InvalidUser.selector);
-    router.forwardWithPermit(address(0), address(token), AMOUNT, address(train), cd,
+    router.forwardWithPermit(address(0), address(token), AMOUNT, address(train), cd, INTENT_NONCE, INTENT_DEADLINE,
       TrainRouter.Permit2612({ value: AMOUNT, deadline: type(uint256).max, v: 0, r: 0, s: 0 }), '');
   }
 
@@ -195,11 +216,11 @@ contract TrainRouterTest is Test {
 
   function test_authorization_HappyPath() public {
     bytes memory cd = _callData(_params(address(token3009)), _dst());
-    bytes32 nonce = router.hashIntent(user, address(train), address(token3009), AMOUNT, keccak256(cd));
+    bytes32 nonce = router.hashIntent(user, address(train), address(token3009), AMOUNT, keccak256(cd), INTENT_NONCE, INTENT_DEADLINE);
     (uint8 v, bytes32 r, bytes32 s) = _sign3009(address(router), AMOUNT, 0, type(uint256).max, nonce);
 
     vm.prank(relayer);
-    router.forwardWithAuthorization(user, address(token3009), AMOUNT, address(train), cd,
+    router.forwardWithAuthorization(user, address(token3009), AMOUNT, address(train), cd, INTENT_NONCE, INTENT_DEADLINE,
       TrainRouter.Authorization3009({ validAfter: 0, validBefore: type(uint256).max, v: v, r: r, s: s }));
 
     _assertLanded(address(token3009));
@@ -207,24 +228,24 @@ contract TrainRouterTest is Test {
 
   function test_authorization_RevertsOnTamperedTrain() public {
     bytes memory cd = _callData(_params(address(token3009)), _dst());
-    bytes32 nonce = router.hashIntent(user, address(train), address(token3009), AMOUNT, keccak256(cd));
+    bytes32 nonce = router.hashIntent(user, address(train), address(token3009), AMOUNT, keccak256(cd), INTENT_NONCE, INTENT_DEADLINE);
     (uint8 v, bytes32 r, bytes32 s) = _sign3009(address(router), AMOUNT, 0, type(uint256).max, nonce);
 
     vm.prank(relayer);
     vm.expectRevert(); // router recomputes a different nonce → token rejects sig
-    router.forwardWithAuthorization(user, address(token3009), AMOUNT, address(0xDEAD), cd,
+    router.forwardWithAuthorization(user, address(token3009), AMOUNT, address(0xDEAD), cd, INTENT_NONCE, INTENT_DEADLINE,
       TrainRouter.Authorization3009({ validAfter: 0, validBefore: type(uint256).max, v: v, r: r, s: s }));
   }
 
   function test_authorization_RevertsOnReplay() public {
     test_authorization_HappyPath();
     bytes memory cd = _callData(_params(address(token3009)), _dst());
-    bytes32 nonce = router.hashIntent(user, address(train), address(token3009), AMOUNT, keccak256(cd));
+    bytes32 nonce = router.hashIntent(user, address(train), address(token3009), AMOUNT, keccak256(cd), INTENT_NONCE, INTENT_DEADLINE);
     (uint8 v, bytes32 r, bytes32 s) = _sign3009(address(router), AMOUNT, 0, type(uint256).max, nonce);
 
     vm.prank(relayer);
-    vm.expectRevert(); // authorization nonce already used
-    router.forwardWithAuthorization(user, address(token3009), AMOUNT, address(train), cd,
+    vm.expectRevert(TrainRouter.IntentAlreadyConsumed.selector); // router blocks before the token's nonce check
+    router.forwardWithAuthorization(user, address(token3009), AMOUNT, address(train), cd, INTENT_NONCE, INTENT_DEADLINE,
       TrainRouter.Authorization3009({ validAfter: 0, validBefore: type(uint256).max, v: v, r: r, s: s }));
   }
 
@@ -233,11 +254,11 @@ contract TrainRouterTest is Test {
   function test_permit2_HappyPath() public {
     bytes memory cd = _callData(_params(address(token)), _dst());
     ISignatureTransfer.PermitTransferFrom memory permit = _permit();
-    bytes32 witness = router.hashIntent(user, address(train), address(token), AMOUNT, keccak256(cd));
+    bytes32 witness = router.hashIntent(user, address(train), address(token), AMOUNT, keccak256(cd), INTENT_NONCE, INTENT_DEADLINE);
     bytes memory sig = _signPermit2(permit, address(router), witness);
 
     vm.prank(relayer);
-    router.forwardWithPermit2(user, address(token), AMOUNT, address(train), cd, address(permit2), permit, sig);
+    router.forwardWithPermit2(user, address(token), AMOUNT, address(train), cd, INTENT_NONCE, INTENT_DEADLINE, address(permit2), permit, sig);
 
     _assertLanded(address(token));
   }
@@ -245,24 +266,24 @@ contract TrainRouterTest is Test {
   function test_permit2_RevertsOnTamperedTrain() public {
     bytes memory cd = _callData(_params(address(token)), _dst());
     ISignatureTransfer.PermitTransferFrom memory permit = _permit();
-    bytes32 witness = router.hashIntent(user, address(train), address(token), AMOUNT, keccak256(cd));
+    bytes32 witness = router.hashIntent(user, address(train), address(token), AMOUNT, keccak256(cd), INTENT_NONCE, INTENT_DEADLINE);
     bytes memory sig = _signPermit2(permit, address(router), witness);
 
     vm.prank(relayer);
     vm.expectRevert(); // router recomputes a different witness → Permit2 rejects sig
-    router.forwardWithPermit2(user, address(token), AMOUNT, address(0xDEAD), cd, address(permit2), permit, sig);
+    router.forwardWithPermit2(user, address(token), AMOUNT, address(0xDEAD), cd, INTENT_NONCE, INTENT_DEADLINE, address(permit2), permit, sig);
   }
 
   function test_permit2_RevertsOnMismatch() public {
     bytes memory cd = _callData(_params(address(token)), _dst());
     ISignatureTransfer.PermitTransferFrom memory permit = _permit();
     permit.permitted.amount = AMOUNT - 1; // less than signed amount
-    bytes32 witness = router.hashIntent(user, address(train), address(token), AMOUNT, keccak256(cd));
+    bytes32 witness = router.hashIntent(user, address(train), address(token), AMOUNT, keccak256(cd), INTENT_NONCE, INTENT_DEADLINE);
     bytes memory sig = _signPermit2(permit, address(router), witness);
 
     vm.prank(relayer);
     vm.expectRevert(TrainRouter.Permit2Mismatch.selector);
-    router.forwardWithPermit2(user, address(token), AMOUNT, address(train), cd, address(permit2), permit, sig);
+    router.forwardWithPermit2(user, address(token), AMOUNT, address(train), cd, INTENT_NONCE, INTENT_DEADLINE, address(permit2), permit, sig);
   }
 
   // ─── Conservation guards / native-zero / views / front-run / reentrancy ───
@@ -279,7 +300,7 @@ contract TrainRouterTest is Test {
 
     vm.prank(relayer);
     vm.expectRevert(TrainRouter.InsufficientPulled.selector);
-    router.forwardWithPermit(user, address(fot), AMOUNT, address(train), cd,
+    router.forwardWithPermit(user, address(fot), AMOUNT, address(train), cd, INTENT_NONCE, INTENT_DEADLINE,
       TrainRouter.Permit2612({ value: AMOUNT, deadline: type(uint256).max, v: v, r: r, s: s }), intentSig);
   }
 
@@ -291,41 +312,41 @@ contract TrainRouterTest is Test {
 
     vm.prank(relayer);
     vm.expectRevert(TrainRouter.ResidualBalance.selector);
-    router.forwardWithPermit(user, address(token), AMOUNT, address(badTrain), cd,
+    router.forwardWithPermit(user, address(token), AMOUNT, address(badTrain), cd, INTENT_NONCE, INTENT_DEADLINE,
       TrainRouter.Permit2612({ value: AMOUNT, deadline: type(uint256).max, v: v, r: r, s: s }), intentSig);
   }
 
   function test_authorization_RevertsOnNativeToken() public {
     vm.prank(relayer);
     vm.expectRevert(TrainRouter.NativeNotSupported.selector);
-    router.forwardWithAuthorization(user, address(0), AMOUNT, address(train), '',
+    router.forwardWithAuthorization(user, address(0), AMOUNT, address(train), '', INTENT_NONCE, INTENT_DEADLINE,
       TrainRouter.Authorization3009({ validAfter: 0, validBefore: type(uint256).max, v: 0, r: 0, s: 0 }));
   }
 
   function test_authorization_RevertsOnZeroUser() public {
     vm.prank(relayer);
     vm.expectRevert(TrainRouter.InvalidUser.selector);
-    router.forwardWithAuthorization(address(0), address(token3009), AMOUNT, address(train), '',
+    router.forwardWithAuthorization(address(0), address(token3009), AMOUNT, address(train), '', INTENT_NONCE, INTENT_DEADLINE,
       TrainRouter.Authorization3009({ validAfter: 0, validBefore: type(uint256).max, v: 0, r: 0, s: 0 }));
   }
 
   function test_permit2_RevertsOnNativeToken() public {
     vm.prank(relayer);
     vm.expectRevert(TrainRouter.NativeNotSupported.selector);
-    router.forwardWithPermit2(user, address(0), AMOUNT, address(train), '', address(permit2), _permit(), '');
+    router.forwardWithPermit2(user, address(0), AMOUNT, address(train), '', INTENT_NONCE, INTENT_DEADLINE, address(permit2), _permit(), '');
   }
 
   function test_permit2_RevertsOnZeroUser() public {
     vm.prank(relayer);
     vm.expectRevert(TrainRouter.InvalidUser.selector);
-    router.forwardWithPermit2(address(0), address(token), AMOUNT, address(train), '', address(permit2), _permit(), '');
+    router.forwardWithPermit2(address(0), address(token), AMOUNT, address(train), '', INTENT_NONCE, INTENT_DEADLINE, address(permit2), _permit(), '');
   }
 
   function test_views_intentDigest_matchesDomainWrappedHashIntent() public view {
     bytes memory cd = _callData(_params(address(token)), _dst());
-    bytes32 structHash = router.hashIntent(user, address(train), address(token), AMOUNT, keccak256(cd));
+    bytes32 structHash = router.hashIntent(user, address(train), address(token), AMOUNT, keccak256(cd), INTENT_NONCE, INTENT_DEADLINE);
     bytes32 expected = keccak256(abi.encodePacked('\x19\x01', router.DOMAIN_SEPARATOR(), structHash));
-    assertEq(router.intentDigest(user, address(train), address(token), AMOUNT, keccak256(cd)), expected);
+    assertEq(router.intentDigest(user, address(train), address(token), AMOUNT, keccak256(cd), INTENT_NONCE, INTENT_DEADLINE), expected);
   }
 
   function test_permit_FrontRunTolerated_AllowancePresent() public {
@@ -338,7 +359,7 @@ contract TrainRouterTest is Test {
 
     // Router's own permit() now reverts (nonce used) but is caught; transferFrom still succeeds.
     vm.prank(relayer);
-    router.forwardWithPermit(user, address(token), AMOUNT, address(train), cd,
+    router.forwardWithPermit(user, address(token), AMOUNT, address(train), cd, INTENT_NONCE, INTENT_DEADLINE,
       TrainRouter.Permit2612({ value: AMOUNT, deadline: type(uint256).max, v: v, r: r, s: s }), intentSig);
 
     _assertLanded(address(token));
@@ -352,14 +373,14 @@ contract TrainRouterTest is Test {
 
     bytes memory reentry = abi.encodeCall(
       TrainRouter.forwardWithPermit,
-      (user, address(token), AMOUNT, address(rTrain), cd,
+      (user, address(token), AMOUNT, address(rTrain), cd, INTENT_NONCE, INTENT_DEADLINE,
         TrainRouter.Permit2612({ value: AMOUNT, deadline: type(uint256).max, v: v, r: r, s: s }), intentSig)
     );
     rTrain.arm(address(router), reentry);
 
     vm.prank(relayer);
     vm.expectRevert(); // ReentrancyGuardReentrantCall bubbled through the malicious train
-    router.forwardWithPermit(user, address(token), AMOUNT, address(rTrain), cd,
+    router.forwardWithPermit(user, address(token), AMOUNT, address(rTrain), cd, INTENT_NONCE, INTENT_DEADLINE,
       TrainRouter.Permit2612({ value: AMOUNT, deadline: type(uint256).max, v: v, r: r, s: s }), intentSig);
   }
 }

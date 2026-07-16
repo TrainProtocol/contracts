@@ -13,7 +13,7 @@ contract DebugIntent is SepoliaConfig {
     ITrain.UserLockParams memory p = _userParamsI(_hashlock(_secret('dbg')), AMOUNT, 3600);
     ITrain.DestinationInfo memory d = _dstI();
     bytes memory cd = _callData(p, d);
-    bytes32 digest = router.intentDigest(user, address(train), address(USDC), AMOUNT, keccak256(cd));
+    bytes32 digest = router.intentDigest(user, address(train), address(USDC), AMOUNT, keccak256(cd), INTENT_NONCE, INTENT_DEADLINE);
     (uint8 v, bytes32 r, bytes32 s) = vm.sign(userPk, digest);
     bytes memory sig = abi.encodePacked(r, s, v);
     console.log('user      :', user);

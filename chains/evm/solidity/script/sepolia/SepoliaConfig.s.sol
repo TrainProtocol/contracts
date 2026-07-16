@@ -51,6 +51,10 @@ abstract contract SepoliaConfig is Script {
   uint256 internal constant NATIVE_AMOUNT = 0.0002 ether;
   uint256 internal constant NATIVE_REWARD = 0.0001 ether;
 
+  // ── intent replay params (nonce differentiates deliberate re-runs; deadline bounds intent lifetime) ──
+  uint256 internal constant INTENT_NONCE = 1;
+  uint256 internal constant INTENT_DEADLINE = type(uint256).max;
+
   // ── loaded config ──
   uint256 internal userPk;
   address internal user;
@@ -172,7 +176,8 @@ abstract contract SepoliaConfig is Script {
 
   // ── signing helpers (sign as `user`; verified equivalent in RouterFork.t.sol) ──
   function _signIntent(uint256 amount, bytes memory callData) internal view returns (bytes memory) {
-    bytes32 digest = router.intentDigest(user, address(train), address(USDC), amount, keccak256(callData));
+    bytes32 digest =
+      router.intentDigest(user, address(train), address(USDC), amount, keccak256(callData), INTENT_NONCE, INTENT_DEADLINE);
     (uint8 v, bytes32 r, bytes32 s) = vm.sign(userPk, digest);
     return abi.encodePacked(r, s, v);
   }

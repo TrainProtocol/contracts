@@ -95,8 +95,8 @@ contract TrainInvariantsTest is Test {
     vm.assume(a != b);
     bytes32 ch = keccak256(_callData(_params(address(token), 1 ether, bytes32(uint256(1))), _dst()));
     assertTrue(
-      router.hashIntent(user, a, address(token), 1 ether, ch) !=
-        router.hashIntent(user, b, address(token), 1 ether, ch)
+      router.hashIntent(user, a, address(token), 1 ether, ch, 0, type(uint256).max) !=
+        router.hashIntent(user, b, address(token), 1 ether, ch, 0, type(uint256).max)
     );
   }
 
@@ -104,8 +104,8 @@ contract TrainInvariantsTest is Test {
     vm.assume(a != b);
     bytes32 ch = keccak256(_callData(_params(address(token), 1 ether, bytes32(uint256(1))), _dst()));
     assertTrue(
-      router.hashIntent(user, address(train), address(token), a, ch) !=
-        router.hashIntent(user, address(train), address(token), b, ch)
+      router.hashIntent(user, address(train), address(token), a, ch, 0, type(uint256).max) !=
+        router.hashIntent(user, address(train), address(token), b, ch, 0, type(uint256).max)
     );
   }
 
@@ -116,9 +116,9 @@ contract TrainInvariantsTest is Test {
     token.mint(user, amount);
     bytes memory cd = _callData(_params(address(token), amount, keccak256('w')), _dst());
     (uint8 v, bytes32 r, bytes32 s) =
-      vm.sign(wrongPk, router.intentDigest(user, address(train), address(token), amount, keccak256(cd)));
+      vm.sign(wrongPk, router.intentDigest(user, address(train), address(token), amount, keccak256(cd), 0, type(uint256).max));
     vm.expectRevert(TrainRouter.InvalidIntentSignature.selector);
-    router.forwardWithPermit(user, address(token), amount, address(train), cd,
+    router.forwardWithPermit(user, address(token), amount, address(train), cd, 0, type(uint256).max,
       TrainRouter.Permit2612({ value: amount, deadline: type(uint256).max, v: 0, r: 0, s: 0 }), abi.encodePacked(r, s, v));
   }
 
@@ -128,8 +128,8 @@ contract TrainInvariantsTest is Test {
     bytes memory cd = _callData(_params(address(token), amount, keccak256('c')), _dst());
     (uint8 pv, bytes32 pr, bytes32 ps) = _signPermit(address(router), amount, type(uint256).max);
     (uint8 iv, bytes32 ir, bytes32 is_) =
-      vm.sign(userPk, router.intentDigest(user, address(train), address(token), amount, keccak256(cd)));
-    router.forwardWithPermit(user, address(token), amount, address(train), cd,
+      vm.sign(userPk, router.intentDigest(user, address(train), address(token), amount, keccak256(cd), 0, type(uint256).max));
+    router.forwardWithPermit(user, address(token), amount, address(train), cd, 0, type(uint256).max,
       TrainRouter.Permit2612({ value: amount, deadline: type(uint256).max, v: pv, r: pr, s: ps }),
       abi.encodePacked(ir, is_, iv));
     assertEq(train.getUserLock(keccak256('c')).amount, amount);

@@ -29,6 +29,10 @@ import { ISignatureTransfer } from './interfaces/ISignatureTransfer.sol';
 ///        malicious/broken `train` cannot strand user funds.
 ///      - Intent binding per standard: ERC-2612 uses a standalone EIP-712 intent signature; Permit2
 ///        binds via the witness; EIP-3009 binds via the nonce. All commit to `hashIntent(...)`.
+///      - Replay protection: every intent carries a user-chosen `nonce` and a `deadline`; its struct
+///        hash is recorded in `consumedIntent` and rejected on re-use across ALL paths, so a signed
+///        intent executes at most once. Vary the nonce to authorize a deliberate repeat of the same
+///        call; the deadline bounds how long an unused intent stays forwardable.
 ///      - Because the router does not inspect `callData`, the "correct recipient / amount / target"
 ///        guarantee comes entirely from the user's signature over the intent — the router only
 ///        guarantees it forwards exactly that call and custodies nothing.
@@ -49,6 +53,10 @@ contract TrainRouter is EIP712, ReentrancyGuardTransient {
   error InsufficientPulled();
   /// @notice Thrown when `train` did not consume exactly the pulled funds (residual left in router)
   error ResidualBalance();
+  /// @notice Thrown when the intent has already been consumed (replay attempt) on any path
+  error IntentAlreadyConsumed();
+  /// @notice Thrown when the intent deadline has passed (block.timestamp > deadline)
+  error IntentExpired();
 
   /// @notice Emitted when the router forwards a user-signed call to `train`.
   /// @param user The user whose funds were pulled and on whose behalf the call was forwarded.
@@ -69,13 +77,17 @@ contract TrainRouter is EIP712, ReentrancyGuardTransient {
   /// @notice The signed intent. `callHash` = keccak256(callData) binds the exact forwarded call
   ///         without the router needing to know the target's ABI.
   bytes32 private constant INTENT_TYPEHASH =
-    keccak256('Intent(address user,address train,address token,uint256 amount,bytes32 callHash)');
+    keccak256('Intent(address user,address train,address token,uint256 amount,bytes32 callHash,uint256 nonce,uint256 deadline)');
 
   /// @notice Permit2 witness type string: completes the PermitWitnessTransferFrom stub with the
   ///         `Intent witness` field, then appends the referenced struct types alphabetically
   ///         (Intent, TokenPermissions).
   string public constant WITNESS_TYPE_STRING =
-    'Intent witness)Intent(address user,address train,address token,uint256 amount,bytes32 callHash)TokenPermissions(address token,uint256 amount)';
+    'Intent witness)Intent(address user,address train,address token,uint256 amount,bytes32 callHash,uint256 nonce,uint256 deadline)TokenPermissions(address token,uint256 amount)';
+
+  /// @notice Intents already consumed, keyed by the full EIP-712 struct hash (includes nonce+deadline).
+  ///         Enforces single-use uniformly across the ERC-2612, EIP-3009, and Permit2 paths.
+  mapping(bytes32 => bool) public consumedIntent;
 
   /// @notice ERC-2612 permit signature components (value is the permitted allowance)
   struct Permit2612 {
@@ -106,6 +118,8 @@ contract TrainRouter is EIP712, ReentrancyGuardTransient {
   /// @param amount The amount to pull and approve to `train`.
   /// @param train The target contract to forward to (bound into the signed intent).
   /// @param callData The ABI-encoded call to execute on `train` (bound via keccak256 into the intent).
+  /// @param nonce User-chosen replay differentiator bound into the intent.
+  /// @param deadline Unix timestamp after which this intent can no longer be forwarded.
   /// @param permitData ERC-2612 permit (value/deadline/v/r/s) granting this router the allowance.
   /// @param intentSig The user's EIP-712 signature over the intent, verified before funds are pulled.
   function forwardWithPermit(
@@ -114,12 +128,17 @@ contract TrainRouter is EIP712, ReentrancyGuardTransient {
     uint256 amount,
     address train,
     bytes calldata callData,
+    uint256 nonce,
+    uint256 deadline,
     Permit2612 calldata permitData,
     bytes calldata intentSig
   ) external nonReentrant {
     _requireSupported(user, token);
 
-    bytes32 digest = _hashTypedDataV4(hashIntent(user, train, token, amount, keccak256(callData)));
+    bytes32 intentHash = hashIntent(user, train, token, amount, keccak256(callData), nonce, deadline);
+    _consumeIntent(intentHash, deadline);
+
+    bytes32 digest = _hashTypedDataV4(intentHash);
     if (!SignatureChecker.isValidSignatureNow(user, digest, intentSig)) revert InvalidIntentSignature();
 
     uint256 balBefore = IERC20(token).balanceOf(address(this));
@@ -141,6 +160,8 @@ contract TrainRouter is EIP712, ReentrancyGuardTransient {
   /// @param amount The amount to pull and approve to `train`.
   /// @param train The target contract to forward to (bound into the intent nonce).
   /// @param callData The ABI-encoded call to execute on `train`.
+  /// @param nonce User-chosen replay differentiator bound into the intent hash (the 3009 nonce).
+  /// @param deadline Unix timestamp after which this intent can no longer be forwarded.
   /// @param auth EIP-3009 window + signature; the nonce is forced to the intent hash.
   function forwardWithAuthorization(
     address user,
@@ -148,15 +169,18 @@ contract TrainRouter is EIP712, ReentrancyGuardTransient {
     uint256 amount,
     address train,
     bytes calldata callData,
+    uint256 nonce,
+    uint256 deadline,
     Authorization3009 calldata auth
   ) external nonReentrant {
     _requireSupported(user, token);
 
-    bytes32 nonce = hashIntent(user, train, token, amount, keccak256(callData));
+    bytes32 intentHash = hashIntent(user, train, token, amount, keccak256(callData), nonce, deadline);
+    _consumeIntent(intentHash, deadline);
 
     uint256 balBefore = IERC20(token).balanceOf(address(this));
     IERC3009(token).receiveWithAuthorization(
-      user, address(this), amount, auth.validAfter, auth.validBefore, nonce, auth.v, auth.r, auth.s
+      user, address(this), amount, auth.validAfter, auth.validBefore, intentHash, auth.v, auth.r, auth.s
     );
 
     _forward(user, train, token, amount, balBefore, callData);
@@ -169,6 +193,8 @@ contract TrainRouter is EIP712, ReentrancyGuardTransient {
   /// @param amount The amount to pull and approve to `train`.
   /// @param train The target contract to forward to (bound into the witness).
   /// @param callData The ABI-encoded call to execute on `train`.
+  /// @param nonce User-chosen replay differentiator bound into the intent hash (the Permit2 witness).
+  /// @param deadline Unix timestamp after which this intent can no longer be forwarded.
   /// @param permit2 The Permit2 contract to call (supplied per call; no hardcoded address).
   /// @param permit The Permit2 PermitTransferFrom; its token must equal `token` and amount >= `amount`.
   /// @param permit2Sig The user's Permit2 signature carrying the intent witness.
@@ -178,6 +204,8 @@ contract TrainRouter is EIP712, ReentrancyGuardTransient {
     uint256 amount,
     address train,
     bytes calldata callData,
+    uint256 nonce,
+    uint256 deadline,
     address permit2,
     ISignatureTransfer.PermitTransferFrom calldata permit,
     bytes calldata permit2Sig
@@ -185,14 +213,15 @@ contract TrainRouter is EIP712, ReentrancyGuardTransient {
     _requireSupported(user, token);
     if (permit.permitted.token != token || permit.permitted.amount < amount) revert Permit2Mismatch();
 
-    bytes32 witness = hashIntent(user, train, token, amount, keccak256(callData));
+    bytes32 intentHash = hashIntent(user, train, token, amount, keccak256(callData), nonce, deadline);
+    _consumeIntent(intentHash, deadline);
 
     uint256 balBefore = IERC20(token).balanceOf(address(this));
     ISignatureTransfer(permit2).permitWitnessTransferFrom(
       permit,
       ISignatureTransfer.SignatureTransferDetails({ to: address(this), requestedAmount: amount }),
       user,
-      witness,
+      intentHash,
       WITNESS_TYPE_STRING,
       permit2Sig
     );
@@ -209,15 +238,19 @@ contract TrainRouter is EIP712, ReentrancyGuardTransient {
   /// @param token The ERC20 to pull.
   /// @param amount The amount to pull.
   /// @param callHash keccak256 of the forwarded calldata.
+  /// @param nonce User-chosen replay differentiator (vary it to authorize a deliberate repeat).
+  /// @param deadline Unix timestamp after which the intent can no longer be forwarded.
   /// @return The EIP-712 struct hash of the intent.
   function hashIntent(
     address user,
     address train,
     address token,
     uint256 amount,
-    bytes32 callHash
+    bytes32 callHash,
+    uint256 nonce,
+    uint256 deadline
   ) public pure returns (bytes32) {
-    return keccak256(abi.encode(INTENT_TYPEHASH, user, train, token, amount, callHash));
+    return keccak256(abi.encode(INTENT_TYPEHASH, user, train, token, amount, callHash, nonce, deadline));
   }
 
   /// @notice The full EIP-712 digest signed in the ERC-2612 intent-signature path. Exposed for
@@ -228,9 +261,11 @@ contract TrainRouter is EIP712, ReentrancyGuardTransient {
     address train,
     address token,
     uint256 amount,
-    bytes32 callHash
+    bytes32 callHash,
+    uint256 nonce,
+    uint256 deadline
   ) external view returns (bytes32) {
-    return _hashTypedDataV4(hashIntent(user, train, token, amount, callHash));
+    return _hashTypedDataV4(hashIntent(user, train, token, amount, callHash, nonce, deadline));
   }
 
   /// @notice EIP-712 domain separator, exposed for off-chain signers and tests.
@@ -244,6 +279,16 @@ contract TrainRouter is EIP712, ReentrancyGuardTransient {
   function _requireSupported(address user, address token) private pure {
     if (user == address(0)) revert InvalidUser();
     if (token == address(0)) revert NativeNotSupported();
+  }
+
+  /// @dev Enforce intent expiry + single-use, then mark it consumed — BEFORE any external
+  ///      interaction (checks-effects-interactions; redundant with nonReentrant). A later revert in
+  ///      the same tx rolls back this write, so an intent is durably consumed only on a fully
+  ///      successful forward.
+  function _consumeIntent(bytes32 intentHash, uint256 deadline) private {
+    if (block.timestamp > deadline) revert IntentExpired();
+    if (consumedIntent[intentHash]) revert IntentAlreadyConsumed();
+    consumedIntent[intentHash] = true;
   }
 
   /// @dev Approve the untrusted `train` for EXACTLY `amount`, forward the user-signed `callData`,

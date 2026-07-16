@@ -229,7 +229,13 @@ contract Train is ReentrancyGuardTransient {
   /// @param refundTo The address the amount and reward were returned to.
   /// @param amount The principal amount returned.
   /// @param reward The reward returned.
-  event SolverRefunded(bytes32 indexed hashlock, uint256 indexed index, address refundTo, uint256 amount, uint256 reward);
+  event SolverRefunded(
+    bytes32 indexed hashlock,
+    uint256 indexed index,
+    address refundTo,
+    uint256 amount,
+    uint256 reward
+  );
 
   /// @notice Emitted when a user lock is redeemed with the secret preimage.
   /// @param hashlock The lock identifier (sha256 of the secret).
@@ -570,8 +576,9 @@ contract Train is ReentrancyGuardTransient {
     if (limit == 0 || offset >= total) {
       return (new bytes32[](0), total);
     }
-    uint256 end = offset + limit;
-    if (end > total) end = total;
+    // offset < total here (guarded above), so total - offset is safe; the else-branch runs only when
+    // limit <= total - offset, so offset + limit <= total and cannot overflow.
+    uint256 end = limit > total - offset ? total : offset + limit;
     uint256 size = end - offset;
     hashlocks = new bytes32[](size);
     for (uint256 i = 0; i < size; ) {
@@ -601,8 +608,9 @@ contract Train is ReentrancyGuardTransient {
     if (limit == 0 || offset >= total) {
       return (new UserLock[](0), total);
     }
-    uint256 end = offset + limit;
-    if (end > total) end = total;
+    // offset < total here (guarded above), so total - offset is safe; the else-branch runs only when
+    // limit <= total - offset, so offset + limit <= total and cannot overflow.
+    uint256 end = limit > total - offset ? total : offset + limit;
     uint256 size = end - offset;
     locks = new UserLock[](size);
     for (uint256 i = 0; i < size; ) {
@@ -691,7 +699,9 @@ contract Train is ReentrancyGuardTransient {
     uint48 startTime,
     bytes memory curveData
   ) internal view returns (uint256 payout) {
-    try IPayoutCurve(curve).computePayout(amount, startTime, uint48(block.timestamp), curveData) returns (uint256 result) {
+    try IPayoutCurve(curve).computePayout(amount, startTime, uint48(block.timestamp), curveData) returns (
+      uint256 result
+    ) {
       payout = result;
     } catch {
       revert InvalidPayout();
