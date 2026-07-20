@@ -7,15 +7,19 @@ skip-lint = false
 
 [programs.devnet]
 train_htlc = "2cQYFAiud2LBg3r6MxKPJ1oS83yyrRwDsgxQSwhL97LJ"
+constant_payout_curve = "Dp4ReoYGG8VRXpnst4vT8g6UDVwUicJwAuiikQWk8HMF"
+mock_decay_curve = "wmgDCMVreZ5xKv8NTg8rmkGPpb7bs5FHiToxqjc5yMr"
 
 [programs.localnet]
 train_htlc = "2cQYFAiud2LBg3r6MxKPJ1oS83yyrRwDsgxQSwhL97LJ"
+constant_payout_curve = "Dp4ReoYGG8VRXpnst4vT8g6UDVwUicJwAuiikQWk8HMF"
+mock_decay_curve = "wmgDCMVreZ5xKv8NTg8rmkGPpb7bs5FHiToxqjc5yMr"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "devnet"
+cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]

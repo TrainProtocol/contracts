@@ -1,554 +1,275 @@
-# Train HTLC - Solana Program
+# Train HTLC — Solana Program
 
-A unified Solana program for Hash Time-Locked Contracts (HTLC) enabling cross-chain atomic swaps. Supports native SOL and SPL tokens (including Token-2022), with optional different reward tokens for solver locks.
+A unified Solana program for Hash Time-Locked Contracts (HTLC) enabling cross-chain atomic swaps, at feature parity with the EVM `Train.sol` v2 contract (`chains/evm/solidity`). Supports native SOL and SPL tokens (including Token-2022), optional different reward tokens for solver locks, pluggable **payout curves**, and three **gasless / sponsored-transaction rails** replacing the EVM `TrainRouter`.
 
-**Program ID (devnet):** `2cQYFAiud2LBg3r6MxKPJ1oS83yyrRwDsgxQSwhL97LJ`
+**Program IDs (devnet):**
+
+| Program | ID |
+|---|---|
+| `train_htlc` | `2cQYFAiud2LBg3r6MxKPJ1oS83yyrRwDsgxQSwhL97LJ` |
+| `constant_payout_curve` | `Dp4ReoYGG8VRXpnst4vT8g6UDVwUicJwAuiikQWk8HMF` |
+| `mock_decay_curve` (test-only) | `wmgDCMVreZ5xKv8NTg8rmkGPpb7bs5FHiToxqjc5yMr` |
 
 ## Architecture
 
 The program implements a two-party atomic swap protocol between a **User** and a **Solver**:
 
-1. **User** creates a lock on the source chain with a hashlock (SHA-256 hash of a secret)
+1. **User** creates a lock on the source chain with a hashlock (`sha256(secret)`, secret is an opaque 32-byte string — byte-compatible with the EVM side's `sha256(abi.encodePacked(uint256 secret))`)
 2. **Solver** creates a corresponding lock on the destination chain using the same hashlock
 3. **User** redeems the solver's lock by revealing the secret
 4. **Solver** uses the revealed secret to redeem the user's lock
 
-If the swap doesn't complete, both parties can refund after their respective timelocks expire.
+If the swap doesn't complete, both parties can refund after their respective timelocks expire. Refunds always return the **full** amount (plus reward) to the lock's `refund_to` — never decayed, never to the caller.
 
-### Lock Types
+### Protocol invariants (mirrors the EVM invariant suite)
 
-| Variant | Description |
-|---------|-------------|
-| **SOL** | Native SOL transfers |
-| **Token** | SPL token with same token for amount and reward |
-| **Token Diff Reward** | SPL token with a different token for reward (two vaults) |
+- **Escrow solvency** — while `Pending`, each lock's vault (or lamport balance) holds exactly the measured amount (+ reward).
+- **Status machine** — `Empty → Pending → {Redeemed | Refunded}`; terminal states are final; settlement happens exactly once.
+- **Redeem authorization** — knowledge of the secret only; payout always to the stored `recipient`, excess to the stored `refund_to`, never to the caller.
+- **Reward routing** — before `reward_timelock` the reward goes to `reward_recipient`; at/after it, to the redeem caller (relayer bounty enabling gasless destination redemption).
+- **Payout curves** — `0 < payout ≤ amount`, so refunds/excess can never be inflated; the curve never touches rewards or refunds.
+- **Attribution vs custody** — `sender` is the owner-of-record only; custody keys off `recipient` / `refund_to`. A sponsor paying rent (`rent_payer`) gets rent back, never funds.
+- **Measured amounts** — stored/emitted `amount`/`reward` are the vault balance deltas (fee-on-transfer safe for Token-2022 transfer-fee mints).
+
+### Lock fields (parity with EVM `UserLock` / `SolverLock`)
+
+Both lock accounts store: `secret`, `amount` (measured), `sender`, `timelock`, `start_time`, `status`, `recipient`, `refund_to`, `token_mint`, `rent_payer`, `payout_curve` + `payout_curve_data` (≤ 256 bytes); solver locks additionally `reward` (measured), `reward_timelock`, `reward_recipient`, `reward_token_mint`.
 
 ### Account PDAs
 
 | Account | Seeds | Purpose |
 |---------|-------|---------|
-| UserLock | `["user_lock", hashlock]` | Stores user lock state |
+| UserLock | `["user_lock", hashlock]` | User lock state (doubles as SOL custody) |
 | UserVault | `["user_vault", hashlock]` | Token vault for user locks |
-| SolverLock | `["solver_lock", hashlock, index_le]` | Stores solver lock state |
+| SolverLock | `["solver_lock", hashlock, index_le]` | Solver lock state |
 | SolverVault | `["solver_vault", hashlock, index_le]` | Token vault for solver locks |
-| SolverRewardVault | `["solver_reward_vault", hashlock, index_le]` | Reward token vault (diff reward only) |
-| SolverLockCounter | `["solver_count", hashlock]` | Tracks solver lock index per hashlock |
+| SolverRewardVault | `["solver_reward_vault", hashlock, index_le]` | Reward vault (diff-reward only) |
+| SolverLockCounter | `["solver_count", hashlock]` | 1-based monotone index; **never closed** |
+| IntentDomain | `["intent_domain"]` | Per-deployment intent domain salt (EIP-712 chainId analog) |
+| Delegate | `["delegate"]` | SPL delegate authority for the intent rail (Permit2-allowance analog) |
+| ConsumedIntent | `["intent", user, nonce_le]` | Single-use intent replay guard |
 
-### Status Flow
+### Status flow
 
 ```
 EMPTY (0)   --> PENDING (1)    (lock created)
 PENDING (1) --> REDEEMED (3)   (secret revealed)
-PENDING (1) --> REFUNDED (2)   (timelock expired)
+PENDING (1) --> REFUNDED (2)   (recipient early-cancel, or timelock expired)
 ```
 
-## Instructions
+## Payout curves
 
-### Lock (5)
+A lock may declare a `payout_curve` program + config bytes. At redeem, the HTLC CPIs into the curve with **zero accounts and zero signers** (the Solana analog of the EVM `STATICCALL` — the curve can touch no state, and the runtime forbids re-entering the HTLC) and reads a `u64` payout from return data:
 
-| Instruction | Description |
-|-------------|-------------|
-| `user_lock_sol` | Lock native SOL as user |
-| `user_lock_token` | Lock SPL tokens as user |
-| `solver_lock_sol` | Lock native SOL as solver |
-| `solver_lock_token` | Lock SPL tokens as solver (same reward token) |
-| `solver_lock_token_diff_reward` | Lock SPL tokens as solver (different reward token) |
-
-### Redeem (5)
-
-| Instruction | Description |
-|-------------|-------------|
-| `redeem_user_sol` | Redeem user's SOL lock with secret |
-| `redeem_user_token` | Redeem user's token lock with secret |
-| `redeem_solver_sol` | Redeem solver's SOL lock with secret |
-| `redeem_solver_token` | Redeem solver's token lock with secret |
-| `redeem_solver_token_diff_reward` | Redeem solver's diff-reward token lock |
-
-### Refund (5)
-
-| Instruction | Description |
-|-------------|-------------|
-| `refund_user_sol` | Refund user's SOL lock after timelock |
-| `refund_user_token` | Refund user's token lock after timelock |
-| `refund_solver_sol` | Refund solver's SOL lock after timelock |
-| `refund_solver_token` | Refund solver's token lock after timelock |
-| `refund_solver_token_diff_reward` | Refund solver's diff-reward token lock |
-
-### Close (1)
-
-| Instruction | Description |
-|-------------|-------------|
-| `close_solver_lock` | Reclaim rent from redeemed/refunded solver lock (solver only) |
-
-> **Note:** User lock accounts are automatically closed during refund/redeem — rent returns to the user (sender). Solver lock accounts require an explicit close by the solver.
-
-### View (3)
-
-| Instruction | Description |
-|-------------|-------------|
-| `get_user_lock` | Query user lock state |
-| `get_solver_lock` | Query solver lock state |
-| `get_solver_lock_count` | Query solver lock count for a hashlock |
-
-## Prerequisites
-
-- [Solana CLI](https://docs.solanalabs.com/cli/install) configured for devnet
-- [Anchor CLI](https://www.anchor-lang.com/docs/installation) v0.32.1
-- Node.js >= 18
-
-Verify your setup:
-
-```bash
-solana config get          # should show devnet
-solana balance             # should have SOL for fees
-anchor --version           # should show 0.32.1
 ```
+compute_payout(amount: u64, start_time: u64, current_time: u64, config: Vec<u8>) -> u64
+```
+
+`0 < payout ≤ amount` is enforced; `payout` goes to `recipient`, `excess = amount − payout` to `refund_to`. At lock creation the curve account must match the declared id, be executable, and answer a probe call (the ERC-165-check analog). `constant_payout_curve` (payout = amount) ships with the protocol; `mock_decay_curve` exists for tests only.
+
+### Trust model
+
+**The `train_htlc` program is deployed immutable in production** (its upgrade
+authority is burned with `solana program set-upgrade-authority --final`). Once
+immutable, the program's own logic — including the standing-delegate spend path being
+reachable *only* through an intent-gated instruction — cannot be changed by anyone, so
+users granting a rail-C delegate approval are trusting fixed, audited code rather than
+a mutable deployment.
+
+**Payout-curve safety is intentionally an off-chain verification responsibility, on
+both sides.** The program does not (and deliberately does not try to) police which
+curve a lock uses — it only guarantees the curve is invoked with no accounts/no
+signers and its output is clamped to `0 < payout ≤ amount`. Everything else is a
+matter of each party vetting the curve *before* they commit value:
+
+- The `payout_curve` id and `payout_curve_data` are emitted in the `UserLocked` /
+  `SolverLocked` events, so both parties can inspect them off-chain.
+- A **solver** must verify the curve on a *user* lock before locking on the
+  destination chain, and a **user** must verify the curve on a *solver* lock before
+  revealing the secret. In particular each side should confirm the curve program is
+  **immutable** (upgrade authority burned) and audited — an *upgradeable* curve can
+  look benign at inspection time and be changed later to return `0`/`> amount`/revert,
+  which would brick the counterparty's redeem (funds are never lost — the lock
+  creator recovers via refund after the timelock — but the counterparty who already
+  performed on the other chain loses the trade).
+- The shipped `constant_payout_curve` (payout = amount, no decay) is the safe default
+  and is deployed `--final`. Any production curve should likewise be deployed
+  immutable. `mock_decay_curve` is test-only and must never be used in a real quote.
+
+This mirrors the EVM branch's curve trust assumption (no on-chain allowlist; recognize
+the curve before filling); the on-chain program provides containment (no state access,
+bounded output, no reentrancy), and off-chain quote validation provides the rest.
+
+## Gasless rails (EVM TrainRouter equivalent)
+
+The EVM `TrainRouter` exists because ERC-20s move only via allowance/signature standards (permit / EIP-3009 / Permit2). Solana's transaction model signs the *call itself*, so the three EVM rails collapse into three Solana-native ones — no standalone forwarder program, no arbitrary CPI, no router custody to conserve:
+
+| Rail | How it works | User signs | Replay guard |
+|---|---|---|---|
+| **A. Fee-payer sponsorship** | Every lock instruction splits `payer` (rent+fees) from `sender` (funds). Relayer is fee payer; user co-signs as `sender`. Partially-signed tx relay: user signs → relayer countersigns → broadcast. | the transaction | native tx-signature dedup |
+| **B. Durable nonce** | Rail A against a durable nonce account: no blockhash expiry, true offline/deferred signing. | the transaction (offline) | nonce advance |
+| **C. Signed intent** | One-time SPL `approve` of the `["delegate"]` PDA (≈ Permit2 max-allowance), then the user signs only the **sha256 digest of an off-chain intent message** (EIP-712 style); a relayer submits `[ed25519_verify, user_lock_token_with_intent]`. The program verifies the signature via instructions-sysvar introspection and pulls exactly the signed amount by delegate authority. | an off-chain 32-byte digest only | `ConsumedIntent` PDA keyed by `(user, nonce)` (`init` fails on reuse) + deadline |
+
+The rail-C intent message binds, byte-for-byte: domain tag `TRAIN_INTENT_V1\0`, program id, **per-deployment domain salt**, user, mint, amount, `call_hash = sha256(borsh(params) ‖ borsh(user_data) ‖ borsh(solver_data))`, nonce, deadline — the exact analog of the router's EIP-712 `Intent`. The user signs the message's sha256 digest (like signing an EIP-712 struct-hash digest; it also keeps the relayer transaction under Solana's 1232-byte packet limit). A malicious relayer can only execute the exact lock the user signed — the program rebuilds the message from the submitted arguments, so any tampering changes the digest and fails verification — at most once per `(user, nonce)`, before the deadline. Funds go straight user-ATA → lock vault, so there is no residual-custody surface (the EVM `ResidualBalance` check has no equivalent to need).
+
+The **domain salt** is the cross-cluster replay barrier (Solana programs cannot read a chain id): `initialize_intent_domain` may only be called by the program upgrade authority, once, with a distinct salt per cluster — do this immediately after deploying and before finalizing the upgrade authority. Consumed intents can be closed for rent **after their deadline** (`close_consumed_intent`, rent to the relayer that paid it); replay stays impossible because consumption requires `now ≤ deadline`.
+
+Rail C is SPL-only, mirroring the EVM router's ERC20-only rule; native SOL gasless flows use rails A/B.
+
+## Token-2022 policy
+
+The policy rejects only extensions that can cause **unrecoverable** loss, and accepts trusted-issuer capabilities that can merely *delay* settlement (matching the EVM branch's acceptance of USDC's freeze/blacklist).
+
+**Rejected at lock creation** (`UnsupportedMintExtension`):
+- **Permanent delegate** — the mint authority could seize tokens straight out of the escrow vault, silently breaking solvency (unrecoverable; no EVM analog).
+- **Transfer hook** — runs arbitrary third-party code on every transfer; a reverting hook can permanently brick refunds (unrecoverable).
+
+**Accepted** (documented issuer-trust risk — the caller must trust the issuer, exactly as they already do for USDC):
+- **Pausable**, base-field **freeze authority**, **DefaultAccountState** — a trusted issuer can pause/freeze transfers, which *delays* redeem/refund but loses nothing: once unpaused/thawed both paths work, and the timelock/refund still returns funds. Regulated Token-2022 stablecoins (e.g. PYUSD, EURC) rely on these, so they remain usable.
+- **Transfer fee** — accepted with measured-received accounting; the vault close is tolerant of the withheld-fee balance so settlement never bricks (orphaned vault rent is recoverable out-of-band via harvest-then-close).
+
+Note: classic SPL Token mints (including mainnet USDC) carry no extensions and bypass this check entirely.
+
+## Documented deviations from the EVM contract
+
+| Topic | EVM | Solana | Why |
+|---|---|---|---|
+| Hashlock uniqueness | Reserved forever (`SwapAlreadyExists`) | Enforced only while the lock account exists; settled user locks **close** (full rent recovery), so a settled hashlock is reusable-by-convention | No on-chain loss path for correct participants (redeem pays the stored recipient only); replay protection never depends on it (rails A/B: tx dedup; rail C: ConsumedIntent). Off-chain matchers must not key on hashlock alone — use (hashlock, lock-creation signature). Solver-side indices stay chain-unique (counter never closes). |
+| Swap history | On-chain `userLockHashes` + paginated getters | Anchor events + `getProgramAccounts` (memcmp on `sender`) for live locks | On-chain per-user arrays are a rent-funded anti-pattern; events are the canonical indexer surface on both chains |
+| Rent / `rent_payer` | n/a | Locks store who paid rent; all closes return rent there | Sponsored flows must not leak relayer rent to users |
+| Amount width | `uint256` | `u64` (SPL native); cross-chain descriptor fields are `u128` | Platform native |
+| Reentrancy guard | `ReentrancyGuardTransient` | none needed | Runtime forbids CPI re-entry; state still flips before any CPI |
+| Solver lock index | computed+returned on-chain | client passes `index == count+1` (PDA derivation), losers of a race retry | PDA addresses must be known pre-transaction |
+
+## Instructions (22)
+
+### Locks (6)
+
+| Instruction | Description |
+|-------------|-------------|
+| `user_lock_sol` | Lock native SOL as user (`payer`/`sender` split) |
+| `user_lock_token` | Lock SPL/Token-2022 tokens as user |
+| `user_lock_token_with_intent` | Rail C: lock user tokens from a signed off-chain intent (relayer-submitted) |
+| `solver_lock_sol` | Lock native SOL (+ SOL reward) as solver |
+| `solver_lock_token` | Lock tokens, same-token reward (single vault) |
+| `solver_lock_token_diff_reward` | Lock tokens with a different reward mint (two vaults) |
+
+### Redeems (5)
+
+`redeem_user_sol`, `redeem_user_token`, `redeem_solver_sol`, `redeem_solver_token`, `redeem_solver_token_diff_reward` — permissionless with the secret; payout/curve-excess/reward routing as per the invariants above.
+
+### Refunds (5)
+
+`refund_user_sol`, `refund_user_token` (recipient anytime, others after timelock), `refund_solver_sol`, `refund_solver_token`, `refund_solver_token_diff_reward` (anyone, after timelock). Full amount to `refund_to`.
+
+### Intent & lifecycle (3)
+
+| Instruction | Description |
+|-------------|-------------|
+| `initialize_intent_domain` | One-time per deployment, upgrade authority only: sets the intent domain salt |
+| `close_consumed_intent` | After an intent's deadline: reclaim the replay-guard rent to its payer |
+| `close_solver_lock` | Sender/rent-payer reclaims rent from a settled solver lock |
+
+### Views (3)
+
+`get_user_lock`, `get_solver_lock`, `get_solver_lock_count`.
+
+## Actor roles
+
+The protocol has a **user** (source-side depositor), a **solver** (destination-side
+depositor), and a **relayer** (pays gas/rent and submits gasless/redeem transactions).
+The invariant is that **the token/SOL depositor is never the gas payer** — every lock
+instruction separates `payer` (rent + fees) from `sender` (funds authority).
+
+The test/E2E harness maps these to the three funded devnet keypairs in `.env`:
+
+| Role | Keypair (`.env`) | Responsibilities |
+|---|---|---|
+| relayer / fee-payer / redeemer + mint authority | `DEFAULT_KEY` | pays all fees & rent, submits gasless + redeem txs, creates mints |
+| user (source depositor) | `SOLVER_KEY` | holds tokens; creates user locks; authorizes debits but pays no fees |
+| solver (destination depositor) | `THIRDPARTY_KEY` | holds tokens; creates solver locks |
+
+`recipient` / `refund_to` / `reward_recipient` are set to the natural swap counterparty
+among these three (e.g. a user lock's recipient is the solver; its refund_to is the user).
 
 ## Setup
 
 ```bash
 cd chains/solana
 npm install
+cp .env.example .env    # then fill in the three funded devnet keypairs + RPC
 ```
 
-## Build
+`.env` (gitignored) holds `DEFAULT_KEY`, `SOLVER_KEY`, `THIRDPARTY_KEY` (JSON
+byte-array secret keys) and `ANCHOR_PROVIDER_URL`. See `.env.example` for the exact
+format and the role each key plays.
+
+Requirements: Anchor 0.32.1, Solana CLI v2.x, Node 22.
+
+## Building & testing
 
 ```bash
-anchor build
+anchor build          # builds train_htlc + both curve programs
+anchor test           # localnet: core suite + gasless rails + adversarial matrix
 ```
 
-## Testing
+The local suite (`tests/`) — **61 passing** — covers every instruction happy-path plus:
+payout-curve bounds and account-substitution rejections, the variant-confusion guard
+(token lock via a SOL settlement path), the hashlock-reuse deviation (pinned behavior),
+a cross-chain secret→hashlock byte vector, and an adversarial matrix per gasless rail —
+tampered transactions, replays (tx, nonce, intent), attacker-substituted signatures,
+spoofed instructions sysvar, expired intents, delegate over-pull, wrong fee payer.
 
-Run the full automated test suite against a local validator:
+## Devnet end-to-end
 
 ```bash
-anchor test
+# one-time after deploy (upgrade authority):  initialize the intent domain
+npx ts-node scripts/gasless/init-intent-domain.ts <per-cluster-salt>
+
+# full E2E across every flow, happy + unhappy, with production actor separation:
+npx ts-node scripts/devnet-e2e.ts
 ```
 
-This builds the program, starts a local validator, deploys the program, and runs all tests. No manual setup required.
-
-## Scripts
-
-All scripts are in `scripts/` and run via `npx ts-node`. They use your Solana CLI wallet (`~/.config/solana/id.json`) and connect to devnet by default.
-
-### Manual Devnet Testing
-
-#### Wallet Setup
-
-All keypairs are stored in the `.env` file (git-ignored). The file contains three wallets used for testing different roles:
-
-| Variable | Role | Description |
-|----------|------|-------------|
-| `DEFAULT_KEY` | User | Your default Solana CLI wallet. Creates user locks. |
-| `SOLVER_KEY` | Solver | Creates solver locks, closes solver lock accounts. |
-| `THIRDPARTY_KEY` | Third Party | Simulates an external caller (e.g. redeemer). |
-
-**Generating wallets:**
-
-```bash
-# Your default wallet is at ~/.config/solana/id.json
-# Back up its keypair array to .env:
-cat ~/.config/solana/id.json
-# Copy the JSON array and add to .env as: DEFAULT_KEY=[...]
-
-# Generate additional wallets:
-solana-keygen new -o /tmp/solver.json --no-bip39-passphrase
-cat /tmp/solver.json
-# Copy the array to .env as: SOLVER_KEY=[...]
-
-solana-keygen new -o /tmp/thirdparty.json --no-bip39-passphrase
-cat /tmp/thirdparty.json
-# Copy the array to .env as: THIRDPARTY_KEY=[...]
-```
-
-**`.env` file format:**
-
-```bash
-# Default wallet (AR7DUwfrf17iir72oauSPJMqgYzboALej8a7f9yqnA4F)
-DEFAULT_KEY=[74,40,67,...]
-
-# RPC
-ANCHOR_PROVIDER_URL=https://api.devnet.solana.com
-
-# Solver wallet (BKTxkxMsNpKmmtzKpA4c3gp6B8wvPrTDGJFp2mp1Gw6u)
-SOLVER_KEY=[253,115,70,...]
-
-# Third party wallet (8nvF65SJpPuJ36shzCNqZ3rtcz33cqsBpWsLyfaF6c8A)
-THIRDPARTY_KEY=[107,79,81,...]
-```
-
-**Switching wallets when running scripts:**
-
-Use the `WALLET` env var to select a wallet by name. The scripts load the keypair directly from `.env` — no temp files needed:
-
-```bash
-# Run as default wallet (no WALLET var needed)
-npx ts-node scripts/user-lock-sol.ts ...
-
-# Run as solver
-WALLET=solver npx ts-node scripts/solver-lock-sol.ts ...
-
-# Run as third party
-WALLET=thirdparty npx ts-node scripts/redeem-user-sol.ts ...
-```
-
-Valid wallet names: `default`, `solver`, `thirdparty`.
-
-> **Note:** Never commit `.env` or keypair files. Both `.env` and `keys/` are in `.gitignore`.
-
-#### Token Setup
-
-For token tests, create two SPL token mints:
-
-```bash
-# Create token A (amount token)
-spl-token create-token
-# Output: Creating token <TOKEN_A_MINT>
-
-# Create token B (reward token, for diff-reward tests)
-spl-token create-token
-# Output: Creating token <TOKEN_B_MINT>
-
-# Create token accounts and mint some tokens to yourself
-spl-token create-account <TOKEN_A_MINT>
-spl-token mint <TOKEN_A_MINT> 1000000000    # 1B base units
-
-spl-token create-account <TOKEN_B_MINT>
-spl-token mint <TOKEN_B_MINT> 1000000000
-```
-
-Save these values for use in the examples below:
-
-```
-TOKEN_A=<token A mint>
-TOKEN_B=<token B mint>
-```
-
----
-
-### Test 1: User Lock SOL (lock + redeem)
-
-```bash
-# Step 1: Lock 0.001 SOL with 5 min timelock
-npx ts-node scripts/user-lock-sol.ts 1000000 300 $RECIPIENT
-# Save the SECRET and HASHLOCK from output
-
-# Step 2: Verify the lock
-npx ts-node scripts/get-user-lock.ts $HASHLOCK
-# Should show: status=PENDING, amount=1000000
-
-# Step 3: Redeem with the secret
-npx ts-node scripts/redeem-user-sol.ts $HASHLOCK $SECRET
-
-# Step 4: Verify status changed
-npx ts-node scripts/get-user-lock.ts $HASHLOCK
-# Should show: status=REDEEMED
-
-# Step 5: Reclaim rent
-# User lock is auto-closed during redeem/refund — no separate close needed
-```
-
-### Test 2: User Lock SOL (lock + refund after timelock)
-
-```bash
-# Step 1: Lock with short timelock (60 seconds)
-npx ts-node scripts/user-lock-sol.ts 1000000 60 $RECIPIENT
-
-# Step 2: Wait 60+ seconds for timelock to expire
-
-# Step 3: Refund
-npx ts-node scripts/refund-user-sol.ts $HASHLOCK
-
-# Step 4: Verify and cleanup
-npx ts-node scripts/get-user-lock.ts $HASHLOCK
-# Should show: status=REFUNDED
-# User lock is auto-closed during redeem/refund — no separate close needed
-```
-
-### Test 3: User Lock Token (lock + redeem)
-
-```bash
-# Step 1: Lock 1000 tokens with 5 min timelock
-npx ts-node scripts/user-lock-token.ts $TOKEN_A 1000 300 $RECIPIENT
-
-# Step 2: Verify
-npx ts-node scripts/get-user-lock.ts $HASHLOCK
-# Should show: status=PENDING, token_mint=TOKEN_A
-
-# Step 3: Redeem
-npx ts-node scripts/redeem-user-token.ts $HASHLOCK $SECRET $TOKEN_A
-
-# Step 4: Cleanup
-# User lock is auto-closed during redeem/refund — no separate close needed
-```
-
-### Test 4: User Lock Token (lock + refund)
-
-```bash
-# Step 1: Lock with short timelock
-npx ts-node scripts/user-lock-token.ts $TOKEN_A 1000 60 $RECIPIENT
-
-# Step 2: Wait 60+ seconds
-
-# Step 3: Refund
-npx ts-node scripts/refund-user-token.ts $HASHLOCK $TOKEN_A
-
-# Step 4: Cleanup
-# User lock is auto-closed during redeem/refund — no separate close needed
-```
-
-### Test 5: Solver Lock SOL (lock + redeem + close)
-
-```bash
-# Step 1: Create a user lock first (to get a hashlock)
-npx ts-node scripts/user-lock-sol.ts 1000000 300 $RECIPIENT
-# Save SECRET and HASHLOCK
-
-# Step 2: Solver locks SOL against the same hashlock
-# amount=500000, reward=100000, timelock=1800s, reward_timelock=900s
-npx ts-node scripts/solver-lock-sol.ts $HASHLOCK 500000 100000 1800 900 $RECIPIENT $WALLET
-
-# Step 3: Check solver lock count and state
-npx ts-node scripts/get-solver-lock-count.ts $HASHLOCK
-# Should show: Count=1, Next Index=2
-npx ts-node scripts/get-solver-lock.ts $HASHLOCK 1
-
-# Step 4: Redeem solver lock with the secret
-npx ts-node scripts/redeem-solver-sol.ts $HASHLOCK 1 $SECRET
-
-# Step 5: Cleanup
-npx ts-node scripts/close-solver-lock.ts $HASHLOCK 1
-```
-
-### Test 6: Solver Lock SOL (lock + refund)
-
-```bash
-# Step 1: Create user lock
-npx ts-node scripts/user-lock-sol.ts 1000000 300 $RECIPIENT
-
-# Step 2: Solver lock with short timelock (60s)
-npx ts-node scripts/solver-lock-sol.ts $HASHLOCK 500000 0 60 0 $RECIPIENT $WALLET
-
-# Step 3: Wait 60+ seconds
-
-# Step 4: Refund
-npx ts-node scripts/refund-solver-sol.ts $HASHLOCK 1
-
-# Step 5: Cleanup
-npx ts-node scripts/close-solver-lock.ts $HASHLOCK 1
-```
-
-### Test 7: Solver Lock Token — same reward token (lock + redeem)
-
-```bash
-# Step 1: Create user lock to get hashlock
-npx ts-node scripts/user-lock-sol.ts 1000000 300 $RECIPIENT
-
-# Step 2: Solver locks tokens (amount + reward are same token)
-# amount=1000, reward=200, timelock=1800s, reward_timelock=900s
-npx ts-node scripts/solver-lock-token.ts $HASHLOCK $TOKEN_A 1000 200 1800 900 $RECIPIENT $WALLET
-
-# Step 3: Verify
-npx ts-node scripts/get-solver-lock.ts $HASHLOCK 1
-# Should show: token_mint=TOKEN_A, reward_token_mint=same
-
-# Step 4: Redeem
-npx ts-node scripts/redeem-solver-token.ts $HASHLOCK 1 $SECRET $TOKEN_A
-
-# Step 5: Cleanup
-npx ts-node scripts/close-solver-lock.ts $HASHLOCK 1
-```
-
-### Test 8: Solver Lock Token — same reward token (lock + refund)
-
-```bash
-npx ts-node scripts/user-lock-sol.ts 1000000 300 $RECIPIENT
-npx ts-node scripts/solver-lock-token.ts $HASHLOCK $TOKEN_A 1000 200 60 30 $RECIPIENT $WALLET
-
-# Wait 60+ seconds
-npx ts-node scripts/refund-solver-token.ts $HASHLOCK 1 $TOKEN_A
-npx ts-node scripts/close-solver-lock.ts $HASHLOCK 1
-```
-
-### Test 9: Solver Lock Token — different reward token (lock + redeem)
-
-This uses **two different tokens**: TOKEN_A for the amount and TOKEN_B for the reward. The program creates two separate vaults.
-
-```bash
-# Step 1: Create user lock to get hashlock
-npx ts-node scripts/user-lock-sol.ts 1000000 300 $RECIPIENT
-
-# Step 2: Solver locks with different reward token
-# amount=1000 TOKEN_A, reward=500 TOKEN_B, timelock=1800s, reward_timelock=900s
-npx ts-node scripts/solver-lock-token-diff-reward.ts $HASHLOCK $TOKEN_A $TOKEN_B 1000 500 1800 900 $RECIPIENT $WALLET
-
-# Step 3: Verify
-npx ts-node scripts/get-solver-lock.ts $HASHLOCK 1
-# Should show: token_mint=TOKEN_A, reward_token_mint=TOKEN_B
-
-# Step 4: Redeem (needs both mints)
-npx ts-node scripts/redeem-solver-token-diff-reward.ts $HASHLOCK 1 $SECRET $TOKEN_A $TOKEN_B
-
-# Step 5: Cleanup
-npx ts-node scripts/close-solver-lock.ts $HASHLOCK 1
-```
-
-### Test 10: Solver Lock Token — different reward token (lock + refund)
-
-```bash
-npx ts-node scripts/user-lock-sol.ts 1000000 300 $RECIPIENT
-npx ts-node scripts/solver-lock-token-diff-reward.ts $HASHLOCK $TOKEN_A $TOKEN_B 1000 500 60 30 $RECIPIENT $WALLET
-
-# Wait 60+ seconds
-npx ts-node scripts/refund-solver-token-diff-reward.ts $HASHLOCK 1 $TOKEN_A $TOKEN_B
-npx ts-node scripts/close-solver-lock.ts $HASHLOCK 1
-```
-
-### Test 11: Multiple solver locks per hashlock
-
-The program supports multiple solver locks for the same hashlock. The counter tracks the index.
-
-```bash
-npx ts-node scripts/user-lock-sol.ts 1000000 300 $RECIPIENT
-
-# First solver lock (index=1)
-npx ts-node scripts/solver-lock-sol.ts $HASHLOCK 500000 0 1800 0 $RECIPIENT $WALLET
-npx ts-node scripts/get-solver-lock-count.ts $HASHLOCK
-# Count: 1
-
-# Second solver lock (index=2)
-npx ts-node scripts/solver-lock-sol.ts $HASHLOCK 300000 0 1800 0 $RECIPIENT $WALLET
-npx ts-node scripts/get-solver-lock-count.ts $HASHLOCK
-# Count: 2
-
-# Redeem both
-npx ts-node scripts/redeem-solver-sol.ts $HASHLOCK 1 $SECRET
-npx ts-node scripts/redeem-solver-sol.ts $HASHLOCK 2 $SECRET
-
-# Cleanup both
-npx ts-node scripts/close-solver-lock.ts $HASHLOCK 1
-npx ts-node scripts/close-solver-lock.ts $HASHLOCK 2
-```
-
-### Script Reference
-
-| Script | Arguments |
-|--------|-----------|
-| `user-lock-sol.ts` | `<amount_lamports> <timelock_delta_secs> <recipient>` |
-| `user-lock-token.ts` | `<token_mint> <amount> <timelock_delta> <recipient>` |
-| `solver-lock-sol.ts` | `<hashlock> <amount> <reward> <tl_delta> <rtl_delta> <recipient> <reward_recipient>` |
-| `solver-lock-token.ts` | `<hashlock> <token_mint> <amount> <reward> <tl_delta> <rtl_delta> <recipient> <reward_recipient>` |
-| `solver-lock-token-diff-reward.ts` | `<hashlock> <token_mint> <reward_token_mint> <amount> <reward> <tl_delta> <rtl_delta> <recipient> <reward_recipient>` |
-| `refund-user-sol.ts` | `<hashlock>` |
-| `refund-user-token.ts` | `<hashlock> <token_mint>` |
-| `refund-solver-sol.ts` | `<hashlock> <index>` |
-| `refund-solver-token.ts` | `<hashlock> <index> <token_mint>` |
-| `refund-solver-token-diff-reward.ts` | `<hashlock> <index> <token_mint> <reward_token_mint>` |
-| `redeem-user-sol.ts` | `<hashlock> <secret>` |
-| `redeem-user-token.ts` | `<hashlock> <secret> <token_mint>` |
-| `redeem-solver-sol.ts` | `<hashlock> <index> <secret>` |
-| `redeem-solver-token.ts` | `<hashlock> <index> <secret> <token_mint>` |
-| `redeem-solver-token-diff-reward.ts` | `<hashlock> <index> <secret> <token_mint> <reward_token_mint>` |
-| `close-solver-lock.ts` | `<hashlock> <index>` |
-| `get-user-lock.ts` | `<hashlock>` |
-| `get-solver-lock.ts` | `<hashlock> <index>` |
-| `get-solver-lock-count.ts` | `<hashlock>` |
-
-All hashlock and secret arguments are hex strings (64 characters). Amounts are in base units (lamports for SOL, smallest unit for tokens).
-
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `WALLET` | *(unset — uses default wallet)* | Named wallet from `.env`: `default`, `solver`, `thirdparty` |
-| `ANCHOR_WALLET` | `~/.config/solana/id.json` | Path to wallet keypair file (fallback if `WALLET` is not set) |
-| `ANCHOR_PROVIDER_URL` | `https://api.devnet.solana.com` | RPC endpoint |
+`scripts/devnet-e2e.ts` runs **every** flow against devnet using the three funded
+`.env` keypairs as real, distinct swap parties (depositor ≠ gas payer on every flow):
+each deposit rail, each gasless rail (A fee-payer sponsorship, B durable nonce, C signed
+intent), settlement, refunds, payout curves, and views — happy paths **and** unhappy
+paths. It **never funds or sweeps** the wallets (only a balance precheck); fresh mints
+are created per run, so it is idempotent. Every happy path lands a success transaction;
+every landable negative case lands as a real **failed** transaction (submitted with
+`skipPreflight`) with an explorer link and the on-chain error; the few failures that are
+rejected before landing (bad signature, replayed tx, expired durable nonce) are recorded
+with the reason. It writes **`docs/e2e-devnet-report.md`** (+ a `.json`) and prints a
+summary.
+
+### Latest E2E results
+
+Run of 2026-07-20 against devnet: **15/15 flows PASS, 0 failures** — 36 successful
+transactions, 19 negative cases landed on-chain as expected `REVERTED` transactions, 3
+pre-landing rejections documented. Every transaction is explorer-verifiable in
+[`docs/e2e-devnet-report.md`](docs/e2e-devnet-report.md).
 
 ## Deployment
 
-### Sync program keys
-
-Before building, always sync the program ID so that `declare_id!` in the source code matches the keypair you'll deploy with. If these don't match, every on-chain call will fail with `DeclaredProgramIdMismatch`.
-
 ```bash
-anchor keys sync
 anchor build
+anchor deploy --provider.cluster devnet            # deploys all three programs
+npx ts-node scripts/gasless/init-intent-domain.ts <per-cluster-salt>
+# production hardening (irreversible):
+solana program set-upgrade-authority <PROGRAM_ID> --final
 ```
 
-If you need a fresh program address (e.g. previous deployment is bricked), generate a new keypair first:
+Initialize the intent domain **before** finalizing the upgrade authority, with a different salt per cluster. Note: `mock_decay_curve` is for testing only — do not deploy it to mainnet.
 
-```bash
-solana-keygen new -o target/deploy/train_htlc-keypair.json --force --no-bip39-passphrase
-anchor keys sync
-anchor build
-```
+## Script reference
 
-### Build verifiable binary
+Operational scripts live in `scripts/` (one per instruction; run with `npx ts-node scripts/<name>.ts`, wallet selection via `WALLET=default|solver|thirdparty|user` + `.env` keys). Gasless flows live in `scripts/gasless/`:
 
-```bash
-solana-verify build
-```
-
-### Deploy to devnet
-
-> **IMPORTANT:** Always include `--program-id` to deploy to the correct address. Without it, Solana generates a random new address that won't match `declare_id!`.
-
-```bash
-solana program deploy target/deploy/train_htlc.so \
-  --program-id target/deploy/train_htlc-keypair.json \
-  --with-compute-unit-price 10000 \
-  --max-sign-attempts 50
-```
-
-Verify the deployed address matches:
-
-```bash
-solana address -k target/deploy/train_htlc-keypair.json
-```
-
-If you accidentally deployed without `--program-id`, reclaim the SOL:
-
-```bash
-solana program close <WRONG_ADDRESS>
-```
-
-Add `--final` for non-upgradeable (immutable) deployment. Only do this after testing — it is irreversible.
-
-### Verify deployed program
-
-```bash
-# Compare local and on-chain hashes
-solana-verify get-executable-hash target/deploy/train_htlc.so
-solana-verify get-program-hash <PROGRAM_ID>
-
-# Submit for public verification
-solana-verify verify-from-repo \
-  --remote -ud \
-  --program-id <PROGRAM_ID> \
-  https://github.com/TrainProtocol/contracts \
-  --commit-hash <COMMIT> \
-  --library-name train_htlc \
-  --mount-path chains/solana
-```
-
-### Make program non-upgradeable
-
-Once you've finished testing and are confident the program works correctly, revoke the upgrade authority to make it immutable:
-
-```bash
-solana program set-upgrade-authority target/deploy/train_htlc-keypair.json --final
-```
-
-This is **irreversible**. After this, the program can never be changed, upgraded, or closed by anyone — including you. Verify the result:
-
-```bash
-solana program show <PROGRAM_ID>
-# Should show: Authority: none
-```
-
-### Recover SOL from failed deployment
-
-```bash
-solana program show --buffers        # list orphaned buffers
-solana program close --buffers       # reclaim SOL
-```
+| Script | Purpose |
+|---|---|
+| `gasless/approve-delegate.ts` | One-time SPL delegation to the program delegate PDA (rail C prerequisite) |
+| `gasless/init-intent-domain.ts` | Initialize the per-cluster intent domain salt (upgrade authority) |
+| `gasless/rail-a-sponsored-lock.ts` | Fee-payer sponsorship demo (partially-signed relay) |
+| `gasless/rail-b-durable-nonce.ts` | Durable-nonce offline signing demo |
+| `gasless/rail-c-intent-lock.ts` | Signed-intent lock demo (user signs a message digest, not a transaction) |
+| `gasless/close-consumed-intent.ts` | Reclaim replay-guard rent after an intent's deadline (`<user> <nonce>`) |

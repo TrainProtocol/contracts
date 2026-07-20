@@ -1,10 +1,13 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program, AnchorProvider, BN, Idl } from "@coral-xyz/anchor";
-import { PublicKey, Connection, Keypair, clusterApiUrl } from "@solana/web3.js";
+import {
+  PublicKey, Connection, Keypair, clusterApiUrl, Ed25519Program,
+} from "@solana/web3.js";
 import { createHash } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import * as dotenv from "dotenv";
+import nacl from "tweetnacl";
 
 // Load .env from project root
 dotenv.config({ path: path.join(__dirname, "..", ".env") });
@@ -20,7 +23,18 @@ const WALLET_ENV_MAP: Record<string, string> = {
   default: "DEFAULT_KEY",
   solver: "SOLVER_KEY",
   thirdparty: "THIRDPARTY_KEY",
+  user: "USER_KEY",
 };
+
+/** Load a keypair from a named .env variable (e.g. "USER_KEY"). */
+export function loadWalletFromEnv(envVar: string): Keypair {
+  const raw = process.env[envVar];
+  if (!raw) {
+    console.error(`${envVar} not found in .env`);
+    process.exit(1);
+  }
+  return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(raw)));
+}
 
 /**
  * Load a wallet keypair. Resolution order:
@@ -83,6 +97,14 @@ export async function fetchSolverLockCounter(program: Program<Idl>, pda: PublicK
   return (program.account as any).solverLockCounter.fetch(pda);
 }
 
+export async function fetchIntentDomain(program: Program<Idl>, pda: PublicKey): Promise<any> {
+  return (program.account as any).intentDomain.fetch(pda);
+}
+
+export async function fetchConsumedIntent(program: Program<Idl>, pda: PublicKey): Promise<any> {
+  return (program.account as any).consumedIntent.fetch(pda);
+}
+
 // PDA derivation helpers
 export function deriveUserLockPDA(hashlock: Buffer): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
@@ -139,6 +161,185 @@ export function deriveSolverCountPDA(hashlock: Buffer): [PublicKey, number] {
     [Buffer.from("solver_count"), hashlock],
     PROGRAM_ID
   );
+}
+
+export const BPF_LOADER_UPGRADEABLE_ID = new PublicKey(
+  "BPFLoaderUpgradeab1e11111111111111111111111"
+);
+
+export function deriveIntentDomainPDA(): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("intent_domain")],
+    PROGRAM_ID
+  );
+}
+
+export function deriveDelegatePDA(): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([Buffer.from("delegate")], PROGRAM_ID);
+}
+
+export function deriveConsumedIntentPDA(
+  user: PublicKey,
+  nonce: number | bigint
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("intent"), user.toBuffer(), u64Le(nonce)],
+    PROGRAM_ID
+  );
+}
+
+export function deriveProgramDataPDA(): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [PROGRAM_ID.toBuffer()],
+    BPF_LOADER_UPGRADEABLE_ID
+  );
+}
+
+// ─── Params builders ───────────────────────────────────────────────────────────
+
+export interface UserLockParamsInput {
+  hashlock: number[];
+  amount: InstanceType<typeof BN> | number | string;
+  timelockDelta?: InstanceType<typeof BN> | number | string;
+  quoteExpiry?: InstanceType<typeof BN> | number | string;
+  recipient: PublicKey;
+  refundTo: PublicKey;
+  payoutCurve?: PublicKey;
+  payoutCurveData?: Buffer;
+}
+
+export function userLockParams(
+  input: UserLockParamsInput,
+  overrides: Record<string, unknown> = {}
+) {
+  return {
+    hashlock: input.hashlock,
+    amount: new BN(input.amount),
+    timelockDelta: new BN(input.timelockDelta ?? 3600),
+    quoteExpiry: new BN(input.quoteExpiry ?? Math.floor(Date.now() / 1000) + 600),
+    recipient: input.recipient,
+    refundTo: input.refundTo,
+    payoutCurve: input.payoutCurve ?? PublicKey.default,
+    payoutCurveData: input.payoutCurveData ?? Buffer.from([]),
+    srcChain: "solana",
+    dstChain: "ethereum",
+    dstAddress: "0x0000000000000000000000000000000000000000",
+    dstAmount: new BN(0),
+    dstToken: "ETH",
+    rewardAmount: new BN(0),
+    rewardToken: "",
+    rewardRecipient: "",
+    rewardTimelockDelta: new BN(0),
+    ...overrides,
+  };
+}
+
+export interface SolverLockParamsInput {
+  hashlock: number[];
+  index: number;
+  amount: InstanceType<typeof BN> | number | string;
+  reward?: InstanceType<typeof BN> | number | string;
+  timelockDelta?: InstanceType<typeof BN> | number | string;
+  rewardTimelockDelta?: InstanceType<typeof BN> | number | string;
+  recipient: PublicKey;
+  rewardRecipient?: PublicKey;
+  refundTo: PublicKey;
+  payoutCurve?: PublicKey;
+  payoutCurveData?: Buffer;
+}
+
+export function solverLockParams(
+  input: SolverLockParamsInput,
+  overrides: Record<string, unknown> = {}
+) {
+  return {
+    hashlock: input.hashlock,
+    index: new BN(input.index),
+    amount: new BN(input.amount),
+    reward: new BN(input.reward ?? 0),
+    timelockDelta: new BN(input.timelockDelta ?? 3600),
+    rewardTimelockDelta: new BN(input.rewardTimelockDelta ?? 0),
+    recipient: input.recipient,
+    rewardRecipient: input.rewardRecipient ?? PublicKey.default,
+    refundTo: input.refundTo,
+    payoutCurve: input.payoutCurve ?? PublicKey.default,
+    payoutCurveData: input.payoutCurveData ?? Buffer.from([]),
+    srcChain: "ethereum",
+    dstChain: "solana",
+    dstAddress: "",
+    dstAmount: new BN(0),
+    dstToken: "SOL",
+    ...overrides,
+  };
+}
+
+// ─── Intent message (must mirror programs/train-htlc/src/intent.rs) ────────────
+
+export const INTENT_DOMAIN_TAG = Buffer.from("TRAIN_INTENT_V1\0", "ascii");
+
+export function sha256(buf: Buffer): Buffer {
+  return createHash("sha256").update(buf).digest();
+}
+
+export function u64Le(value: number | bigint): Buffer {
+  const buf = Buffer.alloc(8);
+  buf.writeBigUInt64LE(BigInt(value));
+  return buf;
+}
+
+function borshVecU8(data: Buffer): Buffer {
+  const len = Buffer.alloc(4);
+  len.writeUInt32LE(data.length);
+  return Buffer.concat([len, data]);
+}
+
+export function computeCallHash(
+  program: Program<Idl>,
+  params: ReturnType<typeof userLockParams>,
+  userData: Buffer,
+  solverData: Buffer
+): Buffer {
+  const paramsBytes = program.coder.types.encode("userLockParams", params);
+  return sha256(
+    Buffer.concat([paramsBytes, borshVecU8(userData), borshVecU8(solverData)])
+  );
+}
+
+export function buildIntentMessage(args: {
+  domainSalt: Buffer;
+  user: PublicKey;
+  mint: PublicKey;
+  amount: number | bigint;
+  callHash: Buffer;
+  nonce: number | bigint;
+  deadline: number | bigint;
+}): Buffer {
+  return Buffer.concat([
+    INTENT_DOMAIN_TAG,
+    PROGRAM_ID.toBuffer(),
+    args.domainSalt,
+    args.user.toBuffer(),
+    args.mint.toBuffer(),
+    u64Le(args.amount),
+    args.callHash,
+    u64Le(args.nonce),
+    u64Le(args.deadline),
+  ]);
+}
+
+export function signIntent(message: Buffer, user: Keypair): Buffer {
+  return Buffer.from(nacl.sign.detached(message, user.secretKey));
+}
+
+/** The user signs the sha256 digest of the canonical intent message (EIP-712
+ * style), keeping the relayer's transaction under the packet-size limit. */
+export function ed25519VerifyIx(user: Keypair, message: Buffer) {
+  const digest = sha256(message);
+  return Ed25519Program.createInstructionWithPublicKey({
+    publicKey: user.publicKey.toBytes(),
+    message: digest,
+    signature: signIntent(digest, user),
+  });
 }
 
 // Hashlock helpers

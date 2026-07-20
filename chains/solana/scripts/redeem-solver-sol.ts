@@ -20,12 +20,14 @@ async function main() {
   const lockData = await fetchSolverLock(program, solverLockPDA);
   const recipient = lockData.recipient as any;
   const rewardRecipient = lockData.rewardRecipient as any;
+  const refundTo = lockData.refundTo as any;
 
   console.log("=== Redeem Solver SOL ===");
   console.log("Hashlock:", hashlock.toString("hex"));
   console.log("Index:", index);
   console.log("Recipient:", recipient.toBase58());
   console.log("Reward Recipient:", rewardRecipient.toBase58());
+  console.log("Refund To (excess to):", refundTo.toBase58());
 
   const sig = await program.methods
     .redeemSolverSol(toArray32(hashlock), new BN(index), toArray32(secret))
@@ -34,8 +36,10 @@ async function main() {
       solverLock: solverLockPDA,
       recipient: recipient,
       rewardRecipient: rewardRecipient,
+      refundTo: refundTo,
+      payoutCurveProgram: null,
       systemProgram: anchor.web3.SystemProgram.programId,
-    })
+    } as any)
     .signers([wallet])
     .rpc();
 

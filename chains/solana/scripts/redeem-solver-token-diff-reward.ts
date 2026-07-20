@@ -6,14 +6,13 @@ import {
 } from "./helpers";
 import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 
-// Usage: npx ts-node scripts/redeem-solver-token-diff-reward.ts <hashlock_hex> <index> <secret_hex> <token_mint> <reward_token_mint>
+// Usage: npx ts-node scripts/redeem-solver-token-diff-reward.ts <hashlock_hex> <index> <secret_hex>
+// token mints, recipients, refund_to and rent payer are read from the on-chain lock.
 async function main() {
   const args = process.argv.slice(2);
   const hashlock = parseHex(requireArg(args, 0, "hashlock_hex"));
   const index = parseInt(requireArg(args, 1, "index"));
   const secret = parseHex(requireArg(args, 2, "secret_hex"));
-  const tokenMint = new PublicKey(requireArg(args, 3, "token_mint"));
-  const rewardTokenMint = new PublicKey(requireArg(args, 4, "reward_token_mint"));
 
   const program = getProgram();
   const provider = getProvider();
@@ -24,8 +23,12 @@ async function main() {
   const [rewardVaultPDA] = deriveSolverRewardVaultPDA(hashlock, index);
 
   const lockData = await fetchSolverLock(program, solverLockPDA);
+  const rentPayer = lockData.rentPayer as any;
   const recipient = lockData.recipient as any;
   const rewardRecipient = lockData.rewardRecipient as any;
+  const refundTo = lockData.refundTo as any;
+  const tokenMint = (lockData.tokenMint as any) as PublicKey;
+  const rewardTokenMint = (lockData.rewardTokenMint as any) as PublicKey;
 
   const recipientATA = getAssociatedTokenAddressSync(tokenMint, recipient);
   const rewardRecipientATA = getAssociatedTokenAddressSync(rewardTokenMint, rewardRecipient);
@@ -34,14 +37,18 @@ async function main() {
   console.log("=== Redeem Solver Token (Diff Reward) ===");
   console.log("Hashlock:", hashlock.toString("hex"));
   console.log("Index:", index);
+  console.log("Token Mint:", tokenMint.toBase58());
+  console.log("Reward Token Mint:", rewardTokenMint.toBase58());
 
   const sig = await program.methods
     .redeemSolverTokenDiffReward(toArray32(hashlock), new BN(index), toArray32(secret))
     .accounts({
       caller: wallet.publicKey,
       solverLock: solverLockPDA,
+      rentPayer: rentPayer,
       recipient: recipient,
       rewardRecipient: rewardRecipient,
+      refundTo: refundTo,
       tokenMint: tokenMint,
       rewardTokenMint: rewardTokenMint,
       vault: vaultPDA,
@@ -49,12 +56,13 @@ async function main() {
       recipientTokenAccount: recipientATA,
       rewardRecipientTokenAccount: rewardRecipientATA,
       callerRewardTokenAccount: callerRewardATA,
-      sender: lockData.sender as any,
+      refundToTokenAccount: null,
+      payoutCurveProgram: null,
       tokenProgram: TOKEN_PROGRAM_ID,
       associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       systemProgram: anchor.web3.SystemProgram.programId,
       rent: anchor.web3.SYSVAR_RENT_PUBKEY,
-    })
+    } as any)
     .signers([wallet])
     .rpc();
 

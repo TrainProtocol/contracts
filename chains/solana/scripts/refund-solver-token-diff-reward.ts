@@ -6,13 +6,12 @@ import {
 } from "./helpers";
 import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 
-// Usage: npx ts-node scripts/refund-solver-token-diff-reward.ts <hashlock_hex> <index> <token_mint> <reward_token_mint>
+// Usage: npx ts-node scripts/refund-solver-token-diff-reward.ts <hashlock_hex> <index>
+// token mints, refund_to and rent payer are read from the on-chain lock.
 async function main() {
   const args = process.argv.slice(2);
   const hashlock = parseHex(requireArg(args, 0, "hashlock_hex"));
   const index = parseInt(requireArg(args, 1, "index"));
-  const tokenMint = new PublicKey(requireArg(args, 2, "token_mint"));
-  const rewardTokenMint = new PublicKey(requireArg(args, 3, "reward_token_mint"));
 
   const program = getProgram();
   const provider = getProvider();
@@ -23,31 +22,36 @@ async function main() {
   const [rewardVaultPDA] = deriveSolverRewardVaultPDA(hashlock, index);
 
   const lockData = await fetchSolverLock(program, solverLockPDA);
-  const sender = lockData.sender as any;
-  const senderATA = getAssociatedTokenAddressSync(tokenMint, sender);
-  const senderRewardATA = getAssociatedTokenAddressSync(rewardTokenMint, sender);
+  const rentPayer = lockData.rentPayer as any;
+  const refundTo = lockData.refundTo as any;
+  const tokenMint = (lockData.tokenMint as any) as PublicKey;
+  const rewardTokenMint = (lockData.rewardTokenMint as any) as PublicKey;
+  const refundToATA = getAssociatedTokenAddressSync(tokenMint, refundTo);
+  const refundToRewardATA = getAssociatedTokenAddressSync(rewardTokenMint, refundTo);
 
   console.log("=== Refund Solver Token (Diff Reward) ===");
   console.log("Hashlock:", hashlock.toString("hex"));
   console.log("Index:", index);
+  console.log("Refund To:", refundTo.toBase58());
 
   const sig = await program.methods
     .refundSolverTokenDiffReward(toArray32(hashlock), new BN(index))
     .accounts({
       caller: wallet.publicKey,
       solverLock: solverLockPDA,
-      sender: sender,
+      rentPayer: rentPayer,
+      refundTo: refundTo,
       tokenMint: tokenMint,
       rewardTokenMint: rewardTokenMint,
       vault: vaultPDA,
       rewardVault: rewardVaultPDA,
-      senderTokenAccount: senderATA,
-      senderRewardTokenAccount: senderRewardATA,
+      refundToTokenAccount: refundToATA,
+      refundToRewardTokenAccount: refundToRewardATA,
       tokenProgram: TOKEN_PROGRAM_ID,
       associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       systemProgram: anchor.web3.SystemProgram.programId,
       rent: anchor.web3.SYSVAR_RENT_PUBKEY,
-    })
+    } as any)
     .signers([wallet])
     .rpc();
 

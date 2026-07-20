@@ -17,23 +17,27 @@ async function main() {
   const [userLockPDA] = deriveUserLockPDA(hashlock);
 
   const lockData = await fetchUserLock(program, userLockPDA);
-  const sender = lockData.sender as any;
+  const rentPayer = lockData.rentPayer as any;
   const recipient = lockData.recipient as any;
+  const refundTo = lockData.refundTo as any;
 
   console.log("=== Redeem User SOL ===");
   console.log("Hashlock:", hashlock.toString("hex"));
-  console.log("Sender (rent to):", sender.toBase58());
+  console.log("Rent Payer (rent to):", rentPayer.toBase58());
   console.log("Recipient:", recipient.toBase58());
+  console.log("Refund To (excess to):", refundTo.toBase58());
 
   const sig = await program.methods
     .redeemUserSol(toArray32(hashlock), toArray32(secret))
     .accounts({
       caller: wallet.publicKey,
       userLock: userLockPDA,
-      sender: sender,
+      rentPayer: rentPayer,
       recipient: recipient,
+      refundTo: refundTo,
+      payoutCurveProgram: null,
       systemProgram: anchor.web3.SystemProgram.programId,
-    })
+    } as any)
     .signers([wallet])
     .rpc();
 

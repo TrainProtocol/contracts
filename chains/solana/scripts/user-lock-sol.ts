@@ -1,20 +1,22 @@
 import {
   getProgram, getProvider, loadWallet, deriveUserLockPDA,
-  generateHashlock, confirmTx, requireArg, toArray32,
-  BN, PublicKey, anchor,
+  generateHashlock, confirmTx, requireArg, toArray32, userLockParams,
+  PublicKey, anchor,
 } from "./helpers";
 
-// Usage: npx ts-node scripts/user-lock-sol.ts <amount_lamports> <timelock_delta_secs> <recipient_pubkey>
+// Usage: npx ts-node scripts/user-lock-sol.ts <amount_lamports> <timelock_delta_secs> <recipient_pubkey> [refund_to_pubkey]
 // Example: npx ts-node scripts/user-lock-sol.ts 100000000 3600 <PUBKEY>
+// refund_to defaults to the wallet pubkey; refunds and redeem excess go there.
 async function main() {
   const args = process.argv.slice(2);
-  const amount = new BN(requireArg(args, 0, "amount_lamports"));
-  const timelockDelta = new BN(requireArg(args, 1, "timelock_delta_secs"));
+  const amount = requireArg(args, 0, "amount_lamports");
+  const timelockDelta = requireArg(args, 1, "timelock_delta_secs");
   const recipient = new PublicKey(requireArg(args, 2, "recipient_pubkey"));
 
   const program = getProgram();
   const provider = getProvider();
   const wallet = loadWallet();
+  const refundTo = args[3] ? new PublicKey(args[3]) : wallet.publicKey;
 
   const { secret, hashlock } = generateHashlock();
   const [userLockPDA] = deriveUserLockPDA(hashlock);
@@ -23,37 +25,31 @@ async function main() {
   console.log("Secret (save this!):", secret.toString("hex"));
   console.log("Hashlock:", hashlock.toString("hex"));
   console.log("UserLock PDA:", userLockPDA.toBase58());
-  console.log("Amount:", amount.toString(), "lamports");
-  console.log("Timelock delta:", timelockDelta.toString(), "seconds");
+  console.log("Amount:", amount, "lamports");
+  console.log("Timelock delta:", timelockDelta, "seconds");
+  console.log("Refund to:", refundTo.toBase58());
 
-  const now = Math.floor(Date.now() / 1000);
-  const quoteExpiry = new BN(now + 600); // 10 min from now
+  const params = userLockParams({
+    hashlock: toArray32(hashlock),
+    amount,
+    timelockDelta,
+    recipient,
+    refundTo,
+  });
 
   const sig = await program.methods
     .userLockSol(
-      toArray32(hashlock),
-      amount,
-      timelockDelta,
-      quoteExpiry,
-      wallet.publicKey,   // sender
-      recipient,           // recipient
-      "Solana",            // src_chain
-      "Ethereum",          // dst_chain
-      "0x0000000000000000000000000000000000000000", // dst_address
-      new BN(10),          // dst_amount
-      "ETH",               // dst_token
-      new BN(0),           // reward_amount
-      "SOL",               // reward_token
-      "",                  // reward_recipient
-      new BN(0),           // reward_timelock_delta
-      Buffer.from([]),     // user_data
-      Buffer.from([]),     // solver_data
+      params,
+      Buffer.from([]), // user_data
+      Buffer.from([]), // solver_data
     )
     .accounts({
-      signer: wallet.publicKey,
+      payer: wallet.publicKey,
+      sender: wallet.publicKey,
       userLock: userLockPDA,
+      payoutCurveProgram: null,
       systemProgram: anchor.web3.SystemProgram.programId,
-    })
+    } as any)
     .signers([wallet])
     .rpc();
 

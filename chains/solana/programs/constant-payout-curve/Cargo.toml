@@ -1,0 +1,18 @@
+[package]
+name = "constant-payout-curve"
+version = "0.1.0"
+description = "Constant (no-decay) payout curve for the Train HTLC"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "constant_payout_curve"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+anchor-lang = "0.32.1"

@@ -17,6 +17,7 @@ async function main() {
   const STATUS = ["EMPTY", "PENDING", "REFUNDED", "REDEEMED"];
   const tokenMint = (lock.tokenMint as any) as PublicKey;
   const rewardTokenMint = (lock.rewardTokenMint as any) as PublicKey;
+  const payoutCurve = (lock.payoutCurve as any) as PublicKey;
   const isSOL = tokenMint.equals(PublicKey.default);
 
   console.log("=== Solver Lock ===");
@@ -30,8 +31,12 @@ async function main() {
   console.log("Sender:           ", (lock.sender as any).toBase58());
   console.log("Recipient:        ", (lock.recipient as any).toBase58());
   console.log("Reward Recipient: ", (lock.rewardRecipient as any).toBase58());
+  console.log("Refund To:        ", (lock.refundTo as any).toBase58());
+  console.log("Rent Payer:       ", (lock.rentPayer as any).toBase58());
+  console.log("Start Time:       ", new Date((lock.startTime as any).toNumber() * 1000).toISOString());
   console.log("Timelock:         ", new Date((lock.timelock as any).toNumber() * 1000).toISOString());
   console.log("Reward Timelock:  ", new Date((lock.rewardTimelock as any).toNumber() * 1000).toISOString());
+  console.log("Payout Curve:     ", payoutCurve.equals(PublicKey.default) ? "none" : payoutCurve.toBase58());
 
   const secret = Buffer.from(lock.secret as any);
   const isRevealed = !secret.every((b: number) => b === 0);

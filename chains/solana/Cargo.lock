@@ -549,6 +549,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "constant-payout-curve"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+]
+
+[[package]]
 name = "constant_time_eq"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -939,6 +946,13 @@ dependencies = [
  "keccak",
  "rand_core 0.6.4",
  "zeroize",
+]
+
+[[package]]
+name = "mock-decay-curve"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
 ]
 
 [[package]]
@@ -2830,7 +2844,8 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
- "sha2 0.10.9",
+ "solana-sdk-ids",
+ "solana-sha256-hasher",
 ]
 
 [[package]]

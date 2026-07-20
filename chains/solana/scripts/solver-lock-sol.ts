@@ -1,23 +1,25 @@
 import {
   getProgram, getProvider, loadWallet, deriveSolverLockPDA, deriveSolverCountPDA, fetchSolverLockCounter,
-  confirmTx, requireArg, parseHex, toArray32,
-  BN, PublicKey, anchor,
+  confirmTx, requireArg, parseHex, toArray32, solverLockParams,
+  PublicKey, anchor,
 } from "./helpers";
 
-// Usage: npx ts-node scripts/solver-lock-sol.ts <hashlock_hex> <amount_lamports> <reward_lamports> <timelock_delta> <reward_timelock_delta> <recipient> <reward_recipient>
+// Usage: npx ts-node scripts/solver-lock-sol.ts <hashlock_hex> <amount_lamports> <reward_lamports> <timelock_delta> <reward_timelock_delta> <recipient> <reward_recipient> [refund_to]
+// refund_to defaults to the wallet pubkey; refunds go there.
 async function main() {
   const args = process.argv.slice(2);
   const hashlock = parseHex(requireArg(args, 0, "hashlock_hex"));
-  const amount = new BN(requireArg(args, 1, "amount_lamports"));
-  const reward = new BN(requireArg(args, 2, "reward_lamports"));
-  const timelockDelta = new BN(requireArg(args, 3, "timelock_delta_secs"));
-  const rewardTimelockDelta = new BN(requireArg(args, 4, "reward_timelock_delta"));
+  const amount = requireArg(args, 1, "amount_lamports");
+  const reward = requireArg(args, 2, "reward_lamports");
+  const timelockDelta = requireArg(args, 3, "timelock_delta_secs");
+  const rewardTimelockDelta = requireArg(args, 4, "reward_timelock_delta");
   const recipient = new PublicKey(requireArg(args, 5, "recipient"));
   const rewardRecipient = new PublicKey(requireArg(args, 6, "reward_recipient"));
 
   const program = getProgram();
   const provider = getProvider();
   const wallet = loadWallet();
+  const refundTo = args[7] ? new PublicKey(args[7]) : wallet.publicKey;
 
   // Get current counter to determine next index
   const [counterPDA] = deriveSolverCountPDA(hashlock);
@@ -35,33 +37,35 @@ async function main() {
   console.log("Hashlock:", hashlock.toString("hex"));
   console.log("Index:", nextIndex);
   console.log("SolverLock PDA:", solverLockPDA.toBase58());
-  console.log("Amount:", amount.toString(), "lamports");
-  console.log("Reward:", reward.toString(), "lamports");
+  console.log("Amount:", amount, "lamports");
+  console.log("Reward:", reward, "lamports");
+  console.log("Refund to:", refundTo.toBase58());
+
+  const params = solverLockParams({
+    hashlock: toArray32(hashlock),
+    index: nextIndex,
+    amount,
+    reward,
+    timelockDelta,
+    rewardTimelockDelta,
+    recipient,
+    rewardRecipient,
+    refundTo,
+  });
 
   const sig = await program.methods
     .solverLockSol(
-      toArray32(hashlock),
-      new BN(nextIndex),
-      amount,
-      reward,
-      timelockDelta,
-      rewardTimelockDelta,
-      wallet.publicKey,   // sender
-      recipient,
-      rewardRecipient,
-      "Ethereum",         // src_chain
-      "Solana",           // dst_chain
-      "",                 // dst_address
-      new BN(0),          // dst_amount
-      "SOL",              // dst_token
-      Buffer.from([]),    // data
+      params,
+      Buffer.from([]), // data
     )
     .accounts({
-      signer: wallet.publicKey,
+      payer: wallet.publicKey,
+      sender: wallet.publicKey,
       counter: counterPDA,
       solverLock: solverLockPDA,
+      payoutCurveProgram: null,
       systemProgram: anchor.web3.SystemProgram.programId,
-    })
+    } as any)
     .signers([wallet])
     .rpc();
 

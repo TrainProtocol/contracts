@@ -17,21 +17,21 @@ async function main() {
   const [solverLockPDA] = deriveSolverLockPDA(hashlock, index);
 
   const lockData = await fetchSolverLock(program, solverLockPDA);
-  const sender = lockData.sender as any;
+  const refundTo = lockData.refundTo as any;
 
   console.log("=== Refund Solver SOL ===");
   console.log("Hashlock:", hashlock.toString("hex"));
   console.log("Index:", index);
-  console.log("Sender (refund to):", sender.toBase58());
+  console.log("Refund To:", refundTo.toBase58());
 
   const sig = await program.methods
     .refundSolverSol(toArray32(hashlock), new BN(index))
     .accounts({
       caller: wallet.publicKey,
       solverLock: solverLockPDA,
-      sender: sender,
+      refundTo: refundTo,
       systemProgram: anchor.web3.SystemProgram.programId,
-    })
+    } as any)
     .signers([wallet])
     .rpc();
 

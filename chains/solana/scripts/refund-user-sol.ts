@@ -15,22 +15,25 @@ async function main() {
 
   const [userLockPDA] = deriveUserLockPDA(hashlock);
 
-  // Fetch to get sender
+  // Fetch to get rent payer and refund destination
   const lockData = await fetchUserLock(program, userLockPDA);
-  const sender = lockData.sender as any;
+  const rentPayer = lockData.rentPayer as any;
+  const refundTo = lockData.refundTo as any;
 
   console.log("=== Refund User SOL ===");
   console.log("Hashlock:", hashlock.toString("hex"));
-  console.log("Sender (refund to):", sender.toBase58());
+  console.log("Rent Payer (rent to):", rentPayer.toBase58());
+  console.log("Refund To:", refundTo.toBase58());
 
   const sig = await program.methods
     .refundUserSol(toArray32(hashlock))
     .accounts({
       caller: wallet.publicKey,
       userLock: userLockPDA,
-      sender: sender,
+      rentPayer: rentPayer,
+      refundTo: refundTo,
       systemProgram: anchor.web3.SystemProgram.programId,
-    })
+    } as any)
     .signers([wallet])
     .rpc();
 
