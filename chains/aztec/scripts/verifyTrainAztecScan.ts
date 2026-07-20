@@ -74,11 +74,25 @@ async function main(): Promise<void> {
   // Step 2: Verify instance (deployment)
   console.log('\n--- Verifying instance ---');
   const deployerMetadata: DeployerMetadata | undefined = buildDeployerMetadata();
-  const instanceResult = await client.verifyInstance(
-    address,
-    verifyInstanceArgs,
-    deployerMetadata,
-  );
+  // aztec-scan-sdk 0.2.0 predates v5 and rejects the v5 PublicKeys serialization with a
+  // client-side length check; the explorer API itself accepts it. POST directly instead.
+  const instanceUrl = `${(client as any).config?.explorerApiUrl ?? optionalString('AZTECSCAN_API_URL') ?? 'https://api.testnet.aztecscan.xyz'}/v1/${(client as any).config?.apiKey ?? 'temporary-api-key'}/l2/contract-instances/${address}`;
+  const instanceBody: Record<string, unknown> = {
+    verifiedDeploymentArguments: {
+      salt: verifyInstanceArgs.salt,
+      deployer: verifyInstanceArgs.deployer,
+      publicKeysString: verifyInstanceArgs.publicKeysString,
+      constructorArgs: verifyInstanceArgs.constructorArgs,
+      stringifiedArtifactJson: JSON.stringify(TrainArtifact),
+    },
+  };
+  if (deployerMetadata) instanceBody.deployerMetadata = deployerMetadata;
+  const instanceResponse = await fetch(instanceUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(instanceBody),
+  });
+  const instanceResult = { ok: instanceResponse.ok, status: instanceResponse.status, statusText: instanceResponse.statusText, data: await instanceResponse.text() };
   console.log(
     `Instance verification: ${instanceResult.status} ${instanceResult.statusText}`,
   );

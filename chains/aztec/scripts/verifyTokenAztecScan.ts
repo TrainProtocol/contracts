@@ -76,25 +76,25 @@ async function main(): Promise<void> {
   // Step 2: Verify instance (deployment)
   console.log('\n--- Verifying instance ---');
   const deployerMetadata: DeployerMetadata | undefined = buildDeployerMetadata();
-  let instanceResult: Awaited<ReturnType<typeof client.verifyInstance>> | undefined;
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      instanceResult = await client.verifyInstance(
-        address,
-        verifyInstanceArgs,
-        deployerMetadata,
-      );
-      break;
-    } catch (err: any) {
-      if (attempt === 3) throw err;
-      console.log(`  Attempt ${attempt} failed (${err.name}), retrying...`);
-    }
-  }
-  if (!instanceResult) {
-    console.error('Instance verification failed after 3 attempts.');
-    process.exitCode = 1;
-    return;
-  }
+  // aztec-scan-sdk 0.2.0 predates v5 and rejects the v5 PublicKeys serialization with a
+  // client-side length check; the explorer API itself accepts it. POST directly instead.
+  const instanceUrl = `${optionalString('AZTECSCAN_API_URL') ?? 'https://api.testnet.aztecscan.xyz'}/v1/temporary-api-key/l2/contract-instances/${address}`;
+  const instanceBody: Record<string, unknown> = {
+    verifiedDeploymentArguments: {
+      salt: verifyInstanceArgs.salt,
+      deployer: verifyInstanceArgs.deployer,
+      publicKeysString: verifyInstanceArgs.publicKeysString,
+      constructorArgs: verifyInstanceArgs.constructorArgs,
+      stringifiedArtifactJson: JSON.stringify(TokenArtifact),
+    },
+  };
+  if (deployerMetadata) instanceBody.deployerMetadata = deployerMetadata;
+  const instanceResponse = await fetch(instanceUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(instanceBody),
+  });
+  const instanceResult = { ok: instanceResponse.ok, status: instanceResponse.status, statusText: instanceResponse.statusText, data: await instanceResponse.text() };
   console.log(
     `Instance verification: ${instanceResult.status} ${instanceResult.statusText}`,
   );
