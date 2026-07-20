@@ -8,7 +8,7 @@ import { createAztecNodeClient } from '@aztec/aztec.js/node';
 import type { Wallet } from '@aztec/aztec.js/wallet';
 import { EmbeddedWallet } from '@aztec/wallets/embedded';
 import { AccountManager } from '@aztec/aztec.js/wallet';
-import { TokenContract } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js';
+import { TokenContract } from '@aztec-foundation/aztec-standards/dist/src/artifacts/Token.js';
 import { updateEnvFile } from './utils/utils.ts';
 import { getAztecNodeUrl, getEnv, getTimeouts } from './utils/config.ts';
 import { getPaymentMethod } from './utils/feePayment.ts';
@@ -22,7 +22,8 @@ function toWallet(w: EmbeddedWallet): Wallet {
 async function createWallet(proverEnabled: boolean): Promise<EmbeddedWallet> {
   return EmbeddedWallet.create(createAztecNodeClient(getAztecNodeUrl()), {
     ephemeral: true,
-    pxeConfig: { proverEnabled },
+    // EmbeddedWallet's default provider preloads MultiCallEntrypoint and AuthRegistry.
+    pxe: { proverEnabled },
   });
 }
 

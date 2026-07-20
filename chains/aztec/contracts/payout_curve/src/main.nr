@@ -13,7 +13,7 @@ use aztec::macros::aztec;
 /// ConstantPayoutCurve - Constant (no-decay) payout.
 /// P(t) = amount, for all t. The payout never decays and is independent of
 /// start_time, current_time, and config. This makes the payout-curve mechanism
-/// an explicit no-op, mirroring the EVM ConstantPayoutCurve.
+/// an explicit no-op because the payout is constant.
 ///
 /// Any contract exposing a public view function with the same name and signature
 /// is a valid payout curve for the Train contract (function selectors are derived

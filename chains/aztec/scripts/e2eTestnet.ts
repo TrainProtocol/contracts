@@ -25,7 +25,7 @@ import { createAztecNodeClient } from '@aztec/aztec.js/node';
 import type { AztecNode } from '@aztec/stdlib/interfaces/client';
 import { TxHash } from '@aztec/aztec.js/tx';
 import type { EmbeddedWallet } from '@aztec/wallets/embedded';
-import { TokenContract } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js';
+import { TokenContract } from '@aztec-foundation/aztec-standards/dist/src/artifacts/Token.js';
 import { TrainContract } from './Train.ts';
 import { ConstantPayoutCurveContract } from './ConstantPayoutCurve.ts';
 import { getAztecNodeUrl, getEnv, getTimeouts } from './utils/config.ts';
@@ -450,8 +450,8 @@ async function stagePreflight(): Promise<void> {
   const info = await (node as any).getNodeVersion?.();
   const version = info ?? 'unknown';
   record({ stage: 'S0', name: `node ${getAztecNodeUrl()} version ${version}`, kind: 'info', status: 'INFO' });
-  if (!['5.0.0-rc.2', '5.0.0'].includes(String(version))) {
-    console.warn(`WARNING: node version is ${version}, contract was built for 5.0.0-rc.2`);
+  if (String(version) !== '5.0.1') {
+    console.warn(`WARNING: node version is ${version}, contracts were built for 5.0.1`);
   }
 }
 
@@ -579,6 +579,28 @@ async function stageContracts(roles: { user: Role; solver: Role; deployer: Role 
     updateEnvFile('.env', { TRAIN_ADDRESS: trainAddress.toString() });
   }
 
+  const registerForAllRoles = async (
+    label: string,
+    address: AztecAddress,
+    artifact: Parameters<ReturnType<typeof toWallet>['registerContract']>[1],
+  ): Promise<void> => {
+    const instance = await node.getContract(address);
+    if (!instance) throw new Error(`${label} instance ${address.toString()} was not found on the node`);
+    await Promise.all(
+      Object.values(roles).map(({ wallet }) =>
+        toWallet(wallet).registerContract(instance, artifact),
+      ),
+    );
+  };
+
+  // Contract.at() creates a callable wrapper but does not persist artifact metadata
+  // in each EmbeddedWallet. Register every deployed instance explicitly so public
+  // simulation failures can be enriched with their named Noir assertion messages.
+  await registerForAllRoles('Train', trainAddress, TrainContract.artifact);
+  await registerForAllRoles('Token1', tokenAddress, TokenContract.artifact);
+  await registerForAllRoles('Token2', token2Address, TokenContract.artifact);
+  await registerForAllRoles('ConstantPayoutCurve', curveAddress, ConstantPayoutCurveContract.artifact);
+
   const ctx: Ctx = { ...roles, trainAddress, tokenAddress, token2Address, curveAddress };
   record({
     stage: 'S2',
@@ -607,8 +629,16 @@ async function stageContracts(roles: { user: Role; solver: Role; deployer: Role 
 }
 
 async function stageVerification(ctx: Ctx): Promise<void> {
-  if (process.env.E2E_VERIFIED === '1') {
-    record({ stage: 'S3', name: 'AztecScan verification (already done)', kind: 'info', status: 'INFO' });
+  const verificationKey = [ctx.trainAddress, ctx.tokenAddress, ctx.token2Address]
+    .map((address) => address.toString())
+    .join(',');
+  if (process.env.E2E_VERIFIED_DEPLOYMENTS === verificationKey) {
+    record({
+      stage: 'S3',
+      name: 'AztecScan verification (already done for these deployments)',
+      kind: 'info',
+      status: 'INFO',
+    });
     return;
   }
   const results: Array<[string, number]> = [];
@@ -616,7 +646,11 @@ async function stageVerification(ctx: Ctx): Promise<void> {
   results.push(['verify Token1', shellOut('npx', ['tsx', 'verifyTokenAztecScan.ts'])]);
   results.push([
     'verify Token2',
-    shellOut('npx', ['tsx', 'verifyTokenAztecScan.ts'], { TOKEN_ADDRESS: ctx.token2Address.toString() }),
+    shellOut('npx', ['tsx', 'verifyTokenAztecScan.ts'], {
+      TOKEN_ADDRESS: ctx.token2Address.toString(),
+      TOKEN_NAME: 'RWD',
+      TOKEN_SYMBOL: 'RWD',
+    }),
   ]);
   let allOk = true;
   for (const [name, code] of results) {
@@ -632,7 +666,7 @@ async function stageVerification(ctx: Ctx): Promise<void> {
     status: 'INFO',
     note: `not automated - verify manually with artifact payout_curve-ConstantPayoutCurve.json at ${ctx.curveAddress}`,
   });
-  if (allOk) updateEnvFile('.env', { E2E_VERIFIED: '1' });
+  if (allOk) updateEnvFile('.env', { E2E_VERIFIED_DEPLOYMENTS: verificationKey });
 }
 
 // ---------------------------------------------------------------- happy flows

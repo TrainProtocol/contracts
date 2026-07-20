@@ -103,7 +103,7 @@ async function main(): Promise<void> {
   if (artifactResult.ok && instanceResult.ok) {
     console.log('\nVerification complete.');
   } else {
-    process.exitCode = 1;
+    throw new Error('Train artifact or instance verification failed');
   }
 }
 
@@ -136,9 +136,7 @@ function buildDeployerMetadata(): DeployerMetadata | undefined {
   };
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch((err) => {
+main().catch((err) => {
     console.error(`Error: ${err}`);
     if (err instanceof Error && err.stack) console.error(err.stack);
     process.exit(1);

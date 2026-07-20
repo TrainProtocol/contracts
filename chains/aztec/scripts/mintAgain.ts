@@ -3,7 +3,7 @@ dotenv.config();
 
 import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
-import { TokenContract } from '@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js';
+import { TokenContract } from '@aztec-foundation/aztec-standards/dist/src/artifacts/Token.js';
 import { setupWallet, toWallet } from './utils/setupWallet.ts';
 import { getPaymentMethod } from './utils/feePayment.ts';
 import { requireEnv, updateEnvFile } from './utils/utils.ts';
@@ -27,14 +27,8 @@ function getMintAmount(): bigint {
 async function main(): Promise<void> {
   const timeouts = getTimeouts();
   const tokenAddress = AztecAddress.fromStringUnsafe(requireEnv('TOKEN_ADDRESS'));
-  // const userAddress = AztecAddress.fromStringUnsafe(requireEnv('USER_ADDRESS'));
-  // const solverAddress = AztecAddress.fromStringUnsafe(requireEnv('SOLVER_ADDRESS'));
-  const userAddress = AztecAddress.fromStringUnsafe(
-    '0x2f30f923ff5b3afe56dad0d5fcb3d592a76cd7151c2af5c88532541e3d39527a',
-  );
-  const solverAddress = AztecAddress.fromStringUnsafe(
-    '0x2f30f923ff5b3afe56dad0d5fcb3d592a76cd7151c2af5c88532541e3d39527a',
-  );
+  const userAddress = AztecAddress.fromStringUnsafe(requireEnv('USER_ADDRESS'));
+  const solverAddress = AztecAddress.fromStringUnsafe(requireEnv('SOLVER_ADDRESS'));
   const expectedDeployerAddress = requireEnv('DEPLOYER_ADDRESS');
   const amountEach = getMintAmount();
 

@@ -56,7 +56,8 @@ async function main() {
   console.log('\nCreating embedded wallet...');
   const wallet = await EmbeddedWallet.create(node, {
     ephemeral: true,
-    pxeConfig: { proverEnabled: true },
+    // EmbeddedWallet's default provider preloads MultiCallEntrypoint and AuthRegistry.
+    pxe: { proverEnabled: true },
   });
 
   let secretKey: Fr;

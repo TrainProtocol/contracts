@@ -7,7 +7,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-TOKEN_CHECKOUT="$HOME/nargo/github.com/defi-wonderland/aztec-standards/v5.0.0-rc.2"
+TOKEN_CHECKOUT="$HOME/nargo/github.com/AztecProtocol/aztec-standards/v5.0.1"
 
 # Build deps if their artifacts are missing
 if [ ! -f "$TOKEN_CHECKOUT/target/token_contract-Token.json" ]; then

@@ -11,6 +11,7 @@ scripts/data.json
 scripts/package-lock.json
 contracts/train/codegenCache.json
 scripts/codegenCache.json
+codegenCache.json
 
 # env files and any backups of them - never commit (account secrets, L1 keys, claim secrets)
 scripts/.env

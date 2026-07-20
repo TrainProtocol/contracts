@@ -10,7 +10,8 @@ export async function setupWallet(): Promise<EmbeddedWallet> {
 
   const wallet = await EmbeddedWallet.create(createAztecNodeClient(nodeUrl), {
     ephemeral: true,
-    pxeConfig: { proverEnabled },
+    // EmbeddedWallet's default provider preloads MultiCallEntrypoint and AuthRegistry.
+    pxe: { proverEnabled },
   });
 
   return wallet;
@@ -20,9 +21,8 @@ export async function setupWallet(): Promise<EmbeddedWallet> {
  * Bridges the type gap between `EmbeddedWallet` and the `Wallet` interface
  * expected by generated contract bindings (`Contract.at()`, `Contract.deploy()`).
  *
- * At runtime `EmbeddedWallet extends BaseWallet implements Wallet`, but the TS
- * declarations across `@aztec/wallets` and `@aztec/aztec.js` are out of sync in
- * the 4.2.0-aztecnr-rc.2 SDK, so the compiler rejects the assignment.
+ * At runtime `EmbeddedWallet extends BaseWallet implements Wallet`; keep the
+ * cast localized at the generated-binding boundary.
  */
 export function toWallet(w: EmbeddedWallet): Wallet {
   return w as unknown as Wallet;

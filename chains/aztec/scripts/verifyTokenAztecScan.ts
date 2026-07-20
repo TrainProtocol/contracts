@@ -3,7 +3,7 @@ dotenv.config();
 
 import { AztecAddress } from '@aztec/aztec.js/addresses';
 import { createAztecNodeClient } from '@aztec/aztec.js/node';
-import TokenArtifact from '@defi-wonderland/aztec-standards/target/token_contract-Token.json' with { type: 'json' };
+import TokenArtifact from '@aztec-foundation/aztec-standards/target/token_contract-Token.json' with { type: 'json' };
 import {
   AztecScanClient,
   fromContractInstance,
@@ -41,12 +41,19 @@ async function main(): Promise<void> {
     timeout: 120_000,
   });
 
-  // Token was deployed with constructor_with_minter(name, symbol, decimals, minter, upgrade_authority)
+  // Token was deployed with constructor_with_minter(name, symbol, decimals, minter, auth_contract)
   // Read constructor args from env or use defaults
   const constructorArgsRaw = process.env.TOKEN_CONSTRUCTOR_ARGS;
+  const isRewardToken = tokenAddressString === optionalString('E2E_TOKEN2_ADDRESS');
   const constructorArgs: unknown[] = constructorArgsRaw
     ? JSON.parse(constructorArgsRaw)
-    : [];
+    : [
+        optionalString('TOKEN_NAME') ?? (isRewardToken ? 'RWD' : 'ETH'),
+        optionalString('TOKEN_SYMBOL') ?? (isRewardToken ? 'RWD' : 'ETH'),
+        Number(optionalString('TOKEN_DECIMALS') ?? '18'),
+        optionalString('TOKEN_MINTER') ?? instance.deployer.toString(),
+        optionalString('TOKEN_AUTH_CONTRACT') ?? AztecAddress.ZERO.toString(),
+      ];
 
   const { address, contractClassId, verifyInstanceArgs } =
     fromContractInstance(instance, {
@@ -78,23 +85,26 @@ async function main(): Promise<void> {
   const deployerMetadata: DeployerMetadata | undefined = buildDeployerMetadata();
   // aztec-scan-sdk 0.2.0 predates v5 and rejects the v5 PublicKeys serialization with a
   // client-side length check; the explorer API itself accepts it. POST directly instead.
-  const instanceUrl = `${optionalString('AZTECSCAN_API_URL') ?? 'https://api.testnet.aztecscan.xyz'}/v1/temporary-api-key/l2/contract-instances/${address}`;
+  const instanceUrl = `${(client as any).config?.explorerApiUrl ?? optionalString('AZTECSCAN_API_URL') ?? 'https://api.testnet.aztecscan.xyz'}/v1/${(client as any).config?.apiKey ?? 'temporary-api-key'}/l2/contract-instances/${address}`;
   const instanceBody: Record<string, unknown> = {
     verifiedDeploymentArguments: {
       salt: verifyInstanceArgs.salt,
       deployer: verifyInstanceArgs.deployer,
       publicKeysString: verifyInstanceArgs.publicKeysString,
       constructorArgs: verifyInstanceArgs.constructorArgs,
-      stringifiedArtifactJson: JSON.stringify(TokenArtifact),
     },
   };
   if (deployerMetadata) instanceBody.deployerMetadata = deployerMetadata;
-  const instanceResponse = await fetch(instanceUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(instanceBody),
-  });
-  const instanceResult = { ok: instanceResponse.ok, status: instanceResponse.status, statusText: instanceResponse.statusText, data: await instanceResponse.text() };
+  const instanceResponse = artifactResult.ok
+    ? await fetch(instanceUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(instanceBody),
+      })
+    : undefined;
+  const instanceResult = instanceResponse
+    ? { ok: instanceResponse.ok, status: instanceResponse.status, statusText: instanceResponse.statusText, data: await instanceResponse.text() }
+    : { ok: false, status: 0, statusText: 'Skipped', data: 'Artifact verification failed' };
   console.log(
     `Instance verification: ${instanceResult.status} ${instanceResult.statusText}`,
   );
@@ -105,7 +115,7 @@ async function main(): Promise<void> {
   if (artifactResult.ok && instanceResult.ok) {
     console.log('\nVerification complete.');
   } else {
-    process.exitCode = 1;
+    throw new Error('Token artifact or instance verification failed');
   }
 }
 
@@ -138,9 +148,7 @@ function buildDeployerMetadata(): DeployerMetadata | undefined {
   };
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch((err) => {
+main().catch((err) => {
     console.error(`Error: ${err}`);
     if (err instanceof Error && err.stack) console.error(err.stack);
     process.exit(1);

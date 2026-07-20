@@ -12,7 +12,7 @@ mod lib;
 mod test;
 use aztec::macros::aztec;
 
-/// Train Protocol - Cross-Chain HTLC Bridge (Aztec port of the EVM Train contract).
+/// Train Protocol - Cross-chain HTLC bridge for Aztec.
 /// Hashlock = sha256(secret). Token-only (no native asset on Aztec); transfers are
 /// exact-amount public token transfers with authwit authorization.
 #[aztec]
@@ -325,8 +325,8 @@ pub contract Train {
         let timelock = now + timelock_delta;
         assert(timelock > now, "TimelockOverflow");
 
-        // Curve sanity probe (replaces the EVM ERC-165 check): a bad curve address or
-        // out-of-bounds payout fails here at lock time instead of bricking redeem.
+        // Curve sanity probe: a bad curve address or out-of-bounds payout fails
+        // here at lock time instead of preventing a later redeem.
         if !payout_curve.is_zero() {
             let probe = self.view(ConstantPayoutCurve::at(payout_curve).compute_payout(
                 amount,
@@ -352,7 +352,7 @@ pub contract Train {
         };
         self.storage.user_locks.at(hashlock_high).at(hashlock_low).write(lock);
 
-        // Per-user enumeration index (EVM: userLockHashes[user].push)
+        // Append the hashlock to this user's enumeration index.
         let count = self.storage.user_lock_count.at(sender).read();
         self.storage.user_lock_hashes.at(sender).at(count as Field).write(
             HashlockRef { high: hashlock_high, low: hashlock_low },
@@ -772,9 +772,9 @@ pub contract Train {
 
     /// Hashlock of the `index`-th user lock created by `user` (0-based), as
     /// [high, low] u128 limbs (hashlock = high << 128 | low, big-endian; zeros if out
-    /// of range). Replaces the EVM's paginated getUserLockHashes: clients loop
-    /// `0..get_user_lock_count(user)`. (A paged variant miscompiled to zero reads in
-    /// the v5.0.0-rc.2 AVM; single-entry reads are reliable.)
+    /// of range). Clients loop `0..get_user_lock_count(user)` to enumerate entries.
+    /// (A paged variant miscompiled to zero reads in
+    /// an earlier v5 release-candidate AVM; single-entry reads are reliable.)
     #[external("public")]
     #[view]
     fn get_user_lock_hash_at(user: AztecAddress, index: Field) -> pub (Field, Field) {

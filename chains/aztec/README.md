@@ -2,38 +2,33 @@
 
 HTLC (Hash Time Locked Contract) implementation for cross-chain atomic swaps on Aztec Network.
 
-Built with Aztec Noir contracts and Aztec.js SDK `v5.0.0`.
+Built with Aztec Noir contracts and Aztec.js SDK `v5.0.1`.
 
-## v5.0.0 status (2026-07-13)
+## v5.0.1 migration status (2026-07-20)
 
-The stack targets **Aztec v5.0.0 final**, matching the freshly reset public testnet
-(`https://v5.testnet.rpc.aztec-labs.com`). The full E2E matrix was verified on-chain —
-see [docs/e2e-testnet-v5.0.0-report.md](docs/e2e-testnet-v5.0.0-report.md)
-(48 txs: all happy flows, view/enumeration probes, failure cases, and a mined
-on-chain revert). Mainnet still runs 4.4.0; mainnet deployment waits for its v5 upgrade.
+The contracts and scripts target **Aztec v5.0.1**. The token dependency now comes from
+the official [`AztecProtocol/aztec-standards`](https://github.com/AztecProtocol/aztec-standards)
+repository and its `@aztec-foundation/aztec-standards` npm package, both pinned to v5.0.1.
+The old `defi-wonderland` dependency and local cache-patching workaround are no longer used.
 
-### Temporary: token dependency patch
+Contract compilation and the 34-test local TXE suite pass with v5.0.1. The full testnet E2E
+matrix was rerun on 2026-07-20 against fresh deployments: all 101 recorded checks completed
+without a failure (81 `OK`, 18 informational checks, and two expected losing transactions
+that reverted on-chain in race tests). The public node currently reports v5.0.0 while the
+client, compiler, and artifacts are v5.0.1, so the runner emits a version warning. See the
+[v5.0.1 testnet E2E report](docs/e2e-testnet-v5.0.1-report.md).
 
-The token standard's home repo (`defi-wonderland/aztec-standards`) is archived; its last
-release (`v5.0.0-rc.2`) pins aztec-nr rc.2, which cannot work on the v5.0.0 network
-(incompatible canonical AuthRegistry address). Until the official successor —
-[`alejoamiras/ecosystem-tooling`](https://github.com/alejoamiras/ecosystem-tooling)
-(`packages/aztec-standards`) — tags **v5.0.0**, run once after cloning (and after any
-`npm install` in `scripts/`):
+### Authorization contracts and fresh-chain seeding
 
-```bash
-bash contracts/patch-token-v5.sh
-```
+`EmbeddedWallet` preloads the standard AuthRegistry locally by default, so no explicit PXE
+registration is needed in these scripts. On a newly reset rollup, the standard instance must
+still be published once for public execution. Run
+`AZTEC_ENV=testnet npx tsx publishAuthRegistry.ts` (idempotent); it publishes the documented
+salt-1 universal deployment.
 
-It rebuilds the unchanged token source against aztec-nr v5.0.0 and refreshes the artifact
-in `scripts/node_modules`. When the successor release lands: point `contracts/train/Nargo.toml`
-and `scripts/package.json` at it and delete the patch script.
-
-### Fresh-chain seeding
-
-On a newly reset network the standard AuthRegistry is not published yet, and every
-authwit-based transfer fails until it is: `AZTEC_ENV=testnet npx tsx publishAuthRegistry.ts`
-(idempotent).
+This canonical AuthRegistry is used by account contracts for public authwits and is separate
+from the token standard's optional ARC-403 authorization hook. TRAIN's setup scripts pass the
+zero address as the token's `auth_contract`, intentionally disabling the ARC-403 hook.
 
 ## Project Structure
 
@@ -77,9 +72,9 @@ aztec/
 
 ## Prerequisites
 
-- [Aztec CLI](https://docs.aztec.network/) `4.2.0-aztecnr-rc.2`
+- [Aztec CLI](https://docs.aztec.network/) `5.0.1`
 - Install command:
-  `aztec-up install 4.2.0-aztecnr-rc.2`
+  `aztec-up install 5.0.1`
 - Node.js >= 18
 - For local development: a running Aztec sandbox (`aztec start --sandbox`)
 
@@ -90,7 +85,8 @@ cd scripts
 npm install
 ```
 
-> **Note:** `postinstall` creates a symlink needed by `@defi-wonderland/aztec-standards` (its `dist/` is missing the compiled `target/` artifacts). This runs automatically on `npm install`.
+The official standards package includes its compiled token artifact. The `postinstall` step
+only builds the pinned AztecScan SDK dependency.
 
 ## Contract Overview
 
@@ -140,17 +136,17 @@ When redeeming a solver lock:
 - **Before `reward_timelock`**: reward goes to `reward_recipient` (typically the solver)
 - **After `reward_timelock`**: reward goes to the redeemer
 
-## Deployed Contracts (testnet, v5.0.0 — 2026-07-15)
+## Deployed contracts (testnet, v5.0.1 artifacts — 2026-07-20)
 
 | Contract | Address |
 |---|---|
-| Train | `0x3055f51378381769adb3f9f76b70e6e39b4c9a2a6565acdc5c2d1783e7c21216` |
-| Token (test ETH) | `0x264fcdbf3c025c9c7be4e4a593ea688b02158afeca4000a6f6542cf1b71f828f` |
-| Token2 (test RWD) | `0x1658d0a9343374b90096da485a7a6c3998a0c2a70e68b5ad0b06255c5aa02046` |
-| ConstantPayoutCurve | `0x063ae60e12de5e6a34cc1e39d440a018463ea73f46fc73cd3c1c30c942f705ea` |
+| Train | `0x0483a6a15a6275c9482dbf8aa78aa96fe9291d60b08841a35739ebba4c33d9e6` |
+| Token1 (ETH) | `0x217878d61e5d31ed78a8ad6f0a6a9b8ee8a1eec5944a7d122f6d910abee0b098` |
+| Token2 (test RWD) | `0x2f63f2687b2fa5d38b51bc9970674e801e89074bd90b07994b8c288f980ba41a` |
+| ConstantPayoutCurve | `0x0f39abe60a09d7750b0f3fc1dada72f151d815f10f63a4413db9a9e2cb5d2fc7` |
 
-(Deployments from the verified E2E run — see [docs/e2e-testnet-v5.0.0-report.md](docs/e2e-testnet-v5.0.0-report.md).
-Earlier addresses from the pre-reset testnet are defunct; the network was redeployed for v5.)
+The earlier [v5.0.0 E2E report](docs/e2e-testnet-v5.0.0-report.md) is retained as historical
+evidence from the pre-migration deployment.
 
 ## Compile Contract
 
