@@ -11,8 +11,8 @@ on:
       - 'chains/starknet/**'
 
 jobs:
-  run-starknet-tests:
-    name: Run Starknet Tests
+  contracts:
+    name: Build & test (snforge)
     runs-on: ubuntu-latest
 
     steps:
@@ -29,10 +29,31 @@ jobs:
         with:
           starknet-foundry-version: "0.57.0"
 
-      - name: Build Contracts
+      - name: Build contracts
         working-directory: chains/starknet
         run: scarb build
 
-      - name: Run Tests
+      - name: Run tests
         working-directory: chains/starknet
         run: snforge test
+
+  scripts:
+    name: Typecheck scripts (tsc)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        working-directory: chains/starknet/scripts
+        run: npm ci
+
+      - name: Typecheck (no emit)
+        working-directory: chains/starknet/scripts
+        run: npx tsc --noEmit

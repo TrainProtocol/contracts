@@ -32,6 +32,10 @@ pub struct UserLock {
     pub status: LockStatus,
     pub recipient: ContractAddress,
     pub token: ContractAddress,
+    pub refund_to: ContractAddress,
+    pub start_time: u64,
+    pub payout_curve: ContractAddress,
+    pub payout_curve_data: ByteArray,
 }
 
 /// Solver-initiated lock storage structure
@@ -48,6 +52,10 @@ pub struct SolverLock {
     pub reward_recipient: ContractAddress,
     pub token: ContractAddress,
     pub reward_token: ContractAddress,
+    pub refund_to: ContractAddress,
+    pub start_time: u64,
+    pub payout_curve: ContractAddress,
+    pub payout_curve_data: ByteArray,
 }
 
 /// Cross-chain destination details (logged only, not stored)
@@ -68,12 +76,14 @@ pub struct UserLockParams {
     pub timelock_delta: u64,
     pub reward_timelock_delta: u64,
     pub quote_expiry: u64,
-    pub sender: ContractAddress,
     pub recipient: ContractAddress,
     pub token: ContractAddress,
     pub reward_token: ByteArray,
     pub reward_recipient: ByteArray,
     pub src_chain: ByteArray,
+    pub refund_to: ContractAddress,
+    pub payout_curve: ContractAddress,
+    pub payout_curve_data: ByteArray,
 }
 
 /// Parameters for creating a solver lock
@@ -84,19 +94,33 @@ pub struct SolverLockParams {
     pub reward: u256,
     pub timelock_delta: u64,
     pub reward_timelock_delta: u64,
-    pub sender: ContractAddress,
     pub recipient: ContractAddress,
     pub reward_recipient: ContractAddress,
     pub token: ContractAddress,
     pub reward_token: ContractAddress,
     pub src_chain: ByteArray,
+    pub refund_to: ContractAddress,
+    pub payout_curve: ContractAddress,
+    pub payout_curve_data: ByteArray,
 }
 
 #[starknet::interface]
 pub trait ITrain<TContractState> {
-    /// Create a user lock to initiate a cross-chain swap
+    /// Create a user lock to initiate a cross-chain swap (caller is attributed as sender)
     fn user_lock(
         ref self: TContractState,
+        params: UserLockParams,
+        dst: DestinationInfo,
+        user_data: ByteArray,
+        solver_data: ByteArray,
+    );
+
+    /// Create a user lock on behalf of `user`, funded by the caller (e.g. a router/relayer).
+    /// Permissionless: `user` is purely attributive (lock owner of record / enumeration index);
+    /// custody is governed by `params.recipient`/`params.refund_to`, not by `user`.
+    fn user_lock_for(
+        ref self: TContractState,
+        user: ContractAddress,
         params: UserLockParams,
         dst: DestinationInfo,
         user_data: ByteArray,
@@ -111,10 +135,10 @@ pub trait ITrain<TContractState> {
         data: ByteArray,
     ) -> u256;
 
-    /// Refund a user lock
+    /// Refund a user lock (full amount returned to `refund_to`)
     fn refund_user(ref self: TContractState, hashlock: u256);
 
-    /// Refund a solver lock (amount + reward returned to sender)
+    /// Refund a solver lock (amount + reward returned to `refund_to`)
     fn refund_solver(ref self: TContractState, hashlock: u256, index: u256);
 
     /// Redeem a user lock with the secret preimage
@@ -132,22 +156,18 @@ pub trait ITrain<TContractState> {
     /// Get the number of solver locks for a hashlock
     fn get_solver_lock_count(self: @TContractState, hashlock: u256) -> u256;
 
-    /// Get all hashlocks for user locks created by an address with filtering and pagination
+    /// Paginated hashlocks of the user locks created by / attributed to `user`.
+    /// Returns the page in `[offset, min(offset + limit, total))` plus `total`, the full number
+    /// of hashlocks for `user` (not a filtered match count).
     fn get_user_lock_hashes(
-        self: @TContractState,
-        user: ContractAddress,
-        status: LockStatus,
-        offset: u256,
-        limit: u256,
+        self: @TContractState, user: ContractAddress, offset: u256, limit: u256,
     ) -> (Array<u256>, u256);
 
-    /// Get all user lock details created by an address with filtering and pagination
+    /// Paginated user-lock details created by / attributed to `user`.
+    /// Returns the page in `[offset, min(offset + limit, total))` plus `total`, the full number
+    /// of locks for `user` (not a filtered match count).
     fn get_user_locks(
-        self: @TContractState,
-        user: ContractAddress,
-        status: LockStatus,
-        offset: u256,
-        limit: u256,
+        self: @TContractState, user: ContractAddress, offset: u256, limit: u256,
     ) -> (Array<Train::UserLock>, u256);
 }
 
@@ -159,9 +179,11 @@ mod Train {
     use core::num::traits::Zero;
     use core::sha256::compute_sha256_byte_array;
     use openzeppelin_interfaces::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
+    use openzeppelin_interfaces::introspection::{ISRC5Dispatcher, ISRC5DispatcherTrait};
     use openzeppelin_security::ReentrancyGuardComponent;
     use starknet::storage::{Map, StoragePathEntry};
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_contract_address};
+    use crate::payout_curve::{IPAYOUT_CURVE_ID, IPayoutCurveDispatcher, IPayoutCurveDispatcherTrait};
     use super::{LockStatus, UserLockParams, SolverLockParams, DestinationInfo};
 
     component!(path: ReentrancyGuardComponent, storage: reentrancy_guard, event: ReentrancyGuardEvent);
@@ -193,6 +215,10 @@ mod Train {
         pub status: LockStatus,
         pub recipient: ContractAddress,
         pub token: ContractAddress,
+        pub refund_to: ContractAddress,
+        pub start_time: u64,
+        pub payout_curve: ContractAddress,
+        pub payout_curve_data: ByteArray,
     }
 
     #[derive(Drop, Serde, starknet::Store)]
@@ -208,6 +234,10 @@ mod Train {
         pub reward_recipient: ContractAddress,
         pub token: ContractAddress,
         pub reward_token: ContractAddress,
+        pub refund_to: ContractAddress,
+        pub start_time: u64,
+        pub payout_curve: ContractAddress,
+        pub payout_curve_data: ByteArray,
     }
 
     // ───────────────────────────── Events ─────────────────────────────
@@ -246,6 +276,7 @@ mod Train {
         reward_recipient: ByteArray,
         reward_timelock_delta: u64,
         quote_expiry: u64,
+        payout_curve: ContractAddress,
         user_data: ByteArray,
         solver_data: ByteArray,
     }
@@ -267,6 +298,7 @@ mod Train {
         reward_recipient: ContractAddress,
         timelock: u64,
         reward_timelock: u64,
+        payout_curve: ContractAddress,
         dst_chain: ByteArray,
         dst_address: ByteArray,
         dst_amount: u256,
@@ -278,6 +310,8 @@ mod Train {
     struct UserRefunded {
         #[key]
         hashlock: u256,
+        refund_to: ContractAddress,
+        amount: u256,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -286,6 +320,9 @@ mod Train {
         hashlock: u256,
         #[key]
         index: u256,
+        refund_to: ContractAddress,
+        amount: u256,
+        reward: u256,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -294,6 +331,8 @@ mod Train {
         hashlock: u256,
         redeemer: ContractAddress,
         secret: u256,
+        payout: u256,
+        excess: u256,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -304,6 +343,10 @@ mod Train {
         index: u256,
         redeemer: ContractAddress,
         secret: u256,
+        payout: u256,
+        excess: u256,
+        reward_to: ContractAddress,
+        reward: u256,
     }
 
     // ───────────────────────── Implementation ─────────────────────────
@@ -317,69 +360,20 @@ mod Train {
             user_data: ByteArray,
             solver_data: ByteArray,
         ) {
-            self.reentrancy_guard.start();
+            let user = get_caller_address();
+            self._user_lock_core(user, params, dst, user_data, solver_data);
+        }
 
-            // Checks
-            assert(params.amount != 0, 'ZeroAmount');
-            assert(!params.token.is_zero(), 'InvalidToken');
-            assert(params.timelock_delta != 0, 'InvalidTimelock');
-            let now = get_block_timestamp();
-            assert(now < params.quote_expiry, 'QuoteExpired');
-            assert(
-                self.user_locks.entry(params.hashlock).sender.read().is_zero(),
-                'SwapAlreadyExists',
-            );
-            assert(params.timelock_delta <= 0xFFFFFFFFFFFFFFFF_u64 - now, 'TimelockOverflow');
-            let timelock = now + params.timelock_delta;
-
-            // Effects
-            self
-                .user_locks
-                .write(
-                    params.hashlock,
-                    UserLock {
-                        secret: 0,
-                        amount: params.amount,
-                        sender: params.sender,
-                        timelock: timelock,
-                        status: LockStatus::Pending,
-                        recipient: params.recipient,
-                        token: params.token,
-                    },
-                );
-
-            let count = self.user_lock_hash_count.read(params.sender);
-            self.user_lock_hashes.write((params.sender, count), params.hashlock);
-            self.user_lock_hash_count.write(params.sender, count + 1);
-
-            self
-                .emit(
-                    UserLocked {
-                        hashlock: params.hashlock,
-                        sender: params.sender,
-                        recipient: params.recipient,
-                        src_chain: params.src_chain,
-                        token: params.token,
-                        amount: params.amount,
-                        timelock: timelock,
-                        dst_chain: dst.dst_chain,
-                        dst_address: dst.dst_address,
-                        dst_amount: dst.dst_amount,
-                        dst_token: dst.dst_token,
-                        reward_amount: params.reward_amount,
-                        reward_token: params.reward_token,
-                        reward_recipient: params.reward_recipient,
-                        reward_timelock_delta: params.reward_timelock_delta,
-                        quote_expiry: params.quote_expiry,
-                        user_data: user_data,
-                        solver_data: solver_data,
-                    },
-                );
-
-            // Interactions
-            self._transfer_in(params.token, params.amount);
-
-            self.reentrancy_guard.end();
+        fn user_lock_for(
+            ref self: ContractState,
+            user: ContractAddress,
+            params: UserLockParams,
+            dst: DestinationInfo,
+            user_data: ByteArray,
+            solver_data: ByteArray,
+        ) {
+            assert(!user.is_zero(), 'InvalidUser');
+            self._user_lock_core(user, params, dst, user_data, solver_data);
         }
 
         fn solver_lock(
@@ -395,12 +389,22 @@ mod Train {
             assert(!params.token.is_zero(), 'InvalidToken');
             assert(params.timelock_delta != 0, 'InvalidTimelock');
             let now = get_block_timestamp();
+            // The solver (caller) is recorded as the lock owner. Using the caller (never zero
+            // for a real transaction) also avoids a fund-loss case where a zero owner would
+            // make the lock read as `LockNotFound` on exit.
+            let caller = get_caller_address();
             assert(params.timelock_delta <= 0xFFFFFFFFFFFFFFFF_u64 - now, 'TimelockOverflow');
             if params.reward > 0 {
                 assert(!params.reward_token.is_zero(), 'InvalidToken');
                 assert(params.reward_timelock_delta < params.timelock_delta, 'InvalidRewardTimelock');
+                assert(!params.reward_recipient.is_zero(), 'ZeroAddress');
             }
             assert(params.reward_timelock_delta <= 0xFFFFFFFFFFFFFFFF_u64 - now, 'TimelockOverflow');
+            assert(!params.recipient.is_zero(), 'ZeroAddress');
+            assert(!params.refund_to.is_zero(), 'ZeroAddress');
+            if !params.payout_curve.is_zero() {
+                self._validate_payout_curve(params.payout_curve);
+            }
             let timelock = now + params.timelock_delta;
             let reward_timelock = now + params.reward_timelock_delta;
 
@@ -418,7 +422,7 @@ mod Train {
                         secret: 0,
                         amount: params.amount,
                         reward: params.reward,
-                        sender: params.sender,
+                        sender: caller,
                         timelock: timelock,
                         reward_timelock: reward_timelock,
                         recipient: params.recipient,
@@ -426,6 +430,10 @@ mod Train {
                         reward_recipient: params.reward_recipient,
                         token: params.token,
                         reward_token: params.reward_token,
+                        refund_to: params.refund_to,
+                        start_time: now,
+                        payout_curve: params.payout_curve,
+                        payout_curve_data: params.payout_curve_data,
                     },
                 );
 
@@ -433,7 +441,7 @@ mod Train {
                 .emit(
                     SolverLocked {
                         hashlock: params.hashlock,
-                        sender: params.sender,
+                        sender: caller,
                         recipient: params.recipient,
                         index: index,
                         src_chain: params.src_chain,
@@ -444,6 +452,7 @@ mod Train {
                         reward_recipient: params.reward_recipient,
                         timelock: timelock,
                         reward_timelock: reward_timelock,
+                        payout_curve: params.payout_curve,
                         dst_chain: dst.dst_chain,
                         dst_address: dst.dst_address,
                         dst_amount: dst.dst_amount,
@@ -472,10 +481,10 @@ mod Train {
 
             // Effects
             self.user_locks.entry(hashlock).status.write(LockStatus::Refunded);
-            self.emit(UserRefunded { hashlock: hashlock });
+            self.emit(UserRefunded { hashlock: hashlock, refund_to: lock.refund_to, amount: lock.amount });
 
             // Interactions
-            self._transfer_out(lock.token, lock.sender, lock.amount);
+            self._transfer_out(lock.token, lock.refund_to, lock.amount);
 
             self.reentrancy_guard.end();
         }
@@ -491,17 +500,26 @@ mod Train {
 
             // Effects
             self.solver_locks.entry((hashlock, index)).status.write(LockStatus::Refunded);
-            self.emit(SolverRefunded { hashlock: hashlock, index: index });
+            self
+                .emit(
+                    SolverRefunded {
+                        hashlock: hashlock,
+                        index: index,
+                        refund_to: lock.refund_to,
+                        amount: lock.amount,
+                        reward: lock.reward,
+                    },
+                );
 
             // Interactions
             self
                 ._transfer_out_mixed(
                     lock.token,
                     lock.amount,
-                    lock.sender,
+                    lock.refund_to,
                     lock.reward_token,
                     lock.reward,
-                    lock.sender,
+                    lock.refund_to,
                 );
 
             self.reentrancy_guard.end();
@@ -516,18 +534,32 @@ mod Train {
             assert(_sha256_u256(secret) == hashlock, 'HashlockMismatch');
             assert(lock.status == LockStatus::Pending, 'LockNotPending');
 
+            let now = get_block_timestamp();
+            let payout = self
+                ._compute_payout(
+                    lock.payout_curve, lock.amount, lock.start_time, now, lock.payout_curve_data,
+                );
+            let excess = lock.amount - payout;
+
             // Effects
             self.user_locks.entry(hashlock).status.write(LockStatus::Redeemed);
             self.user_locks.entry(hashlock).secret.write(secret);
             self
                 .emit(
                     UserRedeemed {
-                        hashlock: hashlock, redeemer: get_caller_address(), secret: secret,
+                        hashlock: hashlock,
+                        redeemer: get_caller_address(),
+                        secret: secret,
+                        payout: payout,
+                        excess: excess,
                     },
                 );
 
             // Interactions
-            self._transfer_out(lock.token, lock.recipient, lock.amount);
+            self._transfer_out(lock.token, lock.recipient, payout);
+            if excess > 0 {
+                self._transfer_out(lock.token, lock.refund_to, excess);
+            }
 
             self.reentrancy_guard.end();
         }
@@ -541,11 +573,18 @@ mod Train {
             assert(_sha256_u256(secret) == hashlock, 'HashlockMismatch');
             assert(lock.status == LockStatus::Pending, 'LockNotPending');
 
-            let reward_to = if lock.reward_timelock > get_block_timestamp() {
+            let now = get_block_timestamp();
+            let reward_to = if lock.reward_timelock > now {
                 lock.reward_recipient
             } else {
                 get_caller_address()
             };
+
+            let payout = self
+                ._compute_payout(
+                    lock.payout_curve, lock.amount, lock.start_time, now, lock.payout_curve_data,
+                );
+            let excess = lock.amount - payout;
 
             // Effects
             self.solver_locks.entry((hashlock, index)).status.write(LockStatus::Redeemed);
@@ -557,19 +596,21 @@ mod Train {
                         index: index,
                         redeemer: get_caller_address(),
                         secret: secret,
+                        payout: payout,
+                        excess: excess,
+                        reward_to: reward_to,
+                        reward: lock.reward,
                     },
                 );
 
             // Interactions
-            self
-                ._transfer_out_mixed(
-                    lock.token,
-                    lock.amount,
-                    lock.recipient,
-                    lock.reward_token,
-                    lock.reward,
-                    reward_to,
-                );
+            self._transfer_out(lock.token, lock.recipient, payout);
+            if excess > 0 {
+                self._transfer_out(lock.token, lock.refund_to, excess);
+            }
+            if lock.reward > 0 {
+                self._transfer_out(lock.reward_token, reward_to, lock.reward);
+            }
 
             self.reentrancy_guard.end();
         }
@@ -587,72 +628,66 @@ mod Train {
         }
 
         fn get_user_lock_hashes(
-            self: @ContractState,
-            user: ContractAddress,
-            status: LockStatus,
-            offset: u256,
-            limit: u256,
+            self: @ContractState, user: ContractAddress, offset: u256, limit: u256,
         ) -> (Array<u256>, u256) {
-            let total_hashes = self.user_lock_hash_count.read(user);
+            let total = self.user_lock_hash_count.read(user);
 
-            if limit == 0 {
-                return (array![], 0);
+            if limit == 0 || offset >= total {
+                return (array![], total);
             }
 
+            // offset < total here (guarded above), so total - offset cannot underflow; the else
+            // branch only runs when limit <= total - offset, so offset + limit <= total.
+            let end = if limit > total - offset {
+                total
+            } else {
+                offset + limit
+            };
+
             let mut result: Array<u256> = array![];
-            let mut match_count: u256 = 0;
-            let mut i: u256 = 0;
-            while i != total_hashes {
-                let h = self.user_lock_hashes.read((user, i));
-                let lock_status = self.user_locks.entry(h).status.read();
-                if status == LockStatus::Empty || lock_status == status {
-                    if match_count >= offset && match_count < offset + limit {
-                        result.append(h);
-                    }
-                    match_count += 1;
-                }
+            let mut i = offset;
+            while i != end {
+                result.append(self.user_lock_hashes.read((user, i)));
                 i += 1;
             };
 
-            (result, match_count)
+            (result, total)
         }
 
         fn get_user_locks(
-            self: @ContractState,
-            user: ContractAddress,
-            status: LockStatus,
-            offset: u256,
-            limit: u256,
+            self: @ContractState, user: ContractAddress, offset: u256, limit: u256,
         ) -> (Array<UserLock>, u256) {
-            let total_hashes = self.user_lock_hash_count.read(user);
+            let total = self.user_lock_hash_count.read(user);
 
-            if limit == 0 {
-                return (array![], 0);
+            if limit == 0 || offset >= total {
+                return (array![], total);
             }
 
+            // offset < total here (guarded above), so total - offset cannot underflow; the else
+            // branch only runs when limit <= total - offset, so offset + limit <= total.
+            let end = if limit > total - offset {
+                total
+            } else {
+                offset + limit
+            };
+
             let mut result: Array<UserLock> = array![];
-            let mut match_count: u256 = 0;
-            let mut i: u256 = 0;
-            while i != total_hashes {
+            let mut i = offset;
+            while i != end {
                 let h = self.user_lock_hashes.read((user, i));
-                let lock = self.user_locks.read(h);
-                if status == LockStatus::Empty || lock.status == status {
-                    if match_count >= offset && match_count < offset + limit {
-                        result.append(lock);
-                    }
-                    match_count += 1;
-                }
+                result.append(self.user_locks.read(h));
                 i += 1;
             };
 
-            (result, match_count)
+            (result, total)
         }
     }
 
     // ──────────────────────── Internal Helpers ────────────────────────
 
-    /// Compute SHA256 of a u256 (32 bytes big-endian), matching Solidity's
-    /// `sha256(abi.encodePacked(uint256))`.
+    /// Computes SHA-256 over the 32-byte big-endian encoding of the `u256` secret, producing
+    /// the hashlock. This is the cross-chain-standard HTLC preimage encoding, so a solver or
+    /// user on any chain the swap touches can derive the same hashlock from the same secret.
     fn _sha256_u256(value: u256) -> u256 {
         let mut ba: ByteArray = "";
         ba.append_word(value.high.into(), 16);
@@ -722,6 +757,119 @@ mod Train {
                     self._transfer_out(reward_token, reward_to, reward);
                 }
             }
+        }
+
+        /// Shared validation + storage/event logic for `user_lock` and `user_lock_for`.
+        /// `user` is the lock owner of record: it is written as `UserLock.sender`, used as the
+        /// `user_lock_hashes` enumeration key, and emitted as `UserLocked.sender`. Funds are
+        /// always pulled from `get_caller_address()` via `_transfer_in`, regardless of `user`.
+        fn _user_lock_core(
+            ref self: ContractState,
+            user: ContractAddress,
+            params: UserLockParams,
+            dst: DestinationInfo,
+            user_data: ByteArray,
+            solver_data: ByteArray,
+        ) {
+            self.reentrancy_guard.start();
+
+            // Checks
+            assert(params.amount != 0, 'ZeroAmount');
+            assert(!params.token.is_zero(), 'InvalidToken');
+            assert(params.timelock_delta != 0, 'InvalidTimelock');
+            let now = get_block_timestamp();
+            assert(now < params.quote_expiry, 'QuoteExpired');
+            assert(
+                self.user_locks.entry(params.hashlock).sender.read().is_zero(),
+                'SwapAlreadyExists',
+            );
+            assert(params.timelock_delta <= 0xFFFFFFFFFFFFFFFF_u64 - now, 'TimelockOverflow');
+            assert(!params.recipient.is_zero(), 'ZeroAddress');
+            assert(!params.refund_to.is_zero(), 'ZeroAddress');
+            if !params.payout_curve.is_zero() {
+                self._validate_payout_curve(params.payout_curve);
+            }
+            let timelock = now + params.timelock_delta;
+
+            // Effects
+            self
+                .user_locks
+                .write(
+                    params.hashlock,
+                    UserLock {
+                        secret: 0,
+                        amount: params.amount,
+                        sender: user,
+                        timelock: timelock,
+                        status: LockStatus::Pending,
+                        recipient: params.recipient,
+                        token: params.token,
+                        refund_to: params.refund_to,
+                        start_time: now,
+                        payout_curve: params.payout_curve,
+                        payout_curve_data: params.payout_curve_data,
+                    },
+                );
+
+            let count = self.user_lock_hash_count.read(user);
+            self.user_lock_hashes.write((user, count), params.hashlock);
+            self.user_lock_hash_count.write(user, count + 1);
+
+            self
+                .emit(
+                    UserLocked {
+                        hashlock: params.hashlock,
+                        sender: user,
+                        recipient: params.recipient,
+                        src_chain: params.src_chain,
+                        token: params.token,
+                        amount: params.amount,
+                        timelock: timelock,
+                        payout_curve: params.payout_curve,
+                        dst_chain: dst.dst_chain,
+                        dst_address: dst.dst_address,
+                        dst_amount: dst.dst_amount,
+                        dst_token: dst.dst_token,
+                        reward_amount: params.reward_amount,
+                        reward_token: params.reward_token,
+                        reward_recipient: params.reward_recipient,
+                        reward_timelock_delta: params.reward_timelock_delta,
+                        quote_expiry: params.quote_expiry,
+                        user_data: user_data,
+                        solver_data: solver_data,
+                    },
+                );
+
+            // Interactions
+            self._transfer_in(params.token, params.amount);
+
+            self.reentrancy_guard.end();
+        }
+
+        /// Reverts with `InvalidPayoutCurve` unless `curve` advertises `IPayoutCurve` via SRC5.
+        fn _validate_payout_curve(ref self: ContractState, curve: ContractAddress) {
+            let supported = ISRC5Dispatcher { contract_address: curve }
+                .supports_interface(IPAYOUT_CURVE_ID);
+            assert(supported, 'InvalidPayoutCurve');
+        }
+
+        /// Compute the redeemable payout for a lock. Returns `amount` unchanged when no curve is
+        /// set; otherwise calls `IPayoutCurve::compute_payout` and enforces `0 < payout <= amount`.
+        fn _compute_payout(
+            ref self: ContractState,
+            payout_curve: ContractAddress,
+            amount: u256,
+            start_time: u64,
+            current_time: u64,
+            payout_curve_data: ByteArray,
+        ) -> u256 {
+            if payout_curve.is_zero() {
+                return amount;
+            }
+            let payout = IPayoutCurveDispatcher { contract_address: payout_curve }
+                .compute_payout(amount, start_time, current_time, payout_curve_data);
+            assert(payout > 0 && payout <= amount, 'InvalidPayout');
+            payout
         }
     }
 }

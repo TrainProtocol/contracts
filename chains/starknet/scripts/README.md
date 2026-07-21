@@ -119,6 +119,91 @@ Output:
 - Voyager explorer links
 - When `voyager` is specified: submits all Cairo source files + Scarb.toml, polls briefly, then prints the Voyager link to check status
 
+## End-to-end test suite (`sepolia-e2e.ts`)
+
+Config-driven, idempotent, re-runnable end-to-end suite that runs entirely on **Starknet
+Sepolia** using the canonical Sepolia **STRK** (principal) and **ETH** (second / reward token)
+ERC20 contracts. It never deploys or mints a token — it spends from the pre-funded balances of
+whatever accounts are configured, in tiny (wei-scale) amounts since the happy paths cycle funds
+back to the same accounts.
+
+`deploy-all.ts` (used by this suite) declares/deploys only `ConstantPayoutCurve` -> `Train` ->
+`TrainRouter` — no token.
+
+Flows covered (each produces one or more rows in the report):
+
+- **Happy**: direct `user_lock` -> `redeem_user`; `user_lock` with `ConstantPayoutCurve` (full
+  payout, zero excess); `refund_user` by the recipient before the timelock; `refund_user` by a
+  third party after the timelock; `user_lock_for(beneficiary)` attribution; `solver_lock` ->
+  `redeem_solver` (reward before/after `reward_timelock`, same-token and different-token reward);
+  `refund_solver` after the timelock; **Rail A** gasless via `TrainRouter.forward_intent`; **Rail
+  B** gasless via SNIP-9 `execute_from_outside_v2`; view/enumeration probes.
+- **Unhappy**: `ZeroAmount`, `InvalidToken`, `InvalidTimelock`, `QuoteExpired`,
+  `SwapAlreadyExists`, `HashlockMismatch`, `LockNotFound`, `RefundNotAllowed`, `LockNotPending`,
+  `InvalidRewardTimelock`, `ZeroAddress`, `InvalidUser`; Rail A's `RouterMismatch`,
+  `IntentExpired`, `IntentConsumed` (replay), `CallHashMismatch`, `InvalidSignature`,
+  `ResidualBalance`; Rail B's expired time-bounds and duplicate-nonce replay. State-independent
+  cases are checked via a raw `starknet_call` simulation (no tx, no gas); state-dependent cases
+  (double-redeem, replay) send a real transaction and assert it reverts on-chain.
+
+```bash
+npm run e2e
+# or directly:
+cd scripts && npx tsx src/sepolia-e2e.ts
+```
+
+### Sepolia (authoritative run)
+
+```bash
+RPC_URL=https://starknet-sepolia.g.alchemy.com/starknet/version/rpc/v0_10/YOUR_KEY \
+ACCOUNT_ADDRESS=0x<user_wallet_address> \
+PRIVATE_KEY=0x<user_wallet_signing_key> \
+RELAYER_ADDRESS=0x<funded_relayer_address> \
+RELAYER_PRIVATE_KEY=0x<funded_relayer_private_key> \
+cd scripts && npx tsx src/sepolia-e2e.ts
+```
+
+`ACCOUNT_ADDRESS`/`PRIVATE_KEY` (the **user**) **must be a real SNIP-9-capable wallet** — Argent,
+Braavos, or Ready — since Rail B is validated against this exact account via
+`execute_from_outside_v2`, not a throwaway test account. `PRIVATE_KEY` must be the account's raw
+STARK-curve signing key (single-owner / no guardian), because the suite signs the Rail A `Intent`
+and the Rail B `OutsideExecution` directly with `ec.starkCurve.sign`. `RELAYER_ADDRESS`/
+`RELAYER_PRIVATE_KEY` pays gas for both gasless rails; `SOLVER_ADDRESS`/`SOLVER_PRIVATE_KEY` is
+optional (defaults to the relayer, then to the user). `STRK_ADDRESS`/`ETH_ADDRESS` override the
+default canonical Sepolia token addresses if needed. Optionally set `TRAIN`/`TRAIN_ROUTER`/
+`CONSTANT_CURVE` to reuse already-deployed contracts instead of declaring/deploying fresh ones;
+see `.env.example` for the full list of variables.
+
+### Local devnet (non-Rail-B smoke test only)
+
+```bash
+starknet-devnet --seed 0 --port 5060 --accounts 3
+# copy account 0 (user) and account 1 (relayer) address+private key from its output
+
+RPC_URL=http://127.0.0.1:5060/rpc \
+ACCOUNT_ADDRESS=0x<account0_address> \
+PRIVATE_KEY=0x<account0_private_key> \
+RELAYER_ADDRESS=0x<account1_address> \
+RELAYER_PRIVATE_KEY=0x<account1_private_key> \
+STRK_ADDRESS=0x<devnet_strk_fee_token_address> \
+ETH_ADDRESS=0x<devnet_eth_fee_token_address> \
+cd scripts && npx tsx src/sepolia-e2e.ts
+```
+
+`starknet-devnet`'s predeployed accounts are already funded in devnet's own STRK/ETH fee-token
+contracts, so pointing `STRK_ADDRESS`/`ETH_ADDRESS` at those (printed in the devnet startup
+banner) lets every flow except Rail B run for free. **Rail B cannot be validated on devnet**: the
+default devnet account does not support SNIP-9, so the suite detects this via
+`src5.supportsInterface` and records Rail B (and its unhappy paths) as a skipped/pending-on-Sepolia
+info row rather than failing the run. All other flows (direct, curve, refunds, third-party
+refund, Rail A, and the general/Rail-A unhappy paths) run and are asserted normally on devnet.
+
+The suite writes `docs/e2e-testnet-report.md` (+ a sibling `.json`) in the same row-table format
+used by the aztec chain's e2e report (`# | Stage | Name | Kind | Status | Tx | Block | Fee |
+Note`), with a `## Build and local verification` section (Cairo build, `tsc --noEmit`, local
+`snforge` tests) and an `## Environment` section listing the RPC, deployed contracts, token
+addresses, and actor addresses. Exit code is non-zero if any row fails.
+
 ## Hashlock / Secret
 
 The contract uses `sha256(secret)` as the hashlock, where `secret` is a `u256` hashed as 32 bytes big-endian. The `interact` script computes this identically using Node.js `crypto.createHash('sha256')`.

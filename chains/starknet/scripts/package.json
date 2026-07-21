@@ -4,8 +4,10 @@
   "type": "module",
   "scripts": {
     "deploy": "tsx src/deploy.ts",
+    "deploy-all": "tsx src/deploy-all.ts",
     "interact": "tsx src/interact.ts",
-    "verify": "tsx src/verify.ts"
+    "verify": "tsx src/verify.ts",
+    "e2e": "tsx src/sepolia-e2e.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.0",

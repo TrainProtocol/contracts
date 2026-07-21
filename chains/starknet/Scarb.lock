@@ -8,10 +8,28 @@ source = "registry+https://scarbs.xyz/"
 checksum = "sha256:f69fdb36eb894a0e0732385e723c5ff56d8cb4c1d49b29446c77eefac00b02a5"
 
 [[package]]
+name = "openzeppelin_introspection"
+version = "3.0.0"
+source = "registry+https://scarbs.xyz/"
+checksum = "sha256:ee491981a69736cde220f8b7dd290b6d8620c85ee6b83c81f665f5bef78b62b1"
+dependencies = [
+ "openzeppelin_interfaces",
+]
+
+[[package]]
 name = "openzeppelin_security"
 version = "3.0.0"
 source = "registry+https://scarbs.xyz/"
 checksum = "sha256:470f2debae50e03f1435874bc697a0825c257edcad4d1a0cc134e40360e6aba8"
+dependencies = [
+ "openzeppelin_interfaces",
+]
+
+[[package]]
+name = "openzeppelin_utils"
+version = "2.1.0"
+source = "registry+https://scarbs.xyz/"
+checksum = "sha256:4d5504fef1c5a6d9fee6a3ae392004a4a24b4b3ccb790c5e5217da96beb73e08"
 dependencies = [
  "openzeppelin_interfaces",
 ]
@@ -36,6 +54,8 @@ name = "train_protocol"
 version = "0.2.0"
 dependencies = [
  "openzeppelin_interfaces",
+ "openzeppelin_introspection",
  "openzeppelin_security",
+ "openzeppelin_utils",
  "snforge_std",
 ]

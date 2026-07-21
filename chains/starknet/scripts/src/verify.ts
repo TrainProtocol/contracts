@@ -11,9 +11,22 @@ function collectSourceFiles(): Record<string, string> {
   const files: Record<string, string> = {};
 
   files["Scarb.toml"] = readFileSync(resolve(PROJECT_ROOT, "Scarb.toml"), "utf-8");
+  // Include the lockfile so the verifier resolves the EXACT dependency versions we built
+  // against. Without it, a fresh `scarb metadata` re-resolve fails version-solving on our
+  // mixed OpenZeppelin versions (interfaces 2.1.0 vs security/introspection 3.0.0).
+  try {
+    files["Scarb.lock"] = readFileSync(resolve(PROJECT_ROOT, "Scarb.lock"), "utf-8");
+  } catch { /* lockfile optional */ }
+
+  // Test-only sources to keep OUT of the published/verified source. `mocks` (dir) and
+  // `mocks.cairo` are `#[cfg(test)]` and never part of a release build, so excluding them does
+  // not change the compiled class hash — it just keeps the verified source to the deployable
+  // contracts only, so a reader of a verified class never sees test mocks.
+  const EXCLUDE = new Set(["mocks", "mocks.cairo"]);
 
   function walk(dir: string) {
     for (const entry of readdirSync(dir)) {
+      if (EXCLUDE.has(entry)) continue;
       const full = resolve(dir, entry);
       if (statSync(full).isDirectory()) {
         walk(full);
@@ -44,7 +57,9 @@ async function verifyVoyager(classHash: string, isMainnet: boolean): Promise<boo
     compiler_version: "2.14.0",
     scarb_version: "2.14.0",
     project_dir_path: ".",
-    name: "Train",
+    // The contract (`#[starknet::contract] mod <name>`) this class corresponds to. Defaults to
+    // Train; set CONTRACT_NAME for the other contracts in the package (TrainRouter, ConstantPayoutCurve).
+    name: process.env.CONTRACT_NAME ?? "Train",
     package_name: "train_protocol",
     build_tool: "scarb",
     license: "MIT",

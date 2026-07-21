@@ -157,7 +157,7 @@ fn test_user_lock_increments_hash_count() {
     do_user_lock(train_addr, token_addr, HASHLOCK_2);
     stop_cheat_block_timestamp(train_addr);
 
-    let (hashes, total) = train.get_user_lock_hashes(SENDER(), LockStatus::Empty, 0, 100);
+    let (hashes, total) = train.get_user_lock_hashes(SENDER(), 0, 100);
     assert(total == 2, 'wrong total');
     assert(hashes.len() == 2, 'wrong hashes len');
 }
@@ -179,26 +179,4 @@ fn test_user_lock_event_emitted() {
 
     let events = spy.get_events();
     assert(events.events.len() >= 1, 'no events emitted');
-}
-
-#[test]
-fn test_user_lock_different_sender_field() {
-    let (train_addr, token_addr, _) = setup();
-    let train = ITrainDispatcher { contract_address: train_addr };
-
-    #[feature("deprecated-starknet-consts")]
-    let other = contract_address_const::<'OTHER'>();
-
-    let mut params = make_user_lock_params(HASHLOCK, token_addr, LOCK_AMOUNT);
-    params.sender = other;
-    let dst = make_dst();
-
-    start_cheat_block_timestamp(train_addr, BASE_TIMESTAMP);
-    start_cheat_caller_address(train_addr, SENDER());
-    train.user_lock(params, dst, "", "");
-    stop_cheat_caller_address(train_addr);
-    stop_cheat_block_timestamp(train_addr);
-
-    let lock = train.get_user_lock(HASHLOCK);
-    assert(lock.sender == other, 'wrong sender');
 }
