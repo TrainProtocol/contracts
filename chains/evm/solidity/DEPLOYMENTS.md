@@ -57,6 +57,62 @@ Tron mainnet will get new, unrelated addresses.
 | Monad | 143 | Not deployed | [monadscan.com](https://monadscan.com) |
 | Tron | 728126428 (0x2b6653dc) | Not deployed | [tronscan.org](https://tronscan.org) |
 
+## Tempo Addresses — v2 (deployed, testnet)
+
+**Different contract, not just different bytecode.** Tempo deploys
+[`src/tempo/Train.sol`](src/tempo/Train.sol)'s `Train` — a genuinely distinct contract from the shared
+`Train.sol` above (no native-ETH paths, no `userLockFor`; see `README.md` trust assumptions 7–9) — and
+**no `TrainRouter`** at all. `evm_version = osaka` (vs `cancun` for the shared set) means the addresses
+below legitimately differ from the shared EVM table, via the same `train.protocol.v2` salt.
+
+| Contract | Address |
+| --- | --- |
+| ConstantPayoutCurve | [`0xe07d9f773112388E0126B31611A4A56Cf6a9E3Fa`](https://explore.testnet.tempo.xyz/address/0xe07d9f773112388E0126B31611A4A56Cf6a9E3Fa) |
+| Train (tempo) | [`0xf37846fD2D6fAC5E4F7597463a1c4f30397A9e29`](https://explore.testnet.tempo.xyz/address/0xf37846fD2D6fAC5E4F7597463a1c4f30397A9e29) |
+
+| Network | Chain ID | Status | Verified | Explorer |
+| --- | --- | --- | --- | --- |
+| Tempo Testnet (Moderato) | 42431 | Deployed | Yes (Sourcify) — see note below | [explore.testnet.tempo.xyz](https://explore.testnet.tempo.xyz/address/0xf37846fD2D6fAC5E4F7597463a1c4f30397A9e29) |
+| Tempo Mainnet | 4217 | Not deployed | — | [explore.tempo.xyz](https://explore.tempo.xyz) |
+
+Deployment txs: ConstantPayoutCurve
+[`0xb0c5234663741c20b93b596adb61cd49a838250f5f299f64e4b80d9c781a61f3`](https://explore.testnet.tempo.xyz/tx/0xb0c5234663741c20b93b596adb61cd49a838250f5f299f64e4b80d9c781a61f3),
+Train
+[`0x972f9f88060878c3ee96154dbe0a3e62b943175a3847f3ddfc796e2f9b9aefe2`](https://explore.testnet.tempo.xyz/tx/0x972f9f88060878c3ee96154dbe0a3e62b943175a3847f3ddfc796e2f9b9aefe2).
+Deployed via `script/tempo/DeployTempo.s.sol` (`FOUNDRY_PROFILE=tempo`).
+
+**Verification — DONE (2026-07-23).** Both contracts are source-verified on Tempo's Sourcify-compatible
+verifier at `contracts.tempo.xyz`, each with an `exact_match` (runtime `exact_match`, creation `match`):
+
+| Contract | matchId | Lookup (verifier API) |
+| --- | --- | --- |
+| ConstantPayoutCurve | 28107 | [`/v2/contract/42431/0xe07d…E3Fa`](https://contracts.tempo.xyz/v2/contract/42431/0xe07d9f773112388E0126B31611A4A56Cf6a9E3Fa) |
+| Train (tempo) | 28108 | [`/v2/contract/42431/0xf378…9e29`](https://contracts.tempo.xyz/v2/contract/42431/0xf37846fD2D6fAC5E4F7597463a1c4f30397A9e29) |
+
+Confirm anytime with `GET https://contracts.tempo.xyz/v2/contract/42431/<addr>` (returns HTTP 200 +
+`"match":"exact_match"` when verified) or on the explorer contract page. The verifier is a Sourcify v2
+instance (per its `/openapi.json`); the live verified copy is authoritative there and the explorer reads
+from it.
+
+*Method (why not a plain `forge verify-contract`):* the installed forge (`1.6.0-nightly-tempo`) always
+emits an **Etherscan-format** verify payload once `--verifier-url` is set — even with `--verifier sourcify`
+explicit — and POSTs it to a route that 404s; it never reaches Tempo's `/v2/verify/{chainId}/{address}`
+Sourcify route. (It also runs an Etherscan-style is-verified/ABI precheck first, which fails with a
+`host only … did you mean /api?` error; `--skip-is-verified-check` gets past that but the payload shape is
+still wrong.) So verification was submitted **directly to the API**, exactly as Tempo's docs
+(`tempo.xyz/docs/quickstart/verify-contracts`, "API Verification") describe:
+
+1. Generate the standard-JSON compiler input with forge (this *does* work and is the reliable part):
+   `$env:FOUNDRY_PROFILE="tempo"; forge verify-contract <addr> <path>:<Name> --show-standard-json-input`.
+2. `POST https://contracts.tempo.xyz/v2/verify/42431/<addr>` with a JSON body
+   `{ stdJsonInput, compilerVersion: "v0.8.34+commit.80d5c536", contractIdentifier: "<path>:<Name>",
+   creationTransactionHash: "<deploy tx>" }`. Set a browser `User-Agent` — Cloudflare returns 403
+   (error 1010, "browser signature banned") for the default `Python-urllib`/scripted UA.
+3. Poll `GET https://contracts.tempo.xyz/v2/verify/{verificationId}` until `isJobCompleted:true`.
+
+`FOUNDRY_PROFILE=tempo` is required in step 1 so the std-JSON carries `evmVersion:"osaka"` + `viaIR:true`;
+without it the bytecode won't match. The one-off script used lives outside the repo (session scratchpad).
+
 ## Tron Addresses — Nile Testnet — v2 (deployed)
 
 Addresses differ from EVM by design (no CREATE2 on Tron, 0x41 address derivation).
@@ -95,6 +151,15 @@ Fill in after `npm run deploy:tron:mainnet`.
   [`script/deploy-testnets.ps1`](script/deploy-testnets.ps1) (multi-chain orchestrator),
   [`script/deploy-tron.js`](script/deploy-tron.js) (TronWeb). See the
   [deploy section of the README](README.md#deploy--on-chain-testnet-flow) for usage.
+- **Tempo-specific:** the deployer (and any relayer/fee-payer) needs a **pathUSD** balance, not native
+  ETH — Tempo has no native gas token, and `eth_getBalance` there always returns a fixed sentinel
+  regardless of actual balance, so it cannot be used as an affordability check (`DeployTempo.s.sol`
+  checks pathUSD directly). No native-ETH support exists on this deployment at all (not just
+  unreachable — the contract itself has no `payable` entrypoints). No `TrainRouter` is deployed on
+  Tempo; use the native batched-and-sponsored flow instead (`script/tempo/native_flow.py`). pathUSD
+  carries an active TIP-403 blacklist policy (README trust assumption 8) — accepted risk, not specific
+  to this deployment tooling. See [`script/tempo/README.md`](script/tempo/README.md) for the full
+  walkthrough.
 
 ---
 

@@ -37,6 +37,23 @@ remappings = [
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/"
 ]
 
+# Tempo build profile (Osaka hard fork; no native gas token — deploys src/tempo/Train.sol, a
+# Tempo-specific contract, not the shared src/Train.sol used by the other 6 EVM chains).
+# Use:  $env:FOUNDRY_PROFILE="tempo"; forge build
+[profile.tempo]
+src = "src"
+out = "out"
+libs = ["lib"]
+solc = "0.8.34"
+evm_version = "osaka"
+via_ir = true
+optimizer = true
+optimizer_runs = 1000000
+script = "script"
+remappings = [
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/"
+]
+
 # Public testnet RPCs for the deterministic multi-chain deploy (script/deploy-testnets.ps1).
 [rpc_endpoints]
 sepolia          = "https://ethereum-sepolia-rpc.publicnode.com"

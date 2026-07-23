@@ -111,6 +111,24 @@ These are **documented, accepted** behaviors — read before integrating.
    locks. ERC20 transfers are unaffected.
 6. **Native ETH is ERC20-only on the gasless path.** `userLock`/`solverLock` stay `payable` for native
    ETH; the Router is ERC20-only (the gasless standards are token signatures).
+7. **Tempo gets a dedicated contract, not this one.** Tempo has no native gas token —
+   `CALLVALUE`/`BALANCE`/`SELFBALANCE` always return 0. Rather than deploy this `Train.sol` with its
+   native-ETH paths sitting unreachable, Tempo deploys [`src/tempo/Train.sol`](src/tempo/Train.sol): the
+   same core HTLC logic with `payable`, the native-ETH branches, and `userLockFor` removed entirely
+   (see point 9 for why `userLockFor` specifically isn't needed there). See
+   [`script/tempo/README.md`](script/tempo/README.md).
+8. **pathUSD carries an active TIP-403 blacklist policy.** Tempo's fee-fallback TIP-20 (`0x20C0...`) is
+   not on the permissive default policy — it's on an admin-controlled blacklist (policy id 2, immediate
+   effect, no appeal process). If a lock's `recipient`/`refundTo` gets blocked after creation, both
+   redeem and refund can revert permanently on that lock — Train has no admin sweep. Accepted risk,
+   noted here for awareness; document the current admin identity/governance when it's needed.
+9. **`TrainRouter` is not deployed on Tempo at all.** Its whole purpose — let a user sign once
+   off-chain and have an unrelated relayer submit and pay for it — is already a native Tempo Transaction
+   feature (`calls: Vec<Call>` batching + `fee_payer_signature` sponsorship), proven working end-to-end
+   on Moderato testnet. Deploying `TrainRouter` on Tempo would just reintroduce the TIP-1004 permit-`v`
+   trap and TIP-403 exposure above for a caller with no reason to exist there — hence no `userLockFor`
+   either (its only purpose is letting `TrainRouter` attribute a lock to someone other than
+   `msg.sender`). See [`script/tempo/README.md`](script/tempo/README.md) for the native gasless flow.
 
 ---
 
@@ -264,6 +282,14 @@ new release. Each run also writes a local summary of that run to `deployments/te
 deployed separately with plain deploys via TronWeb — `npm install`, set `TRON_PRIVATE_KEY`, then
 `npm run deploy:tron:nile` (or `:shasta` / `:mainnet`). Requires TVM ≥ GreatVoyage-v4.8.0 (Kant)
 for transient storage; Nile/Shasta have it.
+
+### Deploying to Tempo
+
+Tempo (targets the Osaka hard fork, no native gas token) deploys a different contract
+([`src/tempo/Train.sol`](src/tempo/Train.sol), not `Train.sol`) via a dedicated `[profile.tempo]` build
+profile and `script/tempo/DeployTempo.s.sol` — no `TrainRouter` (see trust assumptions 7–9 above). Full
+walkthrough, connection details, the native gasless-intake flow, and solver operational notes: see
+[`script/tempo/README.md`](script/tempo/README.md).
 
 > ⚠️ No guarantee of security is given. An independent audit and a bug bounty are recommended before
 > mainnet use.
