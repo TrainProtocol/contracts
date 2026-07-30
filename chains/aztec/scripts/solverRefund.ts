@@ -18,11 +18,14 @@ import { getAztecNodeUrl, getTimeouts } from './utils/config.ts';
 
 async function main(): Promise<void> {
   const timeouts = getTimeouts();
-  const trainAddress = AztecAddress.fromStringUnsafe(requireEnv('TRAIN_ADDRESS'));
-  const tokenAddress = AztecAddress.fromStringUnsafe(requireEnv('TOKEN_ADDRESS'));
+  const trainAddress = AztecAddress.fromStringUnsafe(
+    requireEnv('TRAIN_ADDRESS'),
+  );
+  const tokenAddress = AztecAddress.fromStringUnsafe(
+    requireEnv('TOKEN_ADDRESS'),
+  );
   const expectedSolverAddress = requireEnv('SOLVER_ADDRESS');
   const hashlock = parseHashlock(requireEnv('USER_LOCK_HASHLOCK'));
-  const solverIndex = BigInt(requireEnv('SOLVER_LOCK_INDEX'));
 
   const wallet = await setupWallet();
 
@@ -44,7 +47,7 @@ async function main(): Promise<void> {
   const token = TokenContract.at(tokenAddress, toWallet(wallet));
 
   const { result: lockBefore } = await train.methods
-    .get_solver_lock(hashlock, solverIndex)
+    .get_solver_lock(hashlock, solverAccount.address)
     .simulate({ from: solverAccount.address });
 
   const node = createAztecNodeClient(getAztecNodeUrl());
@@ -66,17 +69,21 @@ async function main(): Promise<void> {
   console.log(`Train address: ${trainAddress.toString()}`);
   console.log(`Token address: ${tokenAddress.toString()}`);
   console.log(`Hashlock: 0x${Buffer.from(hashlock).toString('hex')}`);
-  console.log(`Solver lock index: ${solverIndex.toString()}`);
+  console.log(
+    `Solver lock key: hashlock + solver ${solverAccount.address.toString()}`,
+  );
   console.log(`Node timestamp now: ${now}`);
   console.log(`Solver lock timelock: ${timelock}`);
   console.log(`Solver token balance before: ${solverBalBefore}`);
   console.log(`Train token balance before: ${trainBalBefore}`);
 
-  const tx = await train.methods.refund_solver(hashlock, solverIndex).send({
-    from: solverAccount.address,
-    fee: { paymentMethod },
-    wait: { timeout: timeouts.txTimeout, dontThrowOnRevert: true },
-  });
+  const tx = await train.methods
+    .refund_solver(hashlock, solverAccount.address)
+    .send({
+      from: solverAccount.address,
+      fee: { paymentMethod },
+      wait: { timeout: timeouts.txTimeout, dontThrowOnRevert: true },
+    });
 
   if (tx.receipt.hasExecutionReverted()) {
     throw new Error(
@@ -85,7 +92,7 @@ async function main(): Promise<void> {
   }
 
   const { result: lockAfter } = await train.methods
-    .get_solver_lock(hashlock, solverIndex)
+    .get_solver_lock(hashlock, solverAccount.address)
     .simulate({ from: solverAccount.address });
   const statusAfter = decodeLockStatus(lockAfter.status);
   const { result: solverBalAfter } = await token.methods

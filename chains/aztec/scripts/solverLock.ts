@@ -18,8 +18,12 @@ import { getTimeouts } from './utils/config.ts';
 
 async function main(): Promise<void> {
   const timeouts = getTimeouts();
-  const trainAddress = AztecAddress.fromStringUnsafe(requireEnv('TRAIN_ADDRESS'));
-  const tokenAddress = AztecAddress.fromStringUnsafe(requireEnv('TOKEN_ADDRESS'));
+  const trainAddress = AztecAddress.fromStringUnsafe(
+    requireEnv('TRAIN_ADDRESS'),
+  );
+  const tokenAddress = AztecAddress.fromStringUnsafe(
+    requireEnv('TOKEN_ADDRESS'),
+  );
   const expectedSolverAddress = requireEnv('SOLVER_ADDRESS');
   const userAddress = AztecAddress.fromStringUnsafe(requireEnv('USER_ADDRESS'));
   const hashlock = parseHashlock(requireEnv('USER_LOCK_HASHLOCK'));
@@ -46,7 +50,9 @@ async function main(): Promise<void> {
 
   const secretKey = Fr.fromString(requireEnv('SOLVER_SECRET'));
   const salt = Fr.fromString(requireEnv('SOLVER_SALT'));
-  const signingKey = (GrumpkinScalar as any).fromString(requireEnv('SOLVER_SIGNING_KEY'));
+  const signingKey = (GrumpkinScalar as any).fromString(
+    requireEnv('SOLVER_SIGNING_KEY'),
+  );
 
   const solverAccount = await wallet.createSchnorrAccount(
     secretKey,
@@ -111,7 +117,10 @@ async function main(): Promise<void> {
     );
 
     if (reward > 0n && !rewardTokenAddress.equals(tokenAddress)) {
-      const rewardToken = TokenContract.at(rewardTokenAddress, toWallet(wallet));
+      const rewardToken = TokenContract.at(
+        rewardTokenAddress,
+        toWallet(wallet),
+      );
       await authorizePublicTransfer(
         wallet,
         solverAccount.address,
@@ -153,7 +162,9 @@ async function main(): Promise<void> {
     )
     .send({
       from: solverAccount.address,
-      fee: { paymentMethod: await getPaymentMethod(wallet, solverAccount.address) },
+      fee: {
+        paymentMethod: await getPaymentMethod(wallet, solverAccount.address),
+      },
       wait: { timeout: timeouts.txTimeout, dontThrowOnRevert: true },
     });
 
@@ -163,8 +174,8 @@ async function main(): Promise<void> {
     );
   }
 
-  const { result: index } = await train.methods
-    .get_solver_lock_count(hashlock)
+  const { result: lock } = await train.methods
+    .get_solver_lock(hashlock, solverAccount.address)
     .simulate({ from: solverAccount.address });
   const txHash = tx.receipt.txHash?.toString?.() ?? String(tx);
 
@@ -177,11 +188,13 @@ async function main(): Promise<void> {
 
   updateEnvFile('.env', {
     SOLVER_LOCK_TX_HASH: txHash,
-    SOLVER_LOCK_INDEX: index.toString(),
   });
 
   console.log(`Solver lock tx: ${txHash}`);
-  console.log(`Solver lock index: ${index.toString()}`);
+  console.log(
+    `Solver lock key: hashlock + solver ${solverAccount.address.toString()}`,
+  );
+  console.log(`Solver lock status: ${lock.status}`);
   console.log(`Solver token balance after: ${solverBalAfter}`);
   console.log(`Train token balance after: ${trainBalAfter}`);
 }

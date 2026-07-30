@@ -8,8 +8,13 @@ import { setupWallet, toWallet } from './utils/setupWallet.ts';
 import { decodeLockStatus, parseHashlock, requireEnv } from './utils/utils.ts';
 
 async function main(): Promise<void> {
-  const trainAddress = AztecAddress.fromStringUnsafe(requireEnv('TRAIN_ADDRESS'));
+  const trainAddress = AztecAddress.fromStringUnsafe(
+    requireEnv('TRAIN_ADDRESS'),
+  );
   const expectedUserAddress = requireEnv('USER_ADDRESS');
+  const solverAddress = AztecAddress.fromStringUnsafe(
+    requireEnv('SOLVER_ADDRESS'),
+  );
   const hashlock = parseHashlock(requireEnv('USER_LOCK_HASHLOCK'));
 
   const wallet = await setupWallet();
@@ -28,9 +33,11 @@ async function main(): Promise<void> {
   const train = TrainContract.at(trainAddress, toWallet(wallet));
   const from = userAccount.address;
 
-  const { result: userLock } = await train.methods.get_user_lock(hashlock).simulate({ from });
-  const { result: solverCount } = await train.methods
-    .get_solver_lock_count(hashlock)
+  const { result: userLock } = await train.methods
+    .get_user_lock(hashlock)
+    .simulate({ from });
+  const { result: solverLock } = await train.methods
+    .get_solver_lock(hashlock, solverAddress)
     .simulate({ from });
 
   console.log(`Train: ${trainAddress.toString()}`);
@@ -43,30 +50,17 @@ async function main(): Promise<void> {
   console.log(`UserLock token: ${userLock.token.toString()}`);
   console.log(`UserLock timelock: ${userLock.timelock}`);
 
-  const solverCountNum = Number(solverCount);
-  console.log('\n=== Solver Locks ===');
-  console.log(`Solver lock count: ${solverCountNum}`);
-  if (solverCountNum === 0) {
-    console.log('No solver locks found for this hashlock.');
-    return;
-  }
-
-  for (let i = 1; i <= solverCountNum; i++) {
-    const solverIndex = BigInt(i);
-    const { result: solverLock } = await train.methods
-      .get_solver_lock(hashlock, solverIndex)
-      .simulate({ from });
-    console.log(`\nSolverLock index: ${solverIndex.toString()}`);
-    console.log(`SolverLock status: ${decodeLockStatus(solverLock.status)}`);
-    console.log(`SolverLock amount: ${solverLock.amount}`);
-    console.log(`SolverLock reward: ${solverLock.reward}`);
-    console.log(`SolverLock refund_to: ${solverLock.refund_to.toString()}`);
-    console.log(`SolverLock recipient: ${solverLock.recipient.toString()}`);
-    console.log(`SolverLock token: ${solverLock.token.toString()}`);
-    console.log(`SolverLock reward token: ${solverLock.reward_token.toString()}`);
-    console.log(`SolverLock timelock: ${solverLock.timelock}`);
-    console.log(`SolverLock reward timelock: ${solverLock.reward_timelock}`);
-  }
+  console.log('\n=== Solver Lock ===');
+  console.log(`Solver: ${solverAddress.toString()}`);
+  console.log(`SolverLock status: ${decodeLockStatus(solverLock.status)}`);
+  console.log(`SolverLock amount: ${solverLock.amount}`);
+  console.log(`SolverLock reward: ${solverLock.reward}`);
+  console.log(`SolverLock refund_to: ${solverLock.refund_to.toString()}`);
+  console.log(`SolverLock recipient: ${solverLock.recipient.toString()}`);
+  console.log(`SolverLock token: ${solverLock.token.toString()}`);
+  console.log(`SolverLock reward token: ${solverLock.reward_token.toString()}`);
+  console.log(`SolverLock timelock: ${solverLock.timelock}`);
+  console.log(`SolverLock reward timelock: ${solverLock.reward_timelock}`);
 }
 
 main()

@@ -72,7 +72,6 @@ pub contract Train {
         hashlock: [u8; 32],
         sender: AztecAddress,
         recipient: AztecAddress,
-        index: Field,
         src_chain: [u8; 30],
         token: AztecAddress,
         amount: u128,
@@ -101,7 +100,7 @@ pub contract Train {
     #[event]
     struct SolverRedeemed {
         hashlock: [u8; 32],
-        index: Field,
+        solver: AztecAddress,
         redeemer: AztecAddress,
         secret: [u8; 32],
         payout: u128,
@@ -120,7 +119,7 @@ pub contract Train {
     #[event]
     struct SolverRefunded {
         hashlock: [u8; 32],
-        index: Field,
+        solver: AztecAddress,
         refund_to: AztecAddress,
         amount: u128,
         reward: u128,
@@ -278,8 +277,7 @@ pub contract Train {
     #[storage]
     struct Storage<Context> {
         user_locks: Map<Field, Map<Field, PublicMutable<UserLock, Context>, Context>, Context>,
-        solver_locks: Map<Field, Map<Field, Map<Field, PublicMutable<SolverLock, Context>, Context>, Context>, Context>,
-        solver_lock_count: Map<Field, Map<Field, PublicMutable<Field, Context>, Context>, Context>,
+        solver_locks: Map<Field, Map<Field, Map<AztecAddress, PublicMutable<SolverLock, Context>, Context>, Context>, Context>,
         user_lock_hashes: Map<AztecAddress, Map<Field, PublicMutable<HashlockRef, Context>, Context>, Context>,
         user_lock_count: Map<AztecAddress, PublicMutable<u64, Context>, Context>,
     }
@@ -413,7 +411,7 @@ pub contract Train {
         dst_amount: u128,
         dst_token: [u8; 90],
         data: [u8; 256],
-    ) -> pub Field {
+    ) {
         let sender = self.msg_sender();
         let now = self.context.timestamp();
         assert(amount > 0, "ZeroAmount");
@@ -426,6 +424,10 @@ pub contract Train {
         }
 
         let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
+        let existing =
+            self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(sender).read();
+        assert(existing.status == STATUS_EMPTY, "SolverLockAlreadyExists");
+
         let timelock = now + timelock_delta;
         assert(timelock > now, "TimelockOverflow");
         let reward_timelock = now + reward_timelock_delta;
@@ -441,12 +443,6 @@ pub contract Train {
             ));
             assert((probe > 0) & (probe <= amount), "InvalidPayout");
         }
-
-        // Auto-increment index (1-based, monotonic per hashlock)
-        let current_count =
-            self.storage.solver_lock_count.at(hashlock_high).at(hashlock_low).read();
-        let index = current_count + 1;
-        self.storage.solver_lock_count.at(hashlock_high).at(hashlock_low).write(index);
 
         let lock = SolverLock {
             secret: [0u8; 32],
@@ -465,7 +461,7 @@ pub contract Train {
             payout_curve,
             payout_curve_data,
         };
-        self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(index).write(lock);
+        self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(sender).write(lock);
 
         // Transfer tokens
         if reward > 0 {
@@ -507,7 +503,6 @@ pub contract Train {
                 hashlock,
                 sender,
                 recipient,
-                index,
                 src_chain,
                 token,
                 amount,
@@ -524,8 +519,6 @@ pub contract Train {
                 data,
             },
         );
-
-        index
     }
 
     // ============ Redeems ============
@@ -579,9 +572,9 @@ pub contract Train {
     }
 
     #[external("public")]
-    fn redeem_solver(hashlock: [u8; 32], index: Field, secret: [u8; 32]) {
+    fn redeem_solver(hashlock: [u8; 32], solver: AztecAddress, secret: [u8; 32]) {
         let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
-        let lock = self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(index).read();
+        let lock = self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(solver).read();
 
         assert(lock.status != STATUS_EMPTY, "LockNotFound");
         let hashed_secret = sha256::sha256_var(secret, secret.len() as u32);
@@ -591,7 +584,7 @@ pub contract Train {
         let mut redeemed_lock = lock;
         redeemed_lock.secret = secret;
         redeemed_lock.status = STATUS_REDEEMED;
-        self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(index).write(redeemed_lock);
+        self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(solver).write(redeemed_lock);
 
         let redeemer = self.msg_sender();
         let now = self.context.timestamp();
@@ -657,7 +650,7 @@ pub contract Train {
         self.emit(
             SolverRedeemed {
                 hashlock,
-                index,
+                solver,
                 redeemer,
                 secret,
                 payout,
@@ -699,9 +692,9 @@ pub contract Train {
     }
 
     #[external("public")]
-    fn refund_solver(hashlock: [u8; 32], index: Field) {
+    fn refund_solver(hashlock: [u8; 32], solver: AztecAddress) {
         let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
-        let lock = self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(index).read();
+        let lock = self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(solver).read();
 
         assert(lock.status != STATUS_EMPTY, "LockNotFound");
         assert(lock.status == STATUS_PENDING, "LockNotPending");
@@ -709,7 +702,7 @@ pub contract Train {
 
         let mut refunded_lock = lock;
         refunded_lock.status = STATUS_REFUNDED;
-        self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(index).write(refunded_lock);
+        self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(solver).write(refunded_lock);
 
         // Return amount + reward to refund_to
         if (lock.reward > 0) & (lock.token == lock.reward_token) {
@@ -739,7 +732,7 @@ pub contract Train {
         self.emit(
             SolverRefunded {
                 hashlock,
-                index,
+                solver,
                 refund_to: lock.refund_to,
                 amount: lock.amount,
                 reward: lock.reward,
@@ -758,16 +751,9 @@ pub contract Train {
 
     #[external("public")]
     #[view]
-    fn get_solver_lock(hashlock: [u8; 32], index: Field) -> pub SolverLock {
+    fn get_solver_lock(hashlock: [u8; 32], solver: AztecAddress) -> pub SolverLock {
         let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
-        self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(index).read()
-    }
-
-    #[external("public")]
-    #[view]
-    fn get_solver_lock_count(hashlock: [u8; 32]) -> pub Field {
-        let (hashlock_high, hashlock_low) = hashlock_to_fields(hashlock);
-        self.storage.solver_lock_count.at(hashlock_high).at(hashlock_low).read()
+        self.storage.solver_locks.at(hashlock_high).at(hashlock_low).at(solver).read()
     }
 
     /// Hashlock of the `index`-th user lock created by `user` (0-based), as

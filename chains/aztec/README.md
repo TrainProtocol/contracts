@@ -4,19 +4,20 @@ HTLC (Hash Time Locked Contract) implementation for cross-chain atomic swaps on 
 
 Built with Aztec Noir contracts and Aztec.js SDK `v5.0.1`.
 
-## v5.0.1 migration status (2026-07-20)
+## v5.0.1 migration and solver-key status (2026-07-31)
 
 The contracts and scripts target **Aztec v5.0.1**. The token dependency now comes from
 the official [`AztecProtocol/aztec-standards`](https://github.com/AztecProtocol/aztec-standards)
 repository and its `@aztec-foundation/aztec-standards` npm package, both pinned to v5.0.1.
 The old `defi-wonderland` dependency and local cache-patching workaround are no longer used.
 
-Contract compilation and the 34-test local TXE suite pass with v5.0.1. The full testnet E2E
-matrix was rerun on 2026-07-20 against fresh deployments: all 101 recorded checks completed
-without a failure (81 `OK`, 18 informational checks, and two expected losing transactions
-that reverted on-chain in race tests). The public node currently reports v5.0.0 while the
-client, compiler, and artifacts are v5.0.1, so the runner emits a version warning. See the
-[v5.0.1 testnet E2E report](docs/e2e-testnet-v5.0.1-report.md).
+Contract compilation, TypeScript checking, and the 37-test local TXE suite pass with v5.0.1.
+The solver-address-keyed contract was freshly deployed and its full testnet E2E matrix was
+rerun on 2026-07-31: all 107 recorded results completed without a failure (88 `OK`, 16
+informational checks, and three expected losing transactions that reverted on-chain in race
+tests). The public node currently reports v5.0.0 while the client, compiler, and artifacts
+are v5.0.1, so the runner emits a version warning. See the
+[solver-keyed v5.0.1 testnet E2E report](docs/e2e-testnet-solver-keyed-v5.0.1-report.md).
 
 ### Authorization contracts and fresh-chain seeding
 
@@ -94,7 +95,7 @@ The Train contract manages two types of HTLC locks keyed by a SHA256 hashlock:
 
 **UserLock** - Created by the user initiating a cross-chain swap. Holds `amount` of `token` locked until `timelock` expires or the correct secret (preimage of hashlock) is provided.
 
-**SolverLock** - Created by the solver matching the user's swap on the destination side. Holds `amount` + optional `reward`. Multiple solver locks can exist per hashlock (indexed by auto-incremented ID).
+**SolverLock** - Created by the solver matching the user's swap on the destination side. Holds `amount` + optional `reward`. It is permanently keyed by `(hashlock, solver_address)`: different solvers may fund the same hashlock, but one solver can fund that hashlock only once, even after redeem or refund.
 
 ### Lock Lifecycle
 
@@ -108,18 +109,17 @@ EMPTY (0) --> PENDING (1) --> REDEEMED (3)
 | Function | Description |
 |---|---|
 | `user_lock(...)` | User locks funds with hashlock + timelock. Emits `UserLocked` log. |
-| `solver_lock(...)` | Solver locks funds against same hashlock. Returns index. Emits `SolverLocked` log. |
+| `solver_lock(...)` | Solver locks funds against a hashlock. Rejects a repeated `(hashlock, msg_sender)` before pulling funds. Emits `SolverLocked`. |
 | `redeem_user(hashlock, secret)` | Redeem user lock by providing preimage. Transfers amount to recipient. |
-| `redeem_solver(hashlock, index, secret)` | Redeem solver lock. Reward routing depends on `reward_timelock`. |
+| `redeem_solver(hashlock, solver, secret)` | Redeem the named solver's lock. Reward routing depends on `reward_timelock`. |
 | `refund_user(hashlock)` | Refund after timelock. Recipient can refund anytime. |
-| `refund_solver(hashlock, index)` | Refund after timelock. Returns amount + reward to sender. |
+| `refund_solver(hashlock, solver)` | Refund the named solver's lock after timelock. Returns amount + reward to `refund_to`. |
 | `get_user_lock(hashlock)` | View: returns UserLock state. |
-| `get_solver_lock(hashlock, index)` | View: returns SolverLock state. |
-| `get_solver_lock_count(hashlock)` | View: returns number of solver locks for a hashlock. |
+| `get_solver_lock(hashlock, solver)` | View: returns the lock at the canonical `(hashlock, solver)` key. |
 
 ### Event Emission
 
-Events are emitted via `emit_public_log_unsafe` (bypassing the v4.2.0 `#[event]` macro's 10-field size limit, which is derived from private log encryption constraints and does not apply to public-only contracts). Each event has a unique tag for off-chain indexing:
+Events use Aztec's `#[event]` macro and are public logs suitable for off-chain indexing. Solver settlement events include the solver address rather than an auto-incremented index:
 
 | Tag | Event |
 |---|---|
@@ -136,17 +136,33 @@ When redeeming a solver lock:
 - **Before `reward_timelock`**: reward goes to `reward_recipient` (typically the solver)
 - **After `reward_timelock`**: reward goes to the redeemer
 
-## Deployed contracts (testnet, v5.0.1 artifacts — 2026-07-20)
+### Solver identity and Aztec privacy
+
+The solver key is the canonical `AztecAddress` returned by `msg_sender`; callers cannot provide or spoof a different identity during `solver_lock`. Any deployed Aztec account type can be used, including a dedicated or ephemeral solver account.
+
+The current Train custody rail is public: `solver_lock` is an `#[external("public")]` function and pulls funds with `transfer_public_to_public`. Consequently, the solver address, lock parameters, and public token movements are visible. Supporting a hidden solver identity or private token balance would require a separate private entrypoint and note-based custody design; it is not implied by this public API.
+
+### Retry safety
+
+Before any token pull, `solver_lock` checks the existing `(hashlock, msg_sender)` slot and rejects non-empty history with `SolverLockAlreadyExists`. The slot is never cleared, including after redeem or refund. A client can probe idempotently with `get_solver_lock(hashlock, solver)`; a non-zero status means that solver must not submit another lock for the same hashlock.
+
+## Deployed contracts (testnet, solver-keyed v5.0.1 artifacts — 2026-07-31)
 
 | Contract | Address |
 |---|---|
-| Train | `0x0483a6a15a6275c9482dbf8aa78aa96fe9291d60b08841a35739ebba4c33d9e6` |
+| Train | `0x1e36ef80d7d02ab8ed33aa07635f85152e015b9c4b09fbf5fe54ec11154d3133` |
 | Token1 (ETH) | `0x217878d61e5d31ed78a8ad6f0a6a9b8ee8a1eec5944a7d122f6d910abee0b098` |
 | Token2 (test RWD) | `0x2f63f2687b2fa5d38b51bc9970674e801e89074bd90b07994b8c288f980ba41a` |
 | ConstantPayoutCurve | `0x0f39abe60a09d7750b0f3fc1dada72f151d815f10f63a4413db9a9e2cb5d2fc7` |
 
-The earlier [v5.0.0 E2E report](docs/e2e-testnet-v5.0.0-report.md) is retained as historical
-evidence from the pre-migration deployment.
+Train class ID:
+`0x21cae61cc13c0fc8f635a0b94551c703c1458cd87980a8d5313e27e17a5539b0`.
+Its [deployment transaction](https://aztecscan.xyz/txs/0x2ecfb6762a0e24d4616d798dd0259f18ca9151aa87a068c0e5121a95ae1db942)
+was included at block 24202, and the Train instance and artifact are verified on AztecScan.
+
+The earlier [v5.0.1 E2E report](docs/e2e-testnet-v5.0.1-report.md) and
+[v5.0.0 E2E report](docs/e2e-testnet-v5.0.0-report.md) are retained as historical evidence
+from the index-keyed and pre-migration deployments.
 
 ## Compile Contract
 
@@ -222,7 +238,7 @@ npx tsx deployTrain.ts
 
 # 5. Run the full HTLC flow
 npx tsx userLock.ts          # User locks funds → saves secret + hashlock to .env
-npx tsx solverLock.ts        # Solver locks matching funds → saves index to .env
+npx tsx solverLock.ts        # Solver locks matching funds, keyed by its Aztec address
 npx tsx userRedeem.ts        # User redeems user lock (reveals secret on-chain)
 npx tsx solverRedeem.ts      # User redeems solver lock (using revealed secret)
 
@@ -262,7 +278,7 @@ npx tsx deployTrain.ts
 
 # 7. Run the full HTLC flow (each script pays from Fee Juice balance)
 npx tsx userLock.ts          # User locks funds → saves secret + hashlock to .env
-npx tsx solverLock.ts        # Solver locks matching funds → saves index to .env
+npx tsx solverLock.ts        # Solver locks matching funds, keyed by its Aztec address
 npx tsx userRedeem.ts        # User redeems user lock (reveals secret on-chain)
 npx tsx solverRedeem.ts      # User redeems solver lock (using revealed secret)
 

@@ -1,6 +1,6 @@
 use crate::test::utils::{
-    self, check_balance, do_solver_lock, do_user_lock, hashlock_of, LOCK_AMOUNT, MINT_AMOUNT,
-    REWARD_AMOUNT, test_secret, TIMELOCK_DELTA,
+    self, check_balance, do_solver_lock, do_user_lock, hashlock_of, MINT_AMOUNT, REWARD_AMOUNT,
+    test_secret, TIMELOCK_DELTA,
 };
 use crate::Train;
 use aztec::protocol::address::AztecAddress;
@@ -82,17 +82,17 @@ unconstrained fn refund_solver_after_timelock_same_token_reward() {
     let mut s = utils::setup();
     let hashlock = hashlock_of(test_secret(1));
     let reward_recipient = s.env.create_light_account();
-    let index = do_solver_lock(s, hashlock, 1, REWARD_AMOUNT, 0, s.token, reward_recipient);
+    do_solver_lock(s, hashlock, 1, REWARD_AMOUNT, 0, s.token, reward_recipient);
 
     s.env.advance_next_block_timestamp_by(TIMELOCK_DELTA + 60);
 
-    s.env.call_public(s.user, Train::at(s.train).refund_solver(hashlock, index));
+    s.env.call_public(s.user, Train::at(s.train).refund_solver(hashlock, s.solver));
 
     // amount + reward return to refund_to (the solver)
     check_balance(s.env, s.token, s.solver, MINT_AMOUNT);
     check_balance(s.env, s.token, s.train, 0 as u128);
 
-    let lock = s.env.view_public(Train::at(s.train).get_solver_lock(hashlock, index));
+    let lock = s.env.view_public(Train::at(s.train).get_solver_lock(hashlock, s.solver));
     assert(lock.status == 2, "expected Refunded status");
 }
 
@@ -104,7 +104,7 @@ unconstrained fn refund_solver_after_timelock_different_reward_token() {
     let reward_recipient = s.env.create_light_account();
 
     let hashlock = hashlock_of(test_secret(1));
-    let index = do_solver_lock(
+    do_solver_lock(
         s,
         hashlock,
         1,
@@ -115,7 +115,7 @@ unconstrained fn refund_solver_after_timelock_different_reward_token() {
     );
 
     s.env.advance_next_block_timestamp_by(TIMELOCK_DELTA + 60);
-    s.env.call_public(s.user, Train::at(s.train).refund_solver(hashlock, index));
+    s.env.call_public(s.user, Train::at(s.train).refund_solver(hashlock, s.solver));
 
     check_balance(s.env, s.token, s.solver, MINT_AMOUNT);
     check_balance(s.env, reward_token, s.solver, MINT_AMOUNT);
@@ -127,14 +127,28 @@ unconstrained fn refund_solver_after_timelock_different_reward_token() {
 unconstrained fn refund_solver_before_timelock_fails() {
     let mut s = utils::setup();
     let hashlock = hashlock_of(test_secret(1));
-    let index = do_solver_lock(s, hashlock, 1, 0 as u128, 0, s.token, AztecAddress::zero());
+    do_solver_lock(s, hashlock, 1, 0 as u128, 0, s.token, AztecAddress::zero());
 
     // Unlike user locks, not even the recipient can refund a solver lock early
-    s.env.call_public(s.recipient, Train::at(s.train).refund_solver(hashlock, index));
+    s.env.call_public(s.recipient, Train::at(s.train).refund_solver(hashlock, s.solver));
 }
 
 #[test(should_fail_with = "LockNotFound")]
 unconstrained fn refund_solver_nonexistent_fails() {
     let mut s = utils::setup();
-    s.env.call_public(s.user, Train::at(s.train).refund_solver(hashlock_of(test_secret(1)), 1));
+    s.env.call_public(
+        s.user,
+        Train::at(s.train).refund_solver(hashlock_of(test_secret(1)), s.solver),
+    );
+}
+
+#[test(should_fail_with = "SolverLockAlreadyExists")]
+unconstrained fn solver_cannot_relock_same_hashlock_after_refund() {
+    let mut s = utils::setup();
+    let hashlock = hashlock_of(test_secret(1));
+    do_solver_lock(s, hashlock, 1, 0 as u128, 0, s.token, AztecAddress::zero());
+
+    s.env.advance_next_block_timestamp_by(TIMELOCK_DELTA + 60);
+    s.env.call_public(s.user, Train::at(s.train).refund_solver(hashlock, s.solver));
+    do_solver_lock(s, hashlock, 2, 0 as u128, 0, s.token, AztecAddress::zero());
 }

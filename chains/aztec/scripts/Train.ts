@@ -54,7 +54,7 @@ solver_data: (bigint | number)[]
 
       export type SolverRefunded = {
         hashlock: (bigint | number)[]
-index: FieldLike
+solver: AztecAddressLike
 refund_to: AztecAddressLike
 amount: (bigint | number)
 reward: (bigint | number)
@@ -63,7 +63,7 @@ reward: (bigint | number)
 
       export type SolverRedeemed = {
         hashlock: (bigint | number)[]
-index: FieldLike
+solver: AztecAddressLike
 redeemer: AztecAddressLike
 secret: (bigint | number)[]
 payout: (bigint | number)
@@ -77,7 +77,6 @@ reward: (bigint | number)
         hashlock: (bigint | number)[]
 sender: AztecAddressLike
 recipient: AztecAddressLike
-index: FieldLike
 src_chain: (bigint | number)[]
 token: AztecAddressLike
 amount: (bigint | number)
@@ -176,7 +175,7 @@ export class TrainContract extends ContractBase {
   }
   
 
-  public static get storage(): ContractStorageLayout<'user_locks' | 'solver_locks' | 'solver_lock_count' | 'user_lock_hashes' | 'user_lock_count'> {
+  public static get storage(): ContractStorageLayout<'user_locks' | 'solver_locks' | 'user_lock_hashes' | 'user_lock_count'> {
       return {
         user_locks: {
       slot: new Fr(1n),
@@ -184,16 +183,13 @@ export class TrainContract extends ContractBase {
 solver_locks: {
       slot: new Fr(2n),
     },
-solver_lock_count: {
+user_lock_hashes: {
       slot: new Fr(3n),
     },
-user_lock_hashes: {
-      slot: new Fr(4n),
-    },
 user_lock_count: {
-      slot: new Fr(5n),
+      slot: new Fr(4n),
     }
-      } as ContractStorageLayout<'user_locks' | 'solver_locks' | 'solver_lock_count' | 'user_lock_hashes' | 'user_lock_count'>;
+      } as ContractStorageLayout<'user_locks' | 'solver_locks' | 'user_lock_hashes' | 'user_lock_count'>;
     }
     
 
@@ -203,11 +199,8 @@ user_lock_count: {
     /** constructor() */
     constructor: (() => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** get_solver_lock(hashlock: array, index: field) */
-    get_solver_lock: ((hashlock: (bigint | number)[], index: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
-
-    /** get_solver_lock_count(hashlock: array) */
-    get_solver_lock_count: ((hashlock: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** get_solver_lock(hashlock: array, solver: struct) */
+    get_solver_lock: ((hashlock: (bigint | number)[], solver: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** get_user_lock(hashlock: array) */
     get_user_lock: ((hashlock: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
@@ -224,14 +217,14 @@ user_lock_count: {
     /** public_dispatch(selector: field) */
     public_dispatch: ((selector: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** redeem_solver(hashlock: array, index: field, secret: array) */
-    redeem_solver: ((hashlock: (bigint | number)[], index: FieldLike, secret: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** redeem_solver(hashlock: array, solver: struct, secret: array) */
+    redeem_solver: ((hashlock: (bigint | number)[], solver: AztecAddressLike, secret: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** redeem_user(hashlock: array, secret: array) */
     redeem_user: ((hashlock: (bigint | number)[], secret: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
-    /** refund_solver(hashlock: array, index: field) */
-    refund_solver: ((hashlock: (bigint | number)[], index: FieldLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
+    /** refund_solver(hashlock: array, solver: struct) */
+    refund_solver: ((hashlock: (bigint | number)[], solver: AztecAddressLike) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
 
     /** refund_user(hashlock: array) */
     refund_user: ((hashlock: (bigint | number)[]) => ContractFunctionInteraction) & Pick<ContractMethod, 'selector'>;
@@ -602,9 +595,18 @@ SolverRefunded: {
             }
         },
         {
-            "name": "index",
+            "name": "solver",
             "type": {
-                "kind": "field"
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "inner",
+                        "type": {
+                            "kind": "field"
+                        }
+                    }
+                ],
+                "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
             }
         },
         {
@@ -641,8 +643,8 @@ SolverRefunded: {
     ],
     "path": "Train::SolverRefunded"
 },
-        eventSelector: EventSelector.fromString("0x834ab4fc"),
-        fieldNames: ["hashlock","index","refund_to","amount","reward"],
+        eventSelector: EventSelector.fromString("0x730095ea"),
+        fieldNames: ["hashlock","solver","refund_to","amount","reward"],
       },
 SolverRedeemed: {
         abiType: {
@@ -661,9 +663,18 @@ SolverRedeemed: {
             }
         },
         {
-            "name": "index",
+            "name": "solver",
             "type": {
-                "kind": "field"
+                "kind": "struct",
+                "fields": [
+                    {
+                        "name": "inner",
+                        "type": {
+                            "kind": "field"
+                        }
+                    }
+                ],
+                "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
             }
         },
         {
@@ -735,8 +746,8 @@ SolverRedeemed: {
     ],
     "path": "Train::SolverRedeemed"
 },
-        eventSelector: EventSelector.fromString("0x71e8f48e"),
-        fieldNames: ["hashlock","index","redeemer","secret","payout","excess","reward_to","reward"],
+        eventSelector: EventSelector.fromString("0x9ef17859"),
+        fieldNames: ["hashlock","solver","redeemer","secret","payout","excess","reward_to","reward"],
       },
 SolverLocked: {
         abiType: {
@@ -782,12 +793,6 @@ SolverLocked: {
                     }
                 ],
                 "path": "aztec::protocol_types::address::aztec_address::AztecAddress"
-            }
-        },
-        {
-            "name": "index",
-            "type": {
-                "kind": "field"
             }
         },
         {
@@ -953,8 +958,8 @@ SolverLocked: {
     ],
     "path": "Train::SolverLocked"
 },
-        eventSelector: EventSelector.fromString("0xd27364d7"),
-        fieldNames: ["hashlock","sender","recipient","index","src_chain","token","amount","reward","reward_token","reward_recipient","timelock","reward_timelock","payout_curve","dst_chain","dst_address","dst_amount","dst_token","data"],
+        eventSelector: EventSelector.fromString("0xc0a57db2"),
+        fieldNames: ["hashlock","sender","recipient","src_chain","token","amount","reward","reward_token","reward_recipient","timelock","reward_timelock","payout_curve","dst_chain","dst_address","dst_amount","dst_token","data"],
       }
     };
   }

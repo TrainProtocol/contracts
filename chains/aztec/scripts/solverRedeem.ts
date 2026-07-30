@@ -17,12 +17,18 @@ import { getTimeouts } from './utils/config.ts';
 
 async function main(): Promise<void> {
   const timeouts = getTimeouts();
-  const trainAddress = AztecAddress.fromStringUnsafe(requireEnv('TRAIN_ADDRESS'));
-  const tokenAddress = AztecAddress.fromStringUnsafe(requireEnv('TOKEN_ADDRESS'));
+  const trainAddress = AztecAddress.fromStringUnsafe(
+    requireEnv('TRAIN_ADDRESS'),
+  );
+  const tokenAddress = AztecAddress.fromStringUnsafe(
+    requireEnv('TOKEN_ADDRESS'),
+  );
   const expectedUserAddress = requireEnv('USER_ADDRESS');
+  const solverAddress = AztecAddress.fromStringUnsafe(
+    requireEnv('SOLVER_ADDRESS'),
+  );
   const hashlock = parseHashlock(requireEnv('USER_LOCK_HASHLOCK'));
   const secret = parseSecret(requireEnv('USER_LOCK_SECRET'));
-  const solverIndex = BigInt(requireEnv('SOLVER_LOCK_INDEX'));
 
   const wallet = await setupWallet();
 
@@ -54,12 +60,12 @@ async function main(): Promise<void> {
   console.log(`Train address: ${trainAddress.toString()}`);
   console.log(`Token address: ${tokenAddress.toString()}`);
   console.log(`Hashlock: 0x${Buffer.from(hashlock).toString('hex')}`);
-  console.log(`Solver lock index: ${solverIndex.toString()}`);
+  console.log(`Solver address: ${solverAddress.toString()}`);
   console.log(`User token balance before: ${userBalBefore}`);
   console.log(`Train token balance before: ${trainBalBefore}`);
 
   const tx = await train.methods
-    .redeem_solver(hashlock, solverIndex, secret)
+    .redeem_solver(hashlock, solverAddress, secret)
     .send({
       from: userAccount.address,
       fee: { paymentMethod },

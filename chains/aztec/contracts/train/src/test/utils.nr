@@ -131,26 +131,43 @@ pub unconstrained fn do_solver_lock(
     reward_nonce: Field,
     reward_token: AztecAddress,
     reward_recipient: AztecAddress,
-) -> Field {
+) {
+    do_solver_lock_as(
+        s,
+        s.solver,
+        hashlock,
+        nonce,
+        reward,
+        reward_nonce,
+        reward_token,
+        reward_recipient,
+    );
+}
+
+/// Creates a solver lock for an explicit solver address. This is used to prove
+/// that lock uniqueness is scoped to (hashlock, solver), not hashlock alone.
+pub unconstrained fn do_solver_lock_as(
+    s: TrainSetup,
+    solver: AztecAddress,
+    hashlock: [u8; 32],
+    nonce: Field,
+    reward: u128,
+    reward_nonce: Field,
+    reward_token: AztecAddress,
+    reward_recipient: AztecAddress,
+) {
     if reward > 0 {
         if reward_token == s.token {
-            add_transfer_authwit(
-                s.env,
-                s.token,
-                s.solver,
-                s.train,
-                LOCK_AMOUNT + reward,
-                nonce,
-            );
+            add_transfer_authwit(s.env, s.token, solver, s.train, LOCK_AMOUNT + reward, nonce);
         } else {
-            add_transfer_authwit(s.env, s.token, s.solver, s.train, LOCK_AMOUNT, nonce);
-            add_transfer_authwit(s.env, reward_token, s.solver, s.train, reward, reward_nonce);
+            add_transfer_authwit(s.env, s.token, solver, s.train, LOCK_AMOUNT, nonce);
+            add_transfer_authwit(s.env, reward_token, solver, s.train, reward, reward_nonce);
         }
     } else {
-        add_transfer_authwit(s.env, s.token, s.solver, s.train, LOCK_AMOUNT, nonce);
+        add_transfer_authwit(s.env, s.token, solver, s.train, LOCK_AMOUNT, nonce);
     }
     s.env.call_public(
-        s.solver,
+        solver,
         Train::at(s.train).solver_lock(
             hashlock,
             LOCK_AMOUNT,
@@ -159,7 +176,7 @@ pub unconstrained fn do_solver_lock(
             reward_nonce,
             TIMELOCK_DELTA,
             REWARD_TIMELOCK_DELTA,
-            s.solver,
+            solver,
             s.recipient,
             reward_recipient,
             s.token,
@@ -173,7 +190,7 @@ pub unconstrained fn do_solver_lock(
             [0; 90],
             [0; 256],
         ),
-    )
+    );
 }
 
 pub unconstrained fn balance_of(
