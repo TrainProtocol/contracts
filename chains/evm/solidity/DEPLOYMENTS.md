@@ -91,7 +91,7 @@ same CreateX factory.
 | Network | Chain ID | Status | Verified | Explorer |
 | --- | --- | --- | --- | --- |
 | Tempo Testnet (Moderato) | 42431 | Deployed | Yes (Sourcify) — see note below | [explore.testnet.tempo.xyz](https://explore.testnet.tempo.xyz/address/0xCb74407724c463EAA9bC661818364b532F8B5Cb5) |
-| Tempo Mainnet | 4217 | Not deployed | — | [explore.tempo.xyz](https://explore.tempo.xyz) |
+| Tempo Mainnet | 4217 | **Train deployed 2026-07-30** (Train only — no curve, no router) | Yes — exact_match (matchId 28227) | [explore.tempo.xyz](https://explore.tempo.xyz/address/0xCb74407724c463EAA9bC661818364b532F8B5Cb5) |
 
 Deployment txs: ConstantPayoutCurve
 [`0x2893b94085e1367dfa468c35489c5f80d74c010190d7355f7d3c95325427761b`](https://explore.testnet.tempo.xyz/tx/0x2893b94085e1367dfa468c35489c5f80d74c010190d7355f7d3c95325427761b),
@@ -126,6 +126,24 @@ Sourcify route. So verification was submitted **directly to the API**, exactly a
    creationTransactionHash: "<deploy tx>" }`. Set a browser `User-Agent` — Cloudflare returns 403
    (error 1010, "browser signature banned") for scripted UAs.
 3. Poll `GET https://contracts.tempo.xyz/v2/verify/{verificationId}` until `isJobCompleted:true`.
+
+### Tempo Mainnet — v3 (deployed 2026-07-30)
+
+`Train` (tempo variant) is live on Tempo Mainnet (4217) at the **same address as Moderato
+testnet** — `0xCb74407724c463EAA9bC661818364b532F8B5Cb5` — deployed with salt
+`train.protocol.v3` via CreateX. `ConstantPayoutCurve` deliberately NOT deployed (locks pass
+`payoutCurve = address(0)`); its address stays reserved at
+`0x758347A30b49d353F9C4dc8189F5c8f91FeaB27b`.
+
+- Deploy tx [`0xad8c4af2fe75070bd470b2587ff561564ae139e79983cb05474b6fdd9a7520d7`](https://explore.tempo.xyz/tx/0xad8c4af2fe75070bd470b2587ff561564ae139e79983cb05474b6fdd9a7520d7), block 32,432,238, **gas 14,647,432**, fee paid in pathUSD.
+- Verified on `contracts.tempo.xyz`: runtime `exact_match`, creation `match`, matchId 28227
+  (via `script/tempo/verify-tempo.sh`).
+- **Deployment gotcha (v3/CreateX):** `forge script` fails in *simulation* with CreateX's
+  `FailedContractCreation` on Tempo — stable forge's revm mis-models Tempo, even though a
+  chain-side `cast call` of the identical `CreateX.deployCreate2(salt, initCode)` returns the
+  correct address. Broadcast it directly instead, with Tempo's 30M per-tx gas cap
+  (forge's own estimate is far below the ~14.6M this really needs):
+  `cast send 0xba5Ed0…ba5Ed $(cast calldata "deployCreate2(bytes32,bytes)" $SALT $INITCODE) --gas-limit 30000000`
 
 ## Tron Addresses — Nile Testnet — v3 (deployed)
 
