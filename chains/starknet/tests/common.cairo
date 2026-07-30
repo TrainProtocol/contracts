@@ -214,19 +214,32 @@ pub fn do_user_lock_for(
     stop_cheat_caller_address(train_addr);
 }
 
-/// Helper to create a solver lock with standard params. Cheats caller to SENDER.
+/// Helper to create a solver lock with standard params. Cheats caller to SENDER, so the lock is
+/// keyed as `(hashlock, SENDER())` — use `do_solver_lock_as` to lock from a different solver.
 pub fn do_solver_lock(
     train_addr: ContractAddress,
     token_addr: ContractAddress,
     reward_token_addr: ContractAddress,
     hashlock: u256,
     reward: u256,
-) -> u256 {
+) {
+    do_solver_lock_as(train_addr, token_addr, reward_token_addr, hashlock, reward, SENDER());
+}
+
+/// Helper to create a solver lock with standard params, cheating caller to `solver`. Lets tests
+/// exercise the per-(hashlock, solver) uniqueness guard with distinct solver addresses.
+pub fn do_solver_lock_as(
+    train_addr: ContractAddress,
+    token_addr: ContractAddress,
+    reward_token_addr: ContractAddress,
+    hashlock: u256,
+    reward: u256,
+    solver: ContractAddress,
+) {
     let train = ITrainDispatcher { contract_address: train_addr };
     let params = make_solver_lock_params(hashlock, token_addr, reward_token_addr, LOCK_AMOUNT, reward);
     let dst = make_dst();
-    start_cheat_caller_address(train_addr, SENDER());
-    let index = train.solver_lock(params, dst, "");
+    start_cheat_caller_address(train_addr, solver);
+    train.solver_lock(params, dst, "");
     stop_cheat_caller_address(train_addr);
-    index
 }

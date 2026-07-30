@@ -119,7 +119,7 @@ fn test_refund_solver_after_timelock() {
     let train = ITrainDispatcher { contract_address: train_addr };
 
     start_cheat_block_timestamp(train_addr, BASE_TIMESTAMP);
-    let index = do_solver_lock(train_addr, token_addr, reward_token_addr, HASHLOCK, REWARD_AMOUNT);
+    do_solver_lock(train_addr, token_addr, reward_token_addr, HASHLOCK, REWARD_AMOUNT);
 
     let erc20 = IERC20Dispatcher { contract_address: token_addr };
     let reward_erc20 = IERC20Dispatcher { contract_address: reward_token_addr };
@@ -128,11 +128,11 @@ fn test_refund_solver_after_timelock() {
 
     start_cheat_block_timestamp(train_addr, BASE_TIMESTAMP + TIMELOCK_DELTA + 1);
     start_cheat_caller_address(train_addr, SENDER());
-    train.refund_solver(HASHLOCK, index);
+    train.refund_solver(HASHLOCK, SENDER());
     stop_cheat_caller_address(train_addr);
     stop_cheat_block_timestamp(train_addr);
 
-    let lock = train.get_solver_lock(HASHLOCK, index);
+    let lock = train.get_solver_lock(HASHLOCK, SENDER());
     let is_refunded: bool = lock.status == LockStatus::Refunded;
     assert(is_refunded, 'wrong status');
     assert(erc20.balance_of(SENDER()) == bal_before + LOCK_AMOUNT, 'wrong sender balance');
@@ -146,10 +146,10 @@ fn test_refund_solver_before_timelock() {
     let train = ITrainDispatcher { contract_address: train_addr };
 
     start_cheat_block_timestamp(train_addr, BASE_TIMESTAMP);
-    let index = do_solver_lock(train_addr, token_addr, reward_token_addr, HASHLOCK, REWARD_AMOUNT);
+    do_solver_lock(train_addr, token_addr, reward_token_addr, HASHLOCK, REWARD_AMOUNT);
 
     start_cheat_caller_address(train_addr, SENDER());
-    train.refund_solver(HASHLOCK, index);
+    train.refund_solver(HASHLOCK, SENDER());
 }
 
 #[test]
@@ -159,7 +159,7 @@ fn test_refund_solver_not_found() {
     let train = ITrainDispatcher { contract_address: train_addr };
 
     start_cheat_caller_address(train_addr, SENDER());
-    train.refund_solver(HASHLOCK, 1);
+    train.refund_solver(HASHLOCK, SENDER());
 }
 
 #[test]
@@ -168,7 +168,7 @@ fn test_refund_solver_with_diff_reward_token() {
     let train = ITrainDispatcher { contract_address: train_addr };
 
     start_cheat_block_timestamp(train_addr, BASE_TIMESTAMP);
-    let index = do_solver_lock(train_addr, token_addr, reward_token_addr, HASHLOCK, REWARD_AMOUNT);
+    do_solver_lock(train_addr, token_addr, reward_token_addr, HASHLOCK, REWARD_AMOUNT);
 
     let erc20 = IERC20Dispatcher { contract_address: token_addr };
     let rew_erc20 = IERC20Dispatcher { contract_address: reward_token_addr };
@@ -177,7 +177,7 @@ fn test_refund_solver_with_diff_reward_token() {
 
     start_cheat_block_timestamp(train_addr, BASE_TIMESTAMP + TIMELOCK_DELTA + 1);
     start_cheat_caller_address(train_addr, SENDER());
-    train.refund_solver(HASHLOCK, index);
+    train.refund_solver(HASHLOCK, SENDER());
     stop_cheat_caller_address(train_addr);
     stop_cheat_block_timestamp(train_addr);
 

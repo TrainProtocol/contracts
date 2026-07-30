@@ -215,9 +215,6 @@ async function demoView() {
   const contractAddress = requireEnv('CONTRACT_ADDRESS');
   const contract = getTrainContract(contractAddress, provider);
 
-  const count = await contract.get_solver_lock_count(cairo.uint256(0n));
-  console.log('Solver lock count (hashlock=0):', count.toString());
-
   const testHashlock = process.argv[3];
   if (testHashlock) {
     const hl = cairo.uint256(BigInt(testHashlock));
@@ -226,13 +223,13 @@ async function demoView() {
     const userLock = await contract.get_user_lock(hl);
     console.log(JSON.stringify(userLock, formatBigint, 2));
 
-    console.log('\n--- Solver Lock Count ---');
-    const solverCount = await contract.get_solver_lock_count(hl);
-    console.log('Count:', solverCount.toString());
-
-    if (solverCount > 0n) {
-      console.log('\n--- Solver Lock (index 1) ---');
-      const solverLock = await contract.get_solver_lock(hl, cairo.uint256(1n));
+    // get_solver_lock is keyed by (hashlock, solver) — pass the solver address as the 4th arg
+    // (npm run interact -- view <hashlock> <solverAddress>); defaults to ACCOUNT_ADDRESS. A zero
+    // `sender` in the result means that solver never locked under this hashlock.
+    const solverAddress = process.argv[4] || optionalEnv('ACCOUNT_ADDRESS');
+    if (solverAddress) {
+      console.log('\n--- Solver Lock (solver =', solverAddress, ') ---');
+      const solverLock = await contract.get_solver_lock(hl, solverAddress);
       console.log(JSON.stringify(solverLock, formatBigint, 2));
     }
   }
@@ -277,7 +274,7 @@ async function demoRedeem() {
   const secret = BigInt(process.argv[5] || '0x0');
 
   if (!type || hashlock === 0n || secret === 0n) {
-    console.error('Usage: npm run interact -- redeem <user|solver> <hashlock> <secret> [index]');
+    console.error('Usage: npm run interact -- redeem <user|solver> <hashlock> <secret> [solverAddress]');
     process.exit(1);
   }
 
@@ -292,10 +289,12 @@ async function demoRedeem() {
     const resp = await contract.invoke('redeem_user', [cairo.uint256(hashlock), cairo.uint256(secret)]);
     tx = resp.transaction_hash;
   } else {
-    const index = BigInt(process.argv[6] || '1');
+    // solver_lock is keyed by (hashlock, solver) — defaults to this CLI's own account, which is
+    // the solver in demoSolverLock's flow.
+    const solverAddress = process.argv[6] || account.address;
     const resp = await contract.invoke('redeem_solver', [
       cairo.uint256(hashlock),
-      cairo.uint256(index),
+      solverAddress,
       cairo.uint256(secret),
     ]);
     tx = resp.transaction_hash;
@@ -318,7 +317,7 @@ async function demoRefund() {
   const hashlock = BigInt(process.argv[4] || '0x0');
 
   if (!type || hashlock === 0n) {
-    console.error('Usage: npm run interact -- refund <user|solver> <hashlock> [index]');
+    console.error('Usage: npm run interact -- refund <user|solver> <hashlock> [solverAddress]');
     process.exit(1);
   }
 
@@ -327,8 +326,9 @@ async function demoRefund() {
     const resp = await contract.invoke('refund_user', [cairo.uint256(hashlock)]);
     tx = resp.transaction_hash;
   } else {
-    const index = BigInt(process.argv[5] || '1');
-    const resp = await contract.invoke('refund_solver', [cairo.uint256(hashlock), cairo.uint256(index)]);
+    // solver_lock is keyed by (hashlock, solver) — defaults to this CLI's own account.
+    const solverAddress = process.argv[5] || account.address;
+    const resp = await contract.invoke('refund_solver', [cairo.uint256(hashlock), solverAddress]);
     tx = resp.transaction_hash;
   }
 

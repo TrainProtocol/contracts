@@ -294,10 +294,19 @@ async function waitUntilChainTimeAfter(target: number, isDevnet: boolean, rpcUrl
     }
     return;
   }
+  // Public RPCs blip; a transient fetch failure inside this polling loop must not abort a
+  // multi-minute run — retry the poll instead of propagating.
+  let pollFailures = 0;
   for (;;) {
-    const block = await provider.getBlock("latest");
-    const ts = Number(block.timestamp);
-    if (ts > target) return;
+    try {
+      const block = await provider.getBlock("latest");
+      const ts = Number(block.timestamp);
+      if (ts > target) return;
+      pollFailures = 0;
+    } catch (err) {
+      pollFailures += 1;
+      if (pollFailures > 10) throw err;
+    }
     await sleep(5_000);
   }
 }
@@ -784,7 +793,7 @@ async function main() {
     check(S, "E beneficiary received amount", after - before === AMOUNT, `delta=${after - before}`);
   }
 
-  // ── F: solver_lock -> redeem_solver (no reward), first index is 1 ──
+  // ── F: solver_lock -> redeem_solver (no reward), keyed by (hashlock, solver) ──
   {
     const S = "F";
     const secret = freshSecret("F");
@@ -810,14 +819,14 @@ async function main() {
     await sendTx(S, `F solver_lock (hashlock ${hexShort(hashlock)})`, () =>
       solver.execute([approveCall, lockCall], NO_TIP),
     );
-    const index = (await train.get_solver_lock_count(cairo.uint256(hashlock))) as bigint;
-    check(S, "F first index is 1", index === 1n, `index=${index}`);
+    const lock = await train.get_solver_lock(cairo.uint256(hashlock), solver.address);
+    check(S, "F lock recorded under solver", lockStatusName(lock) === "Pending", `status=${lockStatusName(lock)}`);
 
     // redeem submitted by `relayer`, not `user` (the principal recipient) — see Flow A's comment
     // on why the recipient must never be the one paying its own gas in the measured window.
     const before = (await strkView.balance_of(user.address)) as bigint;
     await sendTx(S, "F redeem_solver (by relayer)", () =>
-      trainAsRelayer.invoke("redeem_solver", [cairo.uint256(hashlock), index, cairo.uint256(secret)], NO_TIP),
+      trainAsRelayer.invoke("redeem_solver", [cairo.uint256(hashlock), solver.address, cairo.uint256(secret)], NO_TIP),
     );
     const after = (await strkView.balance_of(user.address)) as bigint;
     check(S, "F recipient received amount", after - before === AMOUNT, `delta=${after - before}`);
@@ -850,11 +859,9 @@ async function main() {
     await sendTx(S, `G solver_lock (hashlock ${hexShort(hashlock)}, reward)`, () =>
       solver.execute([approveCall, lockCall], NO_TIP),
     );
-    const index = (await train.get_solver_lock_count(cairo.uint256(hashlock))) as bigint;
-
     const rewardBefore = (await strkView.balance_of(rewardRecipient)) as bigint;
     await sendTx(S, "G redeem_solver (before reward_timelock, by relayer)", () =>
-      trainAsRelayer.invoke("redeem_solver", [cairo.uint256(hashlock), index, cairo.uint256(secret)], NO_TIP),
+      trainAsRelayer.invoke("redeem_solver", [cairo.uint256(hashlock), solver.address, cairo.uint256(secret)], NO_TIP),
     );
     const rewardAfter = (await strkView.balance_of(rewardRecipient)) as bigint;
     check(
@@ -891,8 +898,7 @@ async function main() {
     await sendTx(S, `H solver_lock (hashlock ${hexShort(hashlock)}, short reward_timelock)`, () =>
       solver.execute([approveCall, lockCall], NO_TIP),
     );
-    const index = (await train.get_solver_lock_count(cairo.uint256(hashlock))) as bigint;
-    const lock = await train.get_solver_lock(cairo.uint256(hashlock), index);
+    const lock = await train.get_solver_lock(cairo.uint256(hashlock), solver.address);
     await waitUntilChainTimeAfter(Number(lock.reward_timelock), isDevnet, rpcUrl);
 
     // Redeemed by `relayer` after `reward_timelock`: the principal goes to `recipient` (user, who
@@ -901,7 +907,7 @@ async function main() {
     const userBefore = (await strkView.balance_of(user.address)) as bigint;
     const relayerBefore = (await strkView.balance_of(relayer.address)) as bigint;
     const { fee: redeemFee } = await sendTx(S, "H redeem_solver (after reward_timelock, by relayer)", () =>
-      trainAsRelayer.invoke("redeem_solver", [cairo.uint256(hashlock), index, cairo.uint256(secret)], NO_TIP),
+      trainAsRelayer.invoke("redeem_solver", [cairo.uint256(hashlock), solver.address, cairo.uint256(secret)], NO_TIP),
     );
     const userGained = ((await strkView.balance_of(user.address)) as bigint) - userBefore;
     const relayerGained = ((await strkView.balance_of(relayer.address)) as bigint) - relayerBefore + redeemFee;
@@ -941,14 +947,12 @@ async function main() {
     await sendTx(S, `I solver_lock (hashlock ${hexShort(hashlock)}, diff reward token)`, () =>
       solver.execute([approveMain, approveReward, lockCall], NO_TIP),
     );
-    const index = (await train.get_solver_lock_count(cairo.uint256(hashlock))) as bigint;
-
     // redeem submitted by `relayer`, not `user` (the STRK principal recipient) — see Flow A's
     // comment; the ETH reward_recipient is an unrelated dummy address either way.
     const userBefore = (await strkView.balance_of(user.address)) as bigint;
     const rewardBefore = (await ethView.balance_of(rewardRecipient)) as bigint;
     await sendTx(S, "I redeem_solver (different reward token, by relayer)", () =>
-      trainAsRelayer.invoke("redeem_solver", [cairo.uint256(hashlock), index, cairo.uint256(secret)], NO_TIP),
+      trainAsRelayer.invoke("redeem_solver", [cairo.uint256(hashlock), solver.address, cairo.uint256(secret)], NO_TIP),
     );
     const userAfter = (await strkView.balance_of(user.address)) as bigint;
     const rewardAfter = (await ethView.balance_of(rewardRecipient)) as bigint;
@@ -982,8 +986,7 @@ async function main() {
     await sendTx(S, `J solver_lock (hashlock ${hexShort(hashlock)}, short timelock)`, () =>
       solver.execute([approveCall, lockCall], NO_TIP),
     );
-    const index = (await train.get_solver_lock_count(cairo.uint256(hashlock))) as bigint;
-    const lock = await train.get_solver_lock(cairo.uint256(hashlock), index);
+    const lock = await train.get_solver_lock(cairo.uint256(hashlock), solver.address);
     await waitUntilChainTimeAfter(Number(lock.timelock), isDevnet, rpcUrl);
 
     // `before` is captured AFTER solver_lock (which `solver` itself submitted, paying gas) and
@@ -991,7 +994,7 @@ async function main() {
     // the account (`solver`) whose balance we're asserting on.
     const before = (await strkView.balance_of(solver.address)) as bigint;
     await sendTx(S, "J refund_solver (after timelock, by user)", () =>
-      train.invoke("refund_solver", [cairo.uint256(hashlock), index], NO_TIP),
+      train.invoke("refund_solver", [cairo.uint256(hashlock), solver.address], NO_TIP),
     );
     const after = (await strkView.balance_of(solver.address)) as bigint;
     check(S, "J amount+reward returned to solver", after - before === AMOUNT + REWARD, `delta=${after - before}`);
@@ -1173,8 +1176,21 @@ async function main() {
       "",
     ]);
     await sendTx(S, "V probe lock #1 solver_lock", () => solver.execute([approve1, lock1], NO_TIP));
-    const index1 = (await train.get_solver_lock_count(cairo.uint256(probeHashlock))) as bigint;
 
+    const lockAtSolver = await train.get_solver_lock(cairo.uint256(probeHashlock), solver.address);
+    check(S, "V get_solver_lock(h, solver) is Pending", lockStatusName(lockAtSolver) === "Pending", `status=${lockStatusName(lockAtSolver)}`);
+    // An address that never called solver_lock under probeHashlock must read back Empty — the
+    // getter is a solver's "did my lock land?" idempotency probe, so it must not alias another
+    // solver's lock. Probe a constant non-participant address rather than `relayer`: when
+    // SOLVER_* is unset the solver falls back to the relayer account, and probing `relayer`
+    // would then read the solver's own (Pending) lock.
+    const NEVER_LOCKED = "0x00000000000000000000000000000000000000000000000000000000000dead";
+    const lockAtStranger = await train.get_solver_lock(cairo.uint256(probeHashlock), NEVER_LOCKED);
+    check(S, "V get_solver_lock(h, never-locked addr) is Empty", lockStatusName(lockAtStranger) === "Empty", `status=${lockStatusName(lockAtStranger)}`);
+
+    // Double-lock guard: a repeat solver_lock by the SAME solver under the SAME hashlock must
+    // revert with SolverLockAlreadyExists, ever — this is what stops a solver whose RPC lied
+    // about the first tx landing from blindly retrying and double-funding the swap.
     const approve2 = strkTokenAsSolver.populate("approve", [addresses.train, cairo.uint256(AMOUNT)]);
     const lock2 = trainAsSolver.populate("solver_lock", [
       solverLockParams({
@@ -1192,14 +1208,9 @@ async function main() {
       destinationInfo(AMOUNT, strk),
       "",
     ]);
-    await sendTx(S, "V probe lock #2 solver_lock", () => solver.execute([approve2, lock2], NO_TIP));
-    const index2 = (await train.get_solver_lock_count(cairo.uint256(probeHashlock))) as bigint;
-    check(S, "V probe indices are 1 and 2", index1 === 1n && index2 === 2n, `got ${index1}, ${index2}`);
-
-    const lockAt2 = await train.get_solver_lock(cairo.uint256(probeHashlock), 2n);
-    check(S, "V get_solver_lock(h, 2) resolves index 2 (Pending)", lockStatusName(lockAt2) === "Pending", `status=${lockStatusName(lockAt2)}`);
-    const lockAt99 = await train.get_solver_lock(cairo.uint256(probeHashlock), 99n);
-    check(S, "V get_solver_lock(h, 99) is Empty", lockStatusName(lockAt99) === "Empty", `status=${lockStatusName(lockAt99)}`);
+    await sendExpectRevert(S, "V duplicate solver_lock (same solver, same hashlock) reverts", () =>
+      solver.execute([approve2, lock2], NO_TIP),
+    );
 
     // Pagination over user.address's enumerated user-lock hashes (A, B, C, D, K, L if run, and
     // the U1-live fixture below all attribute to `user`).
@@ -1389,7 +1400,7 @@ async function main() {
     );
 
     await simReject(S, "refund_solver unknown", "LockNotFound", () =>
-      simulateCall(trainView, "refund_solver", [cairo.uint256(computeHashlock(freshSecret("U1-j"))), cairo.uint256(1n)]),
+      simulateCall(trainView, "refund_solver", [cairo.uint256(computeHashlock(freshSecret("U1-j"))), solver.address]),
     );
 
     await simReject(S, "redeem_user A again (already redeemed)", "LockNotPending", () =>

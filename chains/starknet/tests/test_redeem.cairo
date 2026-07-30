@@ -102,14 +102,14 @@ fn test_redeem_solver_success() {
     let train = ITrainDispatcher { contract_address: train_addr };
 
     start_cheat_block_timestamp(train_addr, BASE_TIMESTAMP);
-    let index = do_solver_lock(train_addr, token_addr, reward_token_addr, HASHLOCK, REWARD_AMOUNT);
+    do_solver_lock(train_addr, token_addr, reward_token_addr, HASHLOCK, REWARD_AMOUNT);
 
     start_cheat_caller_address(train_addr, ANYONE());
-    train.redeem_solver(HASHLOCK, index, SECRET);
+    train.redeem_solver(HASHLOCK, SENDER(), SECRET);
     stop_cheat_caller_address(train_addr);
     stop_cheat_block_timestamp(train_addr);
 
-    let lock = train.get_solver_lock(HASHLOCK, index);
+    let lock = train.get_solver_lock(HASHLOCK, SENDER());
     let is_redeemed: bool = lock.status == LockStatus::Redeemed;
     assert(is_redeemed, 'wrong status');
     assert(lock.secret == SECRET, 'wrong secret');
@@ -127,13 +127,13 @@ fn test_redeem_solver_reward_after_timelock() {
     let train = ITrainDispatcher { contract_address: train_addr };
 
     start_cheat_block_timestamp(train_addr, BASE_TIMESTAMP);
-    let index = do_solver_lock(train_addr, token_addr, reward_token_addr, HASHLOCK, REWARD_AMOUNT);
+    do_solver_lock(train_addr, token_addr, reward_token_addr, HASHLOCK, REWARD_AMOUNT);
 
     // Advance past reward_timelock -> reward goes to caller
     let after = BASE_TIMESTAMP + REWARD_TIMELOCK_DELTA + 1;
     start_cheat_block_timestamp(train_addr, after);
     start_cheat_caller_address(train_addr, ANYONE());
-    train.redeem_solver(HASHLOCK, index, SECRET);
+    train.redeem_solver(HASHLOCK, SENDER(), SECRET);
     stop_cheat_caller_address(train_addr);
     stop_cheat_block_timestamp(train_addr);
 
@@ -147,11 +147,11 @@ fn test_redeem_solver_reward_before_timelock() {
     let train = ITrainDispatcher { contract_address: train_addr };
 
     start_cheat_block_timestamp(train_addr, BASE_TIMESTAMP);
-    let index = do_solver_lock(train_addr, token_addr, reward_token_addr, HASHLOCK, REWARD_AMOUNT);
+    do_solver_lock(train_addr, token_addr, reward_token_addr, HASHLOCK, REWARD_AMOUNT);
 
     // Before reward_timelock -> reward goes to reward_recipient
     start_cheat_caller_address(train_addr, ANYONE());
-    train.redeem_solver(HASHLOCK, index, SECRET);
+    train.redeem_solver(HASHLOCK, SENDER(), SECRET);
     stop_cheat_caller_address(train_addr);
     stop_cheat_block_timestamp(train_addr);
 
@@ -167,7 +167,7 @@ fn test_redeem_solver_not_found() {
     let train = ITrainDispatcher { contract_address: train_addr };
 
     start_cheat_caller_address(train_addr, ANYONE());
-    train.redeem_solver(HASHLOCK, 1, SECRET);
+    train.redeem_solver(HASHLOCK, SENDER(), SECRET);
 }
 
 #[test]
@@ -177,8 +177,8 @@ fn test_redeem_solver_wrong_secret() {
     let train = ITrainDispatcher { contract_address: train_addr };
 
     start_cheat_block_timestamp(train_addr, BASE_TIMESTAMP);
-    let index = do_solver_lock(train_addr, token_addr, reward_token_addr, HASHLOCK, REWARD_AMOUNT);
+    do_solver_lock(train_addr, token_addr, reward_token_addr, HASHLOCK, REWARD_AMOUNT);
 
     start_cheat_caller_address(train_addr, ANYONE());
-    train.redeem_solver(HASHLOCK, index, 999);
+    train.redeem_solver(HASHLOCK, SENDER(), 999);
 }

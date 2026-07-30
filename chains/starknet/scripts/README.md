@@ -44,14 +44,14 @@ npm run interact -- <command> [args...]
 #### `view` - Read contract state
 
 ```bash
-# Basic check (solver lock count for hashlock=0)
-npm run interact -- view
-
-# Query a specific hashlock
+# Query a specific hashlock (solver defaults to ACCOUNT_ADDRESS)
 npm run interact -- view 0xabc123...
+
+# Query a specific hashlock for a specific solver
+npm run interact -- view 0xabc123... 0x<solverAddress>
 ```
 
-Returns: solver lock count, user lock details, solver lock details (if any), and all user lock hashes for your account.
+Returns: user lock details, solver lock details for the given/default solver address (`get_solver_lock` is keyed by `(hashlock, solver)` — a zero `sender` means that solver never locked), and all user lock hashes for your account.
 
 #### `user-lock` - Create a user lock
 
@@ -85,8 +85,9 @@ Same as `solver-lock` but uses `TOKEN_ADDRESS` for the main amount and `REWARD_T
 # Redeem a user lock
 npm run interact -- redeem user 0x<hashlock> 0x<secret>
 
-# Redeem a solver lock (index defaults to 1)
-npm run interact -- redeem solver 0x<hashlock> 0x<secret> [index]
+# Redeem a solver lock (solver lock is keyed by (hashlock, solver); solverAddress defaults to
+# this CLI's own account)
+npm run interact -- redeem solver 0x<hashlock> 0x<secret> [solverAddress]
 ```
 
 Verifies the hashlock matches `sha256(secret)` before submitting.
@@ -97,8 +98,8 @@ Verifies the hashlock matches `sha256(secret)` before submitting.
 # Refund a user lock (must be past timelock, or called by recipient)
 npm run interact -- refund user 0x<hashlock>
 
-# Refund a solver lock (index defaults to 1)
-npm run interact -- refund solver 0x<hashlock> [index]
+# Refund a solver lock (solverAddress defaults to this CLI's own account)
+npm run interact -- refund solver 0x<hashlock> [solverAddress]
 ```
 
 ## Verify

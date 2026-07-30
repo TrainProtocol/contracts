@@ -62,13 +62,13 @@ fn test_redeem_solver_with_constant_curve_pays_full_amount_and_reward() {
 
     start_cheat_block_timestamp(train_addr, BASE_TIMESTAMP);
     start_cheat_caller_address(train_addr, SENDER());
-    let index = train.solver_lock(params, dst, "");
+    train.solver_lock(params, dst, "");
     stop_cheat_caller_address(train_addr);
 
     // Redeem before reward_timelock: reward goes to reward_recipient, in full, regardless of the
     // curve — the curve only ever governs `amount`, never `reward`.
     start_cheat_caller_address(train_addr, ANYONE());
-    train.redeem_solver(HASHLOCK, index, SECRET);
+    train.redeem_solver(HASHLOCK, SENDER(), SECRET);
     stop_cheat_caller_address(train_addr);
     stop_cheat_block_timestamp(train_addr);
 
@@ -205,14 +205,14 @@ fn test_redeem_solver_decay_curve_splits_amount_but_reward_is_full() {
 
     start_cheat_block_timestamp(train_addr, BASE_TIMESTAMP);
     start_cheat_caller_address(train_addr, SENDER());
-    let index = train.solver_lock(params, dst, "");
+    train.solver_lock(params, dst, "");
     stop_cheat_caller_address(train_addr);
 
     let erc20 = IERC20Dispatcher { contract_address: token_addr };
     let refund_to_before = erc20.balance_of(SENDER());
 
     start_cheat_caller_address(train_addr, ANYONE());
-    train.redeem_solver(HASHLOCK, index, SECRET);
+    train.redeem_solver(HASHLOCK, SENDER(), SECRET);
     stop_cheat_caller_address(train_addr);
     stop_cheat_block_timestamp(train_addr);
 

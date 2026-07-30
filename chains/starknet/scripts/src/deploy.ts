@@ -68,8 +68,10 @@ async function main() {
   // ── Verify deployment ──
   console.log("\nVerifying deployment...");
   const contract = getTrainContract(contractAddress as string, provider);
-  const count = await contract.get_solver_lock_count(0n);
-  console.log("get_solver_lock_count(0) =", count.toString(), "(expected 0)");
+  // get_solver_lock is keyed by (hashlock, solver): a zero solver address never locked anything,
+  // so this must read back Empty (sender == 0) on a fresh deployment.
+  const probe = await contract.get_solver_lock(0n, "0x0");
+  console.log("get_solver_lock(0, 0x0).sender =", probe.sender?.toString?.() ?? probe.sender, "(expected 0)");
 
   // ── Print .env snippet ──
   console.log("\n========================================");

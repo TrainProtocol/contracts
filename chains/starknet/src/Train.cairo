@@ -127,34 +127,42 @@ pub trait ITrain<TContractState> {
         solver_data: ByteArray,
     );
 
-    /// Create a solver lock to fulfill a swap
+    /// Create a solver lock to fulfill a swap. At most ONE lock per (hashlock, caller), EVER —
+    /// a repeat call reverts with `SolverLockAlreadyExists` before any funds are pulled, so a
+    /// blind retry (e.g. after an unreliable RPC reported the first tx as missing) cannot
+    /// double-fund the same swap. Probe idempotently via `get_solver_lock(hashlock,
+    /// solver).sender` (zero means never locked). The guard never lifts, not even after a
+    /// refund; a deliberate re-fill of the same hashlock requires a different solver address.
+    /// Different solvers may still lock the same hashlock.
     fn solver_lock(
         ref self: TContractState,
         params: SolverLockParams,
         dst: DestinationInfo,
         data: ByteArray,
-    ) -> u256;
+    );
 
     /// Refund a user lock (full amount returned to `refund_to`)
     fn refund_user(ref self: TContractState, hashlock: u256);
 
     /// Refund a solver lock (amount + reward returned to `refund_to`)
-    fn refund_solver(ref self: TContractState, hashlock: u256, index: u256);
+    fn refund_solver(ref self: TContractState, hashlock: u256, solver: ContractAddress);
 
     /// Redeem a user lock with the secret preimage
     fn redeem_user(ref self: TContractState, hashlock: u256, secret: u256);
 
     /// Redeem a solver lock with the secret preimage
-    fn redeem_solver(ref self: TContractState, hashlock: u256, index: u256, secret: u256);
+    fn redeem_solver(
+        ref self: TContractState, hashlock: u256, solver: ContractAddress, secret: u256,
+    );
 
     /// Get user lock details
     fn get_user_lock(self: @TContractState, hashlock: u256) -> Train::UserLock;
 
-    /// Get solver lock details
-    fn get_solver_lock(self: @TContractState, hashlock: u256, index: u256) -> Train::SolverLock;
-
-    /// Get the number of solver locks for a hashlock
-    fn get_solver_lock_count(self: @TContractState, hashlock: u256) -> u256;
+    /// Get solver lock details. Doubles as the solver's idempotency probe: a zero `sender` in
+    /// the returned lock means `solver` has never locked under `hashlock`.
+    fn get_solver_lock(
+        self: @TContractState, hashlock: u256, solver: ContractAddress,
+    ) -> Train::SolverLock;
 
     /// Paginated hashlocks of the user locks created by / attributed to `user`.
     /// Returns the page in `[offset, min(offset + limit, total))` plus `total`, the full number
@@ -196,10 +204,10 @@ mod Train {
         reentrancy_guard: ReentrancyGuardComponent::Storage,
         /// hashlock => UserLock
         user_locks: Map<u256, UserLock>,
-        /// (hashlock, index) => SolverLock
-        solver_locks: Map<(u256, u256), SolverLock>,
-        /// hashlock => count of solver locks
-        solver_lock_count: Map<u256, u256>,
+        /// (hashlock, solver) => SolverLock. At most ONE lock per (hashlock, solver), ever — the
+        /// per-solver uniqueness guard in `solver_lock` makes a blind `solver_lock` retry revert
+        /// instead of double-funding the same swap.
+        solver_locks: Map<(u256, ContractAddress), SolverLock>,
         /// user => count of their user lock hashes
         user_lock_hash_count: Map<ContractAddress, u256>,
         /// (user, index) => hashlock
@@ -289,7 +297,6 @@ mod Train {
         sender: ContractAddress,
         #[key]
         recipient: ContractAddress,
-        index: u256,
         src_chain: ByteArray,
         token: ContractAddress,
         amount: u256,
@@ -319,7 +326,7 @@ mod Train {
         #[key]
         hashlock: u256,
         #[key]
-        index: u256,
+        solver: ContractAddress,
         refund_to: ContractAddress,
         amount: u256,
         reward: u256,
@@ -340,7 +347,7 @@ mod Train {
         #[key]
         hashlock: u256,
         #[key]
-        index: u256,
+        solver: ContractAddress,
         redeemer: ContractAddress,
         secret: u256,
         payout: u256,
@@ -381,7 +388,7 @@ mod Train {
             params: SolverLockParams,
             dst: DestinationInfo,
             data: ByteArray,
-        ) -> u256 {
+        ) {
             self.reentrancy_guard.start();
 
             // Checks
@@ -402,22 +409,27 @@ mod Train {
             assert(params.reward_timelock_delta <= 0xFFFFFFFFFFFFFFFF_u64 - now, 'TimelockOverflow');
             assert(!params.recipient.is_zero(), 'ZeroAddress');
             assert(!params.refund_to.is_zero(), 'ZeroAddress');
+            // At most ONE solver lock per (hashlock, caller), EVER: a repeat call reverts here,
+            // before any funds are pulled, so a blind retry (e.g. after an unreliable or
+            // malicious RPC reported the first tx as missing) cannot double-fund the same swap.
+            // The guard never lifts, not even after a refund; a deliberate re-fill of the same
+            // hashlock requires a different solver address. Different solvers may still lock the
+            // same hashlock.
+            assert(
+                self.solver_locks.read((params.hashlock, caller)).sender.is_zero(),
+                'SolverLockAlreadyExists',
+            );
             if !params.payout_curve.is_zero() {
                 self._validate_payout_curve(params.payout_curve);
             }
             let timelock = now + params.timelock_delta;
             let reward_timelock = now + params.reward_timelock_delta;
 
-            let current_count = self.solver_lock_count.read(params.hashlock);
-            let index = current_count + 1;
-
             // Effects
-            self.solver_lock_count.write(params.hashlock, index);
-
             self
                 .solver_locks
                 .write(
-                    (params.hashlock, index),
+                    (params.hashlock, caller),
                     SolverLock {
                         secret: 0,
                         amount: params.amount,
@@ -443,7 +455,6 @@ mod Train {
                         hashlock: params.hashlock,
                         sender: caller,
                         recipient: params.recipient,
-                        index: index,
                         src_chain: params.src_chain,
                         token: params.token,
                         amount: params.amount,
@@ -465,7 +476,6 @@ mod Train {
             self._transfer_in_mixed(params.token, params.amount, params.reward_token, params.reward);
 
             self.reentrancy_guard.end();
-            index
         }
 
         fn refund_user(ref self: ContractState, hashlock: u256) {
@@ -489,22 +499,22 @@ mod Train {
             self.reentrancy_guard.end();
         }
 
-        fn refund_solver(ref self: ContractState, hashlock: u256, index: u256) {
+        fn refund_solver(ref self: ContractState, hashlock: u256, solver: ContractAddress) {
             self.reentrancy_guard.start();
 
             // Checks
-            let lock = self.solver_locks.read((hashlock, index));
+            let lock = self.solver_locks.read((hashlock, solver));
             assert(!lock.sender.is_zero(), 'LockNotFound');
             assert(lock.status == LockStatus::Pending, 'LockNotPending');
             assert(lock.timelock <= get_block_timestamp(), 'RefundNotAllowed');
 
             // Effects
-            self.solver_locks.entry((hashlock, index)).status.write(LockStatus::Refunded);
+            self.solver_locks.entry((hashlock, solver)).status.write(LockStatus::Refunded);
             self
                 .emit(
                     SolverRefunded {
                         hashlock: hashlock,
-                        index: index,
+                        solver: solver,
                         refund_to: lock.refund_to,
                         amount: lock.amount,
                         reward: lock.reward,
@@ -564,11 +574,13 @@ mod Train {
             self.reentrancy_guard.end();
         }
 
-        fn redeem_solver(ref self: ContractState, hashlock: u256, index: u256, secret: u256) {
+        fn redeem_solver(
+            ref self: ContractState, hashlock: u256, solver: ContractAddress, secret: u256,
+        ) {
             self.reentrancy_guard.start();
 
             // Checks
-            let lock = self.solver_locks.read((hashlock, index));
+            let lock = self.solver_locks.read((hashlock, solver));
             assert(!lock.sender.is_zero(), 'LockNotFound');
             assert(_sha256_u256(secret) == hashlock, 'HashlockMismatch');
             assert(lock.status == LockStatus::Pending, 'LockNotPending');
@@ -587,13 +599,13 @@ mod Train {
             let excess = lock.amount - payout;
 
             // Effects
-            self.solver_locks.entry((hashlock, index)).status.write(LockStatus::Redeemed);
-            self.solver_locks.entry((hashlock, index)).secret.write(secret);
+            self.solver_locks.entry((hashlock, solver)).status.write(LockStatus::Redeemed);
+            self.solver_locks.entry((hashlock, solver)).secret.write(secret);
             self
                 .emit(
                     SolverRedeemed {
                         hashlock: hashlock,
-                        index: index,
+                        solver: solver,
                         redeemer: get_caller_address(),
                         secret: secret,
                         payout: payout,
@@ -619,12 +631,10 @@ mod Train {
             self.user_locks.read(hashlock)
         }
 
-        fn get_solver_lock(self: @ContractState, hashlock: u256, index: u256) -> SolverLock {
-            self.solver_locks.read((hashlock, index))
-        }
-
-        fn get_solver_lock_count(self: @ContractState, hashlock: u256) -> u256 {
-            self.solver_lock_count.read(hashlock)
+        fn get_solver_lock(
+            self: @ContractState, hashlock: u256, solver: ContractAddress,
+        ) -> SolverLock {
+            self.solver_locks.read((hashlock, solver))
         }
 
         fn get_user_lock_hashes(

@@ -25,24 +25,11 @@ export function optionalEnv(name: string): string | undefined {
 }
 
 function normalizeRpcUrl(url: string): string {
-  const trimmed = url.trim();
-  if (!/^https?:\/\//i.test(trimmed)) return trimmed;
-
-  let parsed: URL;
-  try {
-    parsed = new URL(trimmed);
-  } catch {
-    return trimmed;
-  }
-
-  // Most public Starknet providers expose JSON-RPC under /rpc/v0_7 or /rpc/v0_8.
-  // If a bare host is provided, default to /rpc/v0_7 for compatibility.
-  if (parsed.pathname === "/" || parsed.pathname === "") {
-    parsed.pathname = "/rpc/v0_7";
-    return parsed.toString();
-  }
-
-  return trimmed;
+  // Bare-host URLs are used as-is. The old behavior appended /rpc/v0_7 "for compatibility",
+  // but starknet.js v9 speaks RPC 0.8+ only and current public providers (e.g. publicnode)
+  // serve a current spec on the bare path — the rewrite just broke them. Point RPC_URL at a
+  // versioned path explicitly if your provider requires one.
+  return url.trim();
 }
 
 // ── Provider & Accounts ──

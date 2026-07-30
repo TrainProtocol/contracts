@@ -7,7 +7,7 @@
 #[starknet::contract]
 pub mod MockDecayCurve {
     use openzeppelin_introspection::src5::SRC5Component;
-    use crate::payout_curve::{IPAYOUT_CURVE_ID, IPayoutCurve};
+    use train_protocol::payout_curve::{IPAYOUT_CURVE_ID, IPayoutCurve};
 
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
 

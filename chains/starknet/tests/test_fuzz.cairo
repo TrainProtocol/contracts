@@ -71,13 +71,11 @@ fn test_fuzz_solver_lock_amounts(raw: u256) {
 
     start_cheat_block_timestamp(train_addr, BASE_TIMESTAMP);
     start_cheat_caller_address(train_addr, SENDER());
-    let index = train.solver_lock(params, dst, "");
+    train.solver_lock(params, dst, "");
     stop_cheat_caller_address(train_addr);
     stop_cheat_block_timestamp(train_addr);
 
-    assert(index == 1, 'wrong index');
-
-    let lock = train.get_solver_lock(HASHLOCK, 1);
+    let lock = train.get_solver_lock(HASHLOCK, SENDER());
     assert(lock.amount == amount, 'amount mismatch');
     assert(lock.reward == reward, 'reward mismatch');
 
@@ -250,12 +248,12 @@ fn test_fuzz_solver_redeem_reward_split(raw: u256) {
 
     start_cheat_block_timestamp(train_addr, BASE_TIMESTAMP);
     start_cheat_caller_address(train_addr, SENDER());
-    let index = train.solver_lock(params, dst, "");
+    train.solver_lock(params, dst, "");
     stop_cheat_caller_address(train_addr);
 
     // Redeem before reward_timelock → reward to reward_recipient
     start_cheat_caller_address(train_addr, ANYONE());
-    train.redeem_solver(HASHLOCK, index, SECRET);
+    train.redeem_solver(HASHLOCK, SENDER(), SECRET);
     stop_cheat_caller_address(train_addr);
     stop_cheat_block_timestamp(train_addr);
 

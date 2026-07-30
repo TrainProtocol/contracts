@@ -28,9 +28,10 @@ cross-chain-standard hashlock so the same secret works across chains.
   `quote_expiry`, and an optional `payout_curve`. One user lock per hashlock
   (`SwapAlreadyExists`).
 - **Solver lock** (`solver_lock`): a solver locks `amount` (+ optional `reward` in
-  `reward_token`) under the same `h`, indexed (`1, 2, …`) so multiple solvers can
-  compete. Carries its own `timelock`, `reward_timelock`, `reward_recipient`,
-  `refund_to`, and optional `payout_curve`.
+  `reward_token`) under the same `h`, keyed by `(h, solver)` — different solvers can
+  still compete for the same hashlock, but at most one lock per `(h, solver)` ever
+  (see the per-solver uniqueness guard below). Carries its own `timelock`,
+  `reward_timelock`, `reward_recipient`, `refund_to`, and optional `payout_curve`.
 - **Redeem** (`redeem_user` / `redeem_solver`): anyone presenting the correct
   `secret` (`sha256(secret) == h`) redeems. The `payout` (curve-adjusted `amount`,
   or full `amount` when no curve) goes to `recipient`; any `excess = amount − payout`
@@ -218,6 +219,17 @@ the user signed and can be sponsored by a SNIP-29 paymaster.
   the explicit `user` (funds still pulled from the caller); `solver_lock` records
   the caller. Owner is never zero for a real transaction, and a zero owner would
   read as `LockNotFound` — so attribution can't be spoofed into stranding funds.
+- **Per-solver lock uniqueness.** `solver_locks` is keyed by `(hashlock, solver)`:
+  at most ONE lock per `(hashlock, solver)`, ever. A repeat `solver_lock` by the
+  same caller reverts with `SolverLockAlreadyExists` *before* any funds are
+  pulled — so a solver whose RPC lied about a submitted tx (reported it as
+  missing when it had actually landed) can retry safely instead of silently
+  double-funding the same swap and losing the second escrow once the secret
+  becomes public. The guard never lifts, not even after a refund or redeem; a
+  deliberate re-fill of the same hashlock requires a different solver address.
+  A solver can probe idempotently via `get_solver_lock(hashlock, solver).sender`
+  (zero means "never locked") before deciding whether to retry. Different
+  solvers may still lock the same hashlock.
 - **Zero-address guards** on `recipient` / `refund_to` (and `reward_recipient` when
   `reward > 0`); `user_lock_for` rejects a zero `user` (`InvalidUser`).
 - **Payout bound** `0 < payout <= amount` on every curve result (`InvalidPayout`),

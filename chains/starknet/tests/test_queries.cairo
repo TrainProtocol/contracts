@@ -32,21 +32,15 @@ fn test_get_solver_lock_empty() {
     let (train_addr, _, _) = setup();
     let train = ITrainDispatcher { contract_address: train_addr };
 
-    let lock = train.get_solver_lock(HASHLOCK, 1);
+    // ANYONE() never locked anything under HASHLOCK: the getter is the idempotency probe a
+    // solver uses to check "did my lock land?" — a zero sender means no.
+    let lock = train.get_solver_lock(HASHLOCK, ANYONE());
     #[feature("deprecated-starknet-consts")]
     let zero = contract_address_const::<0>();
     assert(lock.sender == zero, 'wrong sender');
     assert(lock.amount == 0, 'wrong amount');
     let is_empty: bool = lock.status == LockStatus::Empty;
     assert(is_empty, 'wrong status');
-}
-
-#[test]
-fn test_get_solver_lock_count_zero() {
-    let (train_addr, _, _) = setup();
-    let train = ITrainDispatcher { contract_address: train_addr };
-
-    assert(train.get_solver_lock_count(HASHLOCK) == 0, 'wrong count');
 }
 
 #[test]
