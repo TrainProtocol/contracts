@@ -505,3 +505,139 @@ pub struct SolverLockTokenDiffReward<'info> {
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
 }
+
+// ── SolverLock: SPL token amount + native SOL reward ────────────────────────────
+
+pub fn solver_lock_token_native_reward(
+    ctx: Context<SolverLockTokenNativeReward>,
+    params: SolverLockParams,
+    data: Vec<u8>,
+) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp as u64;
+    let (timelock, reward_timelock) = validate_solver_lock_params(&params, now)?;
+    check_index(&ctx.accounts.counter, params.index)?;
+
+    utils::validate_mint_extensions(&ctx.accounts.token_mint.to_account_info())?;
+    let curve_account = ctx
+        .accounts
+        .payout_curve_program
+        .as_ref()
+        .map(|a| a.to_account_info());
+    utils::validate_payout_curve(
+        params.payout_curve,
+        curve_account.as_ref(),
+        &params.payout_curve_data,
+        params.amount,
+        now,
+    )?;
+
+    let actual_amount = utils::transfer_in_measured(
+        ctx.accounts.sender_token_account.to_account_info(),
+        &mut ctx.accounts.vault,
+        ctx.accounts.token_mint.to_account_info(),
+        ctx.accounts.sender.to_account_info(),
+        ctx.accounts.token_program.to_account_info(),
+        &[],
+        params.amount,
+        ctx.accounts.token_mint.decimals,
+    )?;
+
+    if params.reward > 0 {
+        let cpi_ctx = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.sender.to_account_info(),
+                to: ctx.accounts.solver_lock.to_account_info(),
+            },
+        );
+        system_program::transfer(cpi_ctx, params.reward)?;
+    }
+
+    let sender = ctx.accounts.sender.key();
+    let rent_payer = ctx.accounts.payer.key();
+    let token_mint_key = ctx.accounts.token_mint.key();
+    store_solver_lock(
+        &mut ctx.accounts.solver_lock,
+        &params,
+        sender,
+        rent_payer,
+        token_mint_key,
+        Pubkey::default(),
+        actual_amount,
+        params.reward,
+        timelock,
+        reward_timelock,
+        now,
+    );
+    ctx.accounts.counter.count = params.index;
+
+    emit_solver_locked(
+        params,
+        sender,
+        token_mint_key,
+        Pubkey::default(),
+        actual_amount,
+        ctx.accounts.solver_lock.reward,
+        timelock,
+        reward_timelock,
+        data,
+    );
+    Ok(())
+}
+
+#[derive(Accounts)]
+#[instruction(params: SolverLockParams)]
+pub struct SolverLockTokenNativeReward<'info> {
+    /// Pays rent and fees; may differ from `sender` in sponsored flows.
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
+    /// Funds authority: SPL principal and native SOL reward leave this signer.
+    #[account(mut)]
+    pub sender: Signer<'info>,
+
+    #[account(
+        init_if_needed,
+        payer = payer,
+        space = 8 + SolverLockCounter::INIT_SPACE,
+        seeds = [b"solver_count", params.hashlock.as_ref()],
+        bump,
+    )]
+    pub counter: Box<Account<'info, SolverLockCounter>>,
+
+    #[account(
+        init,
+        payer = payer,
+        space = 8 + SolverLock::INIT_SPACE,
+        seeds = [b"solver_lock", params.hashlock.as_ref(), &params.index.to_le_bytes()],
+        bump,
+    )]
+    pub solver_lock: Box<Account<'info, SolverLock>>,
+
+    pub token_mint: Box<InterfaceAccount<'info, Mint>>,
+
+    #[account(
+        mut,
+        constraint = sender_token_account.owner == sender.key() @ TrainError::WrongToken,
+        constraint = sender_token_account.mint == token_mint.key() @ TrainError::WrongToken,
+    )]
+    pub sender_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    #[account(
+        init,
+        payer = payer,
+        seeds = [b"solver_vault", params.hashlock.as_ref(), &params.index.to_le_bytes()],
+        bump,
+        token::mint = token_mint,
+        token::authority = solver_lock,
+        token::token_program = token_program,
+    )]
+    pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    /// CHECK: payout curve program; validated in the handler.
+    pub payout_curve_program: Option<UncheckedAccount<'info>>,
+
+    pub token_program: Interface<'info, TokenInterface>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+}

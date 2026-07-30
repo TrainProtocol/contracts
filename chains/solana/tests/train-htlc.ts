@@ -165,6 +165,23 @@ describe("train-htlc core", () => {
     rent: SYSVAR_RENT_PUBKEY,
   });
 
+  const solverLockTokenNativeRewardAccounts = (
+    hashlock: number[],
+    index: number
+  ) => ({
+    payer: signer.publicKey,
+    sender: signer.publicKey,
+    counter: deriveSolverCount(programId, hashlock)[0],
+    solverLock: deriveSolverLock(programId, hashlock, index)[0],
+    tokenMint: mintA,
+    senderTokenAccount: signerAtaA,
+    vault: deriveSolverVault(programId, hashlock, index)[0],
+    payoutCurveProgram: null,
+    tokenProgram: TOKEN_PROGRAM_ID,
+    systemProgram: SystemProgram.programId,
+    rent: SYSVAR_RENT_PUBKEY,
+  });
+
   const redeemSolverSolAccounts = (
     hashlock: number[],
     index: number,
@@ -967,6 +984,48 @@ describe("train-htlc core", () => {
     });
   });
 
+  describe("Solver Lock Token Native Reward", () => {
+    it("atomically escrows SPL principal and native SOL reward", async () => {
+      const { hashlock } = generateHashlock();
+      const amount = 200_000;
+      const reward = 700_000;
+      const lockPda = deriveSolverLock(programId, hashlock, 1)[0];
+
+      await program.methods
+        .solverLockTokenNativeReward(
+          solverLockParams({
+            hashlock,
+            index: 1,
+            amount,
+            reward,
+            rewardTimelockDelta: 1800,
+            recipient: recipient.publicKey,
+            rewardRecipient: rewardRecipient.publicKey,
+            refundTo: refundTo.publicKey,
+          }),
+          Buffer.from([])
+        )
+        .accounts(solverLockTokenNativeRewardAccounts(hashlock, 1) as any)
+        .rpc();
+
+      const lock = await (program.account as any).solverLock.fetch(lockPda);
+      const vault = await getAccount(
+        provider.connection,
+        deriveSolverVault(programId, hashlock, 1)[0]
+      );
+      const rent = await provider.connection.getMinimumBalanceForRentExemption(
+        (await provider.connection.getAccountInfo(lockPda))!.data.length
+      );
+
+      expect(Number(vault.amount)).to.equal(amount);
+      expect(lock.reward.toNumber()).to.equal(reward);
+      expect(lock.rewardTokenMint.toBase58()).to.equal(
+        SystemProgram.programId.toBase58()
+      );
+      expect(await lamports(lockPda)).to.equal(rent + reward);
+    });
+  });
+
   // ═══════════════════════════════ Redeem Solver ═══════════════════════════════
 
   describe("Redeem Solver SOL", () => {
@@ -1192,6 +1251,67 @@ describe("train-htlc core", () => {
     });
   });
 
+  describe("Redeem Solver Token Native Reward", () => {
+    it("pays SPL principal and native SOL reward atomically", async () => {
+      const { secret, hashlock } = generateHashlock();
+      const amount = 200_000;
+      const reward = 700_000;
+      await program.methods
+        .solverLockTokenNativeReward(
+          solverLockParams({
+            hashlock,
+            index: 1,
+            amount,
+            reward,
+            rewardTimelockDelta: 1800,
+            recipient: recipient.publicKey,
+            rewardRecipient: rewardRecipient.publicKey,
+            refundTo: refundTo.publicKey,
+          }),
+          Buffer.from([])
+        )
+        .accounts(solverLockTokenNativeRewardAccounts(hashlock, 1) as any)
+        .rpc();
+
+      const rewardBefore = await lamports(rewardRecipient.publicKey);
+      const recipientAta = ata(mintA, recipient.publicKey);
+      const principalBefore = Number(
+        (await provider.connection.getAccountInfo(recipientAta))
+          ? (await getAccount(provider.connection, recipientAta)).amount
+          : 0
+      );
+
+      await program.methods
+        .redeemSolverTokenNativeReward(hashlock, new BN(1), secret)
+        .accounts({
+          caller: signer.publicKey,
+          solverLock: deriveSolverLock(programId, hashlock, 1)[0],
+          rentPayer: signer.publicKey,
+          recipient: recipient.publicKey,
+          rewardRecipient: rewardRecipient.publicKey,
+          refundTo: refundTo.publicKey,
+          tokenMint: mintA,
+          vault: deriveSolverVault(programId, hashlock, 1)[0],
+          recipientTokenAccount: recipientAta,
+          refundToTokenAccount: null,
+          payoutCurveProgram: null,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+          rent: SYSVAR_RENT_PUBKEY,
+        } as any)
+        .rpc();
+
+      const principalAfter = Number(
+        (await getAccount(provider.connection, recipientAta)).amount
+      );
+      expect(principalAfter - principalBefore).to.equal(amount);
+      expect(
+        (await lamports(rewardRecipient.publicKey)) - rewardBefore
+      ).to.equal(reward);
+    });
+  });
+
   // ═══════════════════════════════ Refund Solver ═══════════════════════════════
 
   describe("Refund Solver", () => {
@@ -1357,6 +1477,61 @@ describe("train-htlc core", () => {
         deriveSolverLock(programId, hashlock, 1)[0]
       );
       expect(lock.status).to.equal(STATUS_REFUNDED);
+    });
+
+    it("Native reward: refunds SPL principal and SOL to refund_to", async () => {
+      const { hashlock } = generateHashlock();
+      const amount = 90_000;
+      const reward = 700_000;
+      await program.methods
+        .solverLockTokenNativeReward(
+          solverLockParams({
+            hashlock,
+            index: 1,
+            amount,
+            reward,
+            timelockDelta: 2,
+            rewardTimelockDelta: 1,
+            recipient: recipient.publicKey,
+            rewardRecipient: rewardRecipient.publicKey,
+            refundTo: refundTo.publicKey,
+          }),
+          Buffer.from([])
+        )
+        .accounts(solverLockTokenNativeRewardAccounts(hashlock, 1) as any)
+        .rpc();
+      await sleep(3500);
+
+      const refundAta = ata(mintA, refundTo.publicKey);
+      const tokenBefore = Number(
+        (await provider.connection.getAccountInfo(refundAta))
+          ? (await getAccount(provider.connection, refundAta)).amount
+          : 0
+      );
+      const solBefore = await lamports(refundTo.publicKey);
+
+      await program.methods
+        .refundSolverTokenNativeReward(hashlock, new BN(1))
+        .accounts({
+          caller: signer.publicKey,
+          solverLock: deriveSolverLock(programId, hashlock, 1)[0],
+          rentPayer: signer.publicKey,
+          refundTo: refundTo.publicKey,
+          tokenMint: mintA,
+          vault: deriveSolverVault(programId, hashlock, 1)[0],
+          refundToTokenAccount: refundAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+          rent: SYSVAR_RENT_PUBKEY,
+        } as any)
+        .rpc();
+
+      expect(
+        Number((await getAccount(provider.connection, refundAta)).amount) -
+          tokenBefore
+      ).to.equal(amount);
+      expect((await lamports(refundTo.publicKey)) - solBefore).to.equal(reward);
     });
   });
 

@@ -841,3 +841,192 @@ pub struct RedeemSolverTokenDiffReward<'info> {
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
 }
+
+// ── RedeemSolver: SPL token principal + native SOL reward ──────────────────────
+
+pub fn redeem_solver_token_native_reward(
+    ctx: Context<RedeemSolverTokenNativeReward>,
+    hashlock: [u8; 32],
+    index: u64,
+    secret: [u8; 32],
+) -> Result<()> {
+    utils::verify_hashlock(&secret, &hashlock)?;
+    let now = Clock::get()?.unix_timestamp as u64;
+
+    let lock = &mut ctx.accounts.solver_lock;
+    lock.status = STATUS_REDEEMED;
+    lock.secret = secret;
+    let amount = lock.amount;
+    let reward = lock.reward;
+    let reward_timelock = lock.reward_timelock;
+    let payout_curve = lock.payout_curve;
+    let start_time = lock.start_time;
+    let curve_data = lock.payout_curve_data.clone();
+
+    let curve_account = ctx
+        .accounts
+        .payout_curve_program
+        .as_ref()
+        .map(|a| a.to_account_info());
+    let (payout, excess) = utils::compute_payout_checked(
+        payout_curve,
+        curve_account.as_ref(),
+        amount,
+        start_time,
+        now,
+        &curve_data,
+    )?;
+
+    let index_bytes = index.to_le_bytes();
+    let bump = ctx.bumps.solver_lock;
+    let signer_seeds: &[&[&[u8]]] =
+        &[&[b"solver_lock", hashlock.as_ref(), index_bytes.as_ref(), &[bump]]];
+
+    utils::transfer_from_vault(
+        ctx.accounts.vault.to_account_info(),
+        ctx.accounts.recipient_token_account.to_account_info(),
+        ctx.accounts.token_mint.to_account_info(),
+        ctx.accounts.solver_lock.to_account_info(),
+        ctx.accounts.token_program.to_account_info(),
+        signer_seeds,
+        payout,
+        ctx.accounts.token_mint.decimals,
+    )?;
+
+    if excess > 0 {
+        let refund_to_ata = ctx
+            .accounts
+            .refund_to_token_account
+            .as_ref()
+            .ok_or(TrainError::WrongRefundTo)?;
+        utils::transfer_from_vault(
+            ctx.accounts.vault.to_account_info(),
+            refund_to_ata.to_account_info(),
+            ctx.accounts.token_mint.to_account_info(),
+            ctx.accounts.solver_lock.to_account_info(),
+            ctx.accounts.token_program.to_account_info(),
+            signer_seeds,
+            excess,
+            ctx.accounts.token_mint.decimals,
+        )?;
+    }
+
+    utils::close_vault_if_empty(
+        &mut ctx.accounts.vault,
+        ctx.accounts.rent_payer.to_account_info(),
+        ctx.accounts.solver_lock.to_account_info(),
+        ctx.accounts.token_program.to_account_info(),
+        signer_seeds,
+    )?;
+
+    let reward_to = if reward > 0 {
+        ctx.accounts.solver_lock.sub_lamports(reward)?;
+        if now < reward_timelock {
+            ctx.accounts.reward_recipient.add_lamports(reward)?;
+            ctx.accounts.reward_recipient.key()
+        } else {
+            ctx.accounts.caller.add_lamports(reward)?;
+            ctx.accounts.caller.key()
+        }
+    } else {
+        Pubkey::default()
+    };
+
+    emit!(SolverRedeemed {
+        hashlock,
+        index,
+        redeemer: ctx.accounts.caller.key(),
+        secret,
+        payout,
+        excess,
+        reward_to,
+        reward,
+    });
+    Ok(())
+}
+
+#[derive(Accounts)]
+#[instruction(hashlock: [u8; 32], index: u64)]
+pub struct RedeemSolverTokenNativeReward<'info> {
+    #[account(mut)]
+    pub caller: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"solver_lock", hashlock.as_ref(), &index.to_le_bytes()],
+        bump,
+        constraint = solver_lock.status == STATUS_PENDING @ TrainError::NotPending,
+        constraint = solver_lock.token_mint != Pubkey::default() @ TrainError::WrongToken,
+        constraint = solver_lock.reward_token_mint == Pubkey::default() @ TrainError::WrongToken,
+    )]
+    pub solver_lock: Box<Account<'info, SolverLock>>,
+
+    /// CHECK: rent destination for the emptied vault, verified via
+    /// solver_lock.rent_payer.
+    #[account(
+        mut,
+        constraint = rent_payer.key() == solver_lock.rent_payer @ TrainError::WrongRentPayer,
+    )]
+    pub rent_payer: UncheckedAccount<'info>,
+
+    /// CHECK: verified via solver_lock.recipient.
+    #[account(
+        constraint = recipient.key() == solver_lock.recipient @ TrainError::WrongRecipient,
+    )]
+    pub recipient: UncheckedAccount<'info>,
+
+    /// CHECK: receives native SOL before reward timelock and is verified against
+    /// the stored reward recipient.
+    #[account(
+        mut,
+        constraint = solver_lock.reward == 0
+            || reward_recipient.key() == solver_lock.reward_recipient
+            @ TrainError::WrongRecipient,
+    )]
+    pub reward_recipient: UncheckedAccount<'info>,
+
+    /// CHECK: verified via solver_lock.refund_to (curve excess authority).
+    #[account(
+        constraint = refund_to.key() == solver_lock.refund_to @ TrainError::WrongRefundTo,
+    )]
+    pub refund_to: UncheckedAccount<'info>,
+
+    #[account(
+        constraint = token_mint.key() == solver_lock.token_mint @ TrainError::WrongToken,
+    )]
+    pub token_mint: Box<InterfaceAccount<'info, Mint>>,
+
+    #[account(
+        mut,
+        seeds = [b"solver_vault", hashlock.as_ref(), &index.to_le_bytes()],
+        bump,
+    )]
+    pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    #[account(
+        init_if_needed,
+        payer = caller,
+        associated_token::mint = token_mint,
+        associated_token::authority = recipient,
+        associated_token::token_program = token_program,
+    )]
+    pub recipient_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    /// Required only when the lock has a payout curve (receives the excess).
+    #[account(
+        init_if_needed,
+        payer = caller,
+        associated_token::mint = token_mint,
+        associated_token::authority = refund_to,
+        associated_token::token_program = token_program,
+    )]
+    pub refund_to_token_account: Option<Box<InterfaceAccount<'info, TokenAccount>>>,
+
+    /// CHECK: payout curve program; validated in the handler.
+    pub payout_curve_program: Option<UncheckedAccount<'info>>,
+
+    pub token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+}

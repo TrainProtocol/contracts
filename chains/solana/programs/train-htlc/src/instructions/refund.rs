@@ -483,3 +483,115 @@ pub struct RefundSolverTokenDiffReward<'info> {
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
 }
+
+// ── RefundSolver: SPL token principal + native SOL reward ──────────────────────
+
+pub fn refund_solver_token_native_reward(
+    ctx: Context<RefundSolverTokenNativeReward>,
+    hashlock: [u8; 32],
+    index: u64,
+) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp as u64;
+    let lock = &mut ctx.accounts.solver_lock;
+
+    require!(now >= lock.timelock, TrainError::TimelockNotExpired);
+
+    lock.status = STATUS_REFUNDED;
+    let amount = lock.amount;
+    let reward = lock.reward;
+    let refund_to = lock.refund_to;
+    let index_bytes = index.to_le_bytes();
+    let bump = ctx.bumps.solver_lock;
+    let signer_seeds: &[&[&[u8]]] =
+        &[&[b"solver_lock", hashlock.as_ref(), index_bytes.as_ref(), &[bump]]];
+
+    utils::transfer_from_vault(
+        ctx.accounts.vault.to_account_info(),
+        ctx.accounts.refund_to_token_account.to_account_info(),
+        ctx.accounts.token_mint.to_account_info(),
+        ctx.accounts.solver_lock.to_account_info(),
+        ctx.accounts.token_program.to_account_info(),
+        signer_seeds,
+        amount,
+        ctx.accounts.token_mint.decimals,
+    )?;
+    utils::close_vault_if_empty(
+        &mut ctx.accounts.vault,
+        ctx.accounts.rent_payer.to_account_info(),
+        ctx.accounts.solver_lock.to_account_info(),
+        ctx.accounts.token_program.to_account_info(),
+        signer_seeds,
+    )?;
+
+    if reward > 0 {
+        ctx.accounts.solver_lock.sub_lamports(reward)?;
+        ctx.accounts.refund_to.add_lamports(reward)?;
+    }
+
+    emit!(SolverRefunded {
+        hashlock,
+        index,
+        refund_to,
+        amount,
+        reward,
+    });
+    Ok(())
+}
+
+#[derive(Accounts)]
+#[instruction(hashlock: [u8; 32], index: u64)]
+pub struct RefundSolverTokenNativeReward<'info> {
+    #[account(mut)]
+    pub caller: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"solver_lock", hashlock.as_ref(), &index.to_le_bytes()],
+        bump,
+        constraint = solver_lock.status == STATUS_PENDING @ TrainError::NotPending,
+        constraint = solver_lock.token_mint != Pubkey::default() @ TrainError::WrongToken,
+        constraint = solver_lock.reward_token_mint == Pubkey::default() @ TrainError::WrongToken,
+    )]
+    pub solver_lock: Box<Account<'info, SolverLock>>,
+
+    /// CHECK: rent destination for the emptied vault, verified via
+    /// solver_lock.rent_payer.
+    #[account(
+        mut,
+        constraint = rent_payer.key() == solver_lock.rent_payer @ TrainError::WrongRentPayer,
+    )]
+    pub rent_payer: UncheckedAccount<'info>,
+
+    /// CHECK: verified via solver_lock.refund_to and receives native SOL.
+    #[account(
+        mut,
+        constraint = refund_to.key() == solver_lock.refund_to @ TrainError::WrongRefundTo,
+    )]
+    pub refund_to: UncheckedAccount<'info>,
+
+    #[account(
+        constraint = token_mint.key() == solver_lock.token_mint @ TrainError::WrongToken,
+    )]
+    pub token_mint: Box<InterfaceAccount<'info, Mint>>,
+
+    #[account(
+        mut,
+        seeds = [b"solver_vault", hashlock.as_ref(), &index.to_le_bytes()],
+        bump,
+    )]
+    pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    #[account(
+        init_if_needed,
+        payer = caller,
+        associated_token::mint = token_mint,
+        associated_token::authority = refund_to,
+        associated_token::token_program = token_program,
+    )]
+    pub refund_to_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    pub token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+}

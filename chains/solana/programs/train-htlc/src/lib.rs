@@ -89,6 +89,14 @@ pub mod train_htlc {
         instructions::solver_lock_token_diff_reward(ctx, params, data)
     }
 
+    pub fn solver_lock_token_native_reward(
+        ctx: Context<SolverLockTokenNativeReward>,
+        params: SolverLockParams,
+        data: Vec<u8>,
+    ) -> Result<()> {
+        instructions::solver_lock_token_native_reward(ctx, params, data)
+    }
+
     // ── Gasless intent path ──────────────────────────────────────────────────
 
     pub fn initialize_intent_domain(
@@ -158,6 +166,15 @@ pub mod train_htlc {
         instructions::redeem_solver_token_diff_reward(ctx, hashlock, index, secret)
     }
 
+    pub fn redeem_solver_token_native_reward(
+        ctx: Context<RedeemSolverTokenNativeReward>,
+        hashlock: [u8; 32],
+        index: u64,
+        secret: [u8; 32],
+    ) -> Result<()> {
+        instructions::redeem_solver_token_native_reward(ctx, hashlock, index, secret)
+    }
+
     // ── Refunds ──────────────────────────────────────────────────────────────
 
     pub fn refund_user_sol(ctx: Context<RefundUserSol>, hashlock: [u8; 32]) -> Result<()> {
@@ -190,6 +207,14 @@ pub mod train_htlc {
         index: u64,
     ) -> Result<()> {
         instructions::refund_solver_token_diff_reward(ctx, hashlock, index)
+    }
+
+    pub fn refund_solver_token_native_reward(
+        ctx: Context<RefundSolverTokenNativeReward>,
+        hashlock: [u8; 32],
+        index: u64,
+    ) -> Result<()> {
+        instructions::refund_solver_token_native_reward(ctx, hashlock, index)
     }
 
     // ── Rent reclamation ─────────────────────────────────────────────────────
