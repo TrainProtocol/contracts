@@ -6,6 +6,11 @@ import { IERC20 } from '@openzeppelin/contracts/token/ERC20/IERC20.sol';
 import { Train } from '../../src/tempo/Train.sol';
 import { ConstantPayoutCurve } from '../../src/ConstantPayoutCurve.sol';
 
+/// @dev Minimal CreateX surface used here. Full contract: https://github.com/pcaversaccio/createx
+interface ICreateX {
+  function deployCreate2(bytes32 salt, bytes memory initCode) external payable returns (address newContract);
+}
+
 /// @title Deterministic CREATE2 deploy of ConstantPayoutCurve + Train, for Tempo
 /// @notice Tempo analogue of script/DeployDeterministic.s.sol. Deploys only two contracts —
 ///         no TrainRouter — because TrainRouter is not used on Tempo at all: native Tempo
@@ -14,20 +19,25 @@ import { ConstantPayoutCurve } from '../../src/ConstantPayoutCurve.sol';
 ///         src/tempo/Train.sol, a Tempo-specific contract (no native-ETH paths, no `userLockFor`
 ///         since there is no router to attribute a lock away from `msg.sender`) — not the shared
 ///         src/Train.sol used by the other 6 EVM chains.
-/// @dev Same CREATE2 mechanics as DeployDeterministic.s.sol: goes through the Arachnid factory
-///      (0x4e59b44847b379578588920cA78FbF26c0B4956C, confirmed predeployed on Tempo), so the
-///      address depends only on (factory, salt, initcode) — not the deployer key or its nonce.
+/// @dev Same CreateX mechanics as DeployDeterministic.s.sol: goes through the CreateX factory
+///      (0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed, confirmed predeployed on Tempo Moderato).
+///      Our keccak salt is a "random" salt to CreateX, so it applies
+///      `guardedSalt = keccak256(abi.encode(salt))` — no sender/chain-id mixed in; the address
+///      depends only on (factory, guarded salt, initcode), not the deployer key or its nonce.
 ///      Idempotent: contracts already present at their predicted address are skipped.
 /// @dev Usage:
 ///   export PRIVATE_KEY=0x...                          # deployer (funded with pathUSD, not ETH)
 ///   forge script script/tempo/DeployTempo.s.sol --sig 'predict()'   # offline address preview
 ///   $env:FOUNDRY_PROFILE="tempo"
-///   forge script script/tempo/DeployTempo.s.sol --rpc-url tempo_testnet --broadcast \
-///     --verify --verifier-url https://contracts.tempo.xyz
+///   forge script script/tempo/DeployTempo.s.sol --rpc-url https://rpc.moderato.tempo.xyz --broadcast
+///   (verification: submit std-JSON to contracts.tempo.xyz directly — see DEPLOYMENTS.md)
 contract DeployTempoScript is Script {
   // Same salt as the shared deploy — deliberately not "the same address" as the other 7
   // testnets, since evm_version = osaka (vs cancun) already changes the initcode regardless.
-  bytes32 internal constant DEFAULT_SALT = keccak256('train.protocol.v2');
+  bytes32 internal constant DEFAULT_SALT = keccak256('train.protocol.v3');
+
+  /// @notice CreateX — same address on every supported chain (presence asserted in run()).
+  ICreateX internal constant CREATEX = ICreateX(0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed);
 
   // pathUSD — Tempo's fee-fallback TIP-20 (0x20c0..., 6 decimals; same address on Moderato
   // testnet and mainnet). Train/ConstantPayoutCurve are not TIP-20 contracts, so calling them
@@ -42,18 +52,21 @@ contract DeployTempoScript is Script {
     bytes32 salt = vm.envOr('CREATE2_SALT', DEFAULT_SALT);
 
     _requireFeeTokenFundedOnTempo(vm.addr(pk));
-    require(CREATE2_FACTORY.code.length > 0, 'CREATE2 factory not deployed on this chain');
+    require(address(CREATEX).code.length > 0, 'CreateX factory not deployed on this chain');
+    // A salt whose first 20 bytes equal the caller or zero would hit CreateX's protected paths.
+    address saltPrefix = address(bytes20(salt));
+    require(saltPrefix != vm.addr(pk) && saltPrefix != address(0), 'salt would trigger CreateX salt protection');
 
     (address curve, address train) = _predict(salt);
 
     vm.startBroadcast(pk);
     if (curve.code.length == 0) {
-      require(address(new ConstantPayoutCurve{ salt: salt }()) == curve, 'curve address mismatch');
+      require(CREATEX.deployCreate2(salt, type(ConstantPayoutCurve).creationCode) == curve, 'curve address mismatch');
     } else {
       console.log('ConstantPayoutCurve already deployed, skipping');
     }
     if (train.code.length == 0) {
-      require(address(new Train{ salt: salt }()) == train, 'train address mismatch');
+      require(CREATEX.deployCreate2(salt, type(Train).creationCode) == train, 'train address mismatch');
     } else {
       console.log('Train (tempo) already deployed, skipping');
     }
@@ -70,8 +83,10 @@ contract DeployTempoScript is Script {
   }
 
   function _predict(bytes32 salt) internal pure returns (address curve, address train) {
-    curve = vm.computeCreate2Address(salt, keccak256(type(ConstantPayoutCurve).creationCode));
-    train = vm.computeCreate2Address(salt, keccak256(type(Train).creationCode));
+    // Mirrors CreateX's guarding for a "random" salt (see contract-level @dev note).
+    bytes32 guardedSalt = keccak256(abi.encode(salt));
+    curve = vm.computeCreate2Address(guardedSalt, keccak256(type(ConstantPayoutCurve).creationCode), address(CREATEX));
+    train = vm.computeCreate2Address(guardedSalt, keccak256(type(Train).creationCode), address(CREATEX));
   }
 
   function _logSummary(bytes32 salt, address curve, address train) internal view {

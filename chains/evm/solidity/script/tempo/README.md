@@ -96,12 +96,17 @@ Expected: `... OK` lines, `lock.status : 3` (Redeemed).
 ### 4a. Unhappy paths
 
 ```bash
-forge script script/tempo/TestUnhappy.s.sol --rpc-url https://rpc.moderato.tempo.xyz --broadcast
+forge script script/tempo/TestUnhappy.s.sol --sig 'wrongSecret()'         --rpc-url https://rpc.moderato.tempo.xyz --broadcast --skip-simulation
+forge script script/tempo/TestUnhappy.s.sol --sig 'doubleRedeem()'        --rpc-url https://rpc.moderato.tempo.xyz --broadcast --skip-simulation
+forge script script/tempo/TestUnhappy.s.sol --sig 'earlyRefund()'         --rpc-url https://rpc.moderato.tempo.xyz --broadcast --skip-simulation
+forge script script/tempo/TestUnhappy.s.sol --sig 'duplicateSolverLock()' --rpc-url https://rpc.moderato.tempo.xyz --broadcast --skip-simulation
 ```
 
-Exercises wrong-secret redeem (`HashlockMismatch`), double-redeem (`LockNotPending`), and an early
-non-recipient refund attempt (`RefundNotAllowed`) — each via a low-level `.call` so the expected revert
-doesn't halt the script; look for `reverted as expected: true` and the decoded reason on each line.
+Exercises wrong-secret redeem (`HashlockMismatch`), double-redeem (`LockNotPending`), an early
+non-recipient refund attempt (`RefundNotAllowed`), and a same-solver duplicate `solverLock`
+(`SolverLockAlreadyExists` — the v3 retry/double-funding guard) — each via a low-level `.call` so the
+expected revert doesn't halt the script; look for `reverted as expected: true` and the decoded reason
+on each line.
 
 ### 4b. Refund cycles (timelock-gated) — two steps, ~60s apart
 
@@ -121,8 +126,9 @@ forge script script/tempo/TestSolverRefundClaim.s.sol --rpc-url https://rpc.mode
 
 This is what replaces `TrainRouter` on Tempo: one Tempo Transaction batches `pathUSD.approve(Train,
 amount)` + `Train.userLock(...)`, a separate fee-payer signs and pays, and both calls execute with
-`msg.sender == the real user` — proven live against the real deployed `Train`
-(`0xf37846fD2D6fAC5E4F7597463a1c4f30397A9e29`) on Moderato: lock
+`msg.sender == the real user` — proven live against the then-deployed v2 `Train`
+(`0xf37846fD2D6fAC5E4F7597463a1c4f30397A9e29`; the current v3 deployment is
+`0xCb74407724c463EAA9bC661818364b532F8B5Cb5` — see [`DEPLOYMENTS.md`](../../DEPLOYMENTS.md)) on Moderato: lock
 [`0x99995e1419aab812fa4fd17ac1fd8945a6bb37da40db190560f78e8af06af226`](https://explore.testnet.tempo.xyz/tx/0x99995e1419aab812fa4fd17ac1fd8945a6bb37da40db190560f78e8af06af226)
 then redeem
 [`0x306dd372da5878d56318ff24ee024dc84950adaabb4c0a0fcdeb1244ae421578`](https://explore.testnet.tempo.xyz/tx/0x306dd372da5878d56318ff24ee024dc84950adaabb4c0a0fcdeb1244ae421578)
@@ -202,7 +208,7 @@ addresses, but cheap to keep checking on every future redeploy.
 | `TestSolverReward.s.sol` | USER | solverLock(+reward) → redeemSolver, both reward-routing branches |
 | `TestSolverRefund.s.sol` / `TestSolverRefundClaim.s.sol` | USER | solver lock, 60s timelock, refund |
 | `TestRefundLock.s.sol` / `TestRefundClaim.s.sol` | USER | user lock, 60s timelock, refund |
-| `TestUnhappy.s.sol` (`--sig 'wrongSecret()'` / `'doubleRedeem()'` / `'earlyRefund()'`) | USER | wrong-secret / double-redeem / early-refund, all real broadcasts that revert on-chain as expected — each is its own `--sig` entrypoint since `forge script --broadcast` halts the whole run on the first transaction that reverts, and here every scenario deliberately sends one; use `--skip-simulation` too, since forge's default pre-broadcast simulation also refuses to send a call it can see will revert |
+| `TestUnhappy.s.sol` (`--sig 'wrongSecret()'` / `'doubleRedeem()'` / `'earlyRefund()'` / `'duplicateSolverLock()'`) | USER | wrong-secret / double-redeem / early-refund / same-solver duplicate `solverLock` (the v3 `SolverLockAlreadyExists` guard), all real broadcasts that revert on-chain as expected — each is its own `--sig` entrypoint since `forge script --broadcast` halts the whole run on the first transaction that reverts, and here every scenario deliberately sends one; use `--skip-simulation` too, since forge's default pre-broadcast simulation also refuses to send a call it can see will revert |
 | `native_flow.py lock` / `native_flow.py redeem` | sender + fee-payer (Python/pytempo) | batched `approve`+`userLock`, sponsored; separate sponsored `redeemUser` |
 
 See [`DEMO.md`](DEMO.md) for every real transaction hash produced by a full run of this suite against
