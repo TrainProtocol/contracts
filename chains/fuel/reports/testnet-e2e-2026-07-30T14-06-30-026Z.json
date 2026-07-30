@@ -1,0 +1,870 @@
+{
+  "startedAt": "2026-07-30T14:04:09.557Z",
+  "finishedAt": "2026-07-30T14:06:30.026Z",
+  "network": "testnet",
+  "providerUrl": "https://testnet.fuel.network<redacted-path>",
+  "addresses": {
+    "train": "0x445464bf4d8f2ad1cdffefa8345438f6769c44fc4aedf0eb9c2e34f5756f5750",
+    "payoutCurve": "0xfc598e7d022590a0eecc2f58c9ba865ace7c2ca5acae881dced5f2dbb37eb33b",
+    "test_asset (fixture, non-protocol)": "0x41cd620129d3bfd61c199b8007f474deddeee81261c3843968dfcf5c5c5d4bf8"
+  },
+  "roles": {
+    "primary": "0x64a5dbe7ea663aba7fa6dad9875dae12a35f05d26442f248090d6a04ade78927",
+    "user": "0x752c8f023c1edd5b1e4206f79f1a3ac55a0d7654698bd7969581538ed5746dd5",
+    "sponsor": "0x780efbe592494c3531d3126d53952ccfa5d4f6fec8d3533db33701cfb9a66919",
+    "solver": "0x76467cc2a03f15894ddd55f6108fa9d02b54f0839b0296bcc13ee130a896519a",
+    "relayer": "0x679736be1da0099655fdf5bac8119a00cdbcda9b65cd302ccd1bb63281578f50",
+    "thirdParty": "0xdbaed7db950b0ded2dc668ef175f9fb53e5f717f795b469ac3555aa5700dbb2a",
+    "recipient": "0x527aefcc32800f40aa8bca9e873b7a534a93cdaa0f83b940a750d9c25d08055f",
+    "refundTo": "0xf8c912ba6fca013eaf7f890f6564290e93f09aae9dd20a88a84e0db195f89f8f",
+    "rewardRecipient": "0x9c061f6aaed4140a2a5109f84d11fe4e64dc82f3c723c3ffee84755168ee5898",
+    "beneficiary": "0xb7ac518e1ae042cdcf63e7c116b2b632e84012970856088c46256f0a8fba9bfc"
+  },
+  "buildNotes": [
+    "Sway build (`forc build`): artifacts loaded from each package's `out/debug`.",
+    "Deployment: reused pre-existing contracts from env.",
+    "Principal asset: Sepolia base asset (ETH). Different-asset solver reward + Rail-1 principal: test_asset (a throwaway per-run native-asset minter fixture, NOT a protocol contract).",
+    "Every actor role uses a distinct freshly-generated address (asserted in stage S1)."
+  ],
+  "rows": [
+    {
+      "n": 1,
+      "stage": "S0",
+      "name": "network https://testnet.fuel.network<redacted-path> (testnet)",
+      "kind": "info",
+      "status": "INFO"
+    },
+    {
+      "n": 2,
+      "stage": "S1",
+      "name": "accounts",
+      "kind": "info",
+      "status": "INFO",
+      "note": "primary=0x64a5dbe7ea663aba7fa6dad9875dae12a35f05d26442f248090d6a04ade78927 user=0x752c8f023c1edd5b1e4206f79f1a3ac55a0d7654698bd7969581538ed5746dd5 sponsor=0x780efbe592494c3531d3126d53952ccfa5d4f6fec8d3533db33701cfb9a66919 solver=0x76467cc2a03f15894ddd55f6108fa9d02b54f0839b0296bcc13ee130a896519a relayer=0x679736be1da0099655fdf5bac8119a00cdbcda9b65cd302ccd1bb63281578f50 thirdParty=0xdbaed7db950b0ded2dc668ef175f9fb53e5f717f795b469ac3555aa5700dbb2a recipient=0x527aefcc32800f40aa8bca9e873b7a534a93cdaa0f83b940a750d9c25d08055f refundTo=0xf8c912ba6fca013eaf7f890f6564290e93f09aae9dd20a88a84e0db195f89f8f rewardRecipient=0x9c061f6aaed4140a2a5109f84d11fe4e64dc82f3c723c3ffee84755168ee5898 beneficiary=0xb7ac518e1ae042cdcf63e7c116b2b632e84012970856088c46256f0a8fba9bfc"
+    },
+    {
+      "n": 3,
+      "stage": "S1",
+      "name": "role \"primary\" address is distinct",
+      "kind": "check",
+      "status": "OK",
+      "note": "0x64a5dbe7ea663aba7fa6dad9875dae12a35f05d26442f248090d6a04ade78927"
+    },
+    {
+      "n": 4,
+      "stage": "S1",
+      "name": "role \"user\" address is distinct",
+      "kind": "check",
+      "status": "OK",
+      "note": "0x752c8f023c1edd5b1e4206f79f1a3ac55a0d7654698bd7969581538ed5746dd5"
+    },
+    {
+      "n": 5,
+      "stage": "S1",
+      "name": "role \"sponsor\" address is distinct",
+      "kind": "check",
+      "status": "OK",
+      "note": "0x780efbe592494c3531d3126d53952ccfa5d4f6fec8d3533db33701cfb9a66919"
+    },
+    {
+      "n": 6,
+      "stage": "S1",
+      "name": "role \"solver\" address is distinct",
+      "kind": "check",
+      "status": "OK",
+      "note": "0x76467cc2a03f15894ddd55f6108fa9d02b54f0839b0296bcc13ee130a896519a"
+    },
+    {
+      "n": 7,
+      "stage": "S1",
+      "name": "role \"relayer\" address is distinct",
+      "kind": "check",
+      "status": "OK",
+      "note": "0x679736be1da0099655fdf5bac8119a00cdbcda9b65cd302ccd1bb63281578f50"
+    },
+    {
+      "n": 8,
+      "stage": "S1",
+      "name": "role \"thirdParty\" address is distinct",
+      "kind": "check",
+      "status": "OK",
+      "note": "0xdbaed7db950b0ded2dc668ef175f9fb53e5f717f795b469ac3555aa5700dbb2a"
+    },
+    {
+      "n": 9,
+      "stage": "S1",
+      "name": "role \"recipient\" address is distinct",
+      "kind": "check",
+      "status": "OK",
+      "note": "0x527aefcc32800f40aa8bca9e873b7a534a93cdaa0f83b940a750d9c25d08055f"
+    },
+    {
+      "n": 10,
+      "stage": "S1",
+      "name": "role \"refundTo\" address is distinct",
+      "kind": "check",
+      "status": "OK",
+      "note": "0xf8c912ba6fca013eaf7f890f6564290e93f09aae9dd20a88a84e0db195f89f8f"
+    },
+    {
+      "n": 11,
+      "stage": "S1",
+      "name": "role \"rewardRecipient\" address is distinct",
+      "kind": "check",
+      "status": "OK",
+      "note": "0x9c061f6aaed4140a2a5109f84d11fe4e64dc82f3c723c3ffee84755168ee5898"
+    },
+    {
+      "n": 12,
+      "stage": "S1",
+      "name": "role \"beneficiary\" address is distinct",
+      "kind": "check",
+      "status": "OK",
+      "note": "0xb7ac518e1ae042cdcf63e7c116b2b632e84012970856088c46256f0a8fba9bfc"
+    },
+    {
+      "n": 13,
+      "stage": "S1",
+      "name": "primary starting balance",
+      "kind": "info",
+      "status": "INFO",
+      "note": "1999796 base units"
+    },
+    {
+      "n": 14,
+      "stage": "S3",
+      "name": "topup user",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0xb974e5d9f2dc354d70dd7571211de106d5a9ec502ff315c0a9089b2a422ce8f9"
+    },
+    {
+      "n": 15,
+      "stage": "S3",
+      "name": "topup sponsor",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x6e4f037a2676865e663294889dc549d988eaa426cf47d7131e93a7d81c5c4f6a"
+    },
+    {
+      "n": 16,
+      "stage": "S3",
+      "name": "topup solver",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0xc2520fb820888c7dfac9d0897c1955db0213f083fea9640871cecfd873975bec"
+    },
+    {
+      "n": 17,
+      "stage": "S3",
+      "name": "topup relayer",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x7116035938b348115fdd811daed521b2ec33673d80a3fd80a86b7d171903b232"
+    },
+    {
+      "n": 18,
+      "stage": "S3",
+      "name": "topup thirdParty",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0xb1b46af5d287d205888371c1f6313cf0a89d85a69653d41f3a01ca9f16672530"
+    },
+    {
+      "n": 19,
+      "stage": "S2",
+      "name": "contracts (from env)",
+      "kind": "info",
+      "status": "INFO",
+      "note": "train=0x445464bf4d8f2ad1cdffefa8345438f6769c44fc4aedf0eb9c2e34f5756f5750 payoutCurve=0xfc598e7d022590a0eecc2f58c9ba865ace7c2ca5acae881dced5f2dbb37eb33b"
+    },
+    {
+      "n": 20,
+      "stage": "S2",
+      "name": "test_asset deployed (throwaway fixture)",
+      "kind": "info",
+      "status": "INFO",
+      "note": "contract=0x41cd620129d3bfd61c199b8007f474deddeee81261c3843968dfcf5c5c5d4bf8 assetId=0xa0208c209b0920380bcecc27424e5d66da55f8a1949f079d9a61ceb05512a4a0"
+    },
+    {
+      "n": 21,
+      "stage": "S2",
+      "name": "mint test_asset -> solver",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0xb82eb2a236b226a8eea97316c59234dae0a4a6258020e1a81448900afdeff452"
+    },
+    {
+      "n": 22,
+      "stage": "S2",
+      "name": "mint test_asset -> user",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x9890ff0614388004846b2c4a0d9b6a4d72c4cac822ead7fb9c1afdd6d4595e37"
+    },
+    {
+      "n": 23,
+      "stage": "A",
+      "name": "user_lock (hashlock 0x59c384d4…)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0xdd8e39a095c5e3463e7b978406b1e5748cd9e1e9e451d08602895a7fe69ab412"
+    },
+    {
+      "n": 24,
+      "stage": "A",
+      "name": "lock created with correct hashlock",
+      "kind": "check",
+      "status": "OK",
+      "note": "got 0x59c384d498aa1f8a603c79bef7574875e33b9d3de15cda5d9909a1f5b9fc86f1"
+    },
+    {
+      "n": 25,
+      "stage": "A",
+      "name": "redeem_user (by user; pays distinct recipient)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x1c6ca52e5b9ea792da2416ac81dacbb7e431cd462230f2ab53c85db03d99e93d"
+    },
+    {
+      "n": 26,
+      "stage": "A",
+      "name": "recipient (distinct from sender) received amount",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=1000"
+    },
+    {
+      "n": 27,
+      "stage": "A",
+      "name": "lock status REDEEMED",
+      "kind": "check",
+      "status": "OK",
+      "note": "status=Redeemed"
+    },
+    {
+      "n": 28,
+      "stage": "B",
+      "name": "user_lock with payout_curve (hashlock 0x1a3825f6…)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x914158c77cf85500b28996347da497ed6157d41ce9b083f87dc236cd7bd8f372"
+    },
+    {
+      "n": 29,
+      "stage": "B",
+      "name": "payout_curve stored",
+      "kind": "check",
+      "status": "OK",
+      "note": "stored=0xfc598e7d022590a0eecc2f58c9ba865ace7c2ca5acae881dced5f2dbb37eb33b"
+    },
+    {
+      "n": 30,
+      "stage": "B",
+      "name": "redeem_user (via ConstantPayoutCurve)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x87e526324844ff71451b3b6a526b2032bf21948ea44fd272bedfb3221a81b445"
+    },
+    {
+      "n": 31,
+      "stage": "B",
+      "name": "identity curve pays full amount (payout == amount, zero excess)",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=1000"
+    },
+    {
+      "n": 32,
+      "stage": "C",
+      "name": "user_lock (hashlock 0xb00b182b…, long timelock)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0xecaaee3663988fded2e2bebb36a89322f4be99f014b72e700c273cfb9dac593f"
+    },
+    {
+      "n": 33,
+      "stage": "C",
+      "name": "refund_user by recipient (before timelock)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0xda25da98312044b16dd4042ad8dc2b3a9e9c9e541088b83aca96d50884b16fb3"
+    },
+    {
+      "n": 34,
+      "stage": "C",
+      "name": "refund lands on refund_to (distinct from recipient caller)",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=1000"
+    },
+    {
+      "n": 35,
+      "stage": "C",
+      "name": "lock status REFUNDED",
+      "kind": "check",
+      "status": "OK",
+      "note": "status=Refunded"
+    },
+    {
+      "n": 36,
+      "stage": "D",
+      "name": "user_lock (hashlock 0xc497124d…, short timelock)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x234347fcfa878619458595693f9dd513beb92ff875714d643fb6896acd8038d5"
+    },
+    {
+      "n": 37,
+      "stage": "D",
+      "name": "refund_user by third party (after timelock)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x111fd7d3fc7742671623ea83f49b4ba7ad75acc6cd6806cfb590c7463d375668"
+    },
+    {
+      "n": 38,
+      "stage": "D",
+      "name": "refund lands on refund_to, never the third-party caller",
+      "kind": "check",
+      "status": "OK",
+      "note": "refund_to delta=1000"
+    },
+    {
+      "n": 39,
+      "stage": "D",
+      "name": "third-party caller balance (paid own gas, received nothing)",
+      "kind": "info",
+      "status": "INFO",
+      "note": "before=150000 after=149932"
+    },
+    {
+      "n": 40,
+      "stage": "E",
+      "name": "user_lock_for(beneficiary) funded by user (hashlock 0x9212f6e7…)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x5f75014ea4e825bc01d0fadcf0249cbe46d58e7c0512fe4541ceda5d038efffa"
+    },
+    {
+      "n": 41,
+      "stage": "E",
+      "name": "lock attributed to beneficiary, not the funding caller",
+      "kind": "check",
+      "status": "OK",
+      "note": "sender=0xb7ac518e1ae042cdcf63e7c116b2b632e84012970856088c46256f0a8fba9bfc"
+    },
+    {
+      "n": 42,
+      "stage": "E",
+      "name": "redeem_user (pays recipient)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0xb9bef026bba0d55ae873f75851e03e9ad1cb46da54a33f79cb2d3a7e2d46a6bc"
+    },
+    {
+      "n": 43,
+      "stage": "E",
+      "name": "recipient received amount",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=1000"
+    },
+    {
+      "n": 44,
+      "stage": "F",
+      "name": "solver_lock (hashlock 0xca9ccb30…, same-asset reward)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x01ec54f872a8074a6c36fd5ea94708d492a9b9c5f4ecda1b2d5de5d9e6c0bf15"
+    },
+    {
+      "n": 45,
+      "stage": "F",
+      "name": "lock readable under (hashlock, solver identity) -- the idempotency probe",
+      "kind": "check",
+      "status": "OK",
+      "note": "present"
+    },
+    {
+      "n": 46,
+      "stage": "F",
+      "name": "redeem_solver (before reward_timelock, by relayer)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x7373ca71266f28c1dcc26b03ea87718b6552adda81c6e2dbc4a5d9d2a81d1f3e"
+    },
+    {
+      "n": 47,
+      "stage": "F",
+      "name": "principal -> recipient",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=1000"
+    },
+    {
+      "n": 48,
+      "stage": "F",
+      "name": "reward -> reward_recipient (before reward_timelock)",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=100"
+    },
+    {
+      "n": 49,
+      "stage": "G",
+      "name": "solver_lock (hashlock 0x06b7d88a…, short reward_timelock)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x0d3662a62cba70d6be4e9e808a6f98131fa1e4c1c8d8c5ff9c8a92f35cfa9baa"
+    },
+    {
+      "n": 50,
+      "stage": "G",
+      "name": "redeem_solver (after reward_timelock, by relayer -> keeper bounty)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x24197914afb7061f4dbc8fbc3c203c4c878482c2053cb1473481efd0ee84f116"
+    },
+    {
+      "n": 51,
+      "stage": "G",
+      "name": "principal -> recipient",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=1000"
+    },
+    {
+      "n": 52,
+      "stage": "G",
+      "name": "reward_recipient got NOTHING after reward_timelock",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=0"
+    },
+    {
+      "n": 53,
+      "stage": "G",
+      "name": "reward -> redeemer(relayer) bounty",
+      "kind": "info",
+      "status": "INFO",
+      "note": "relayer before=149930 after=149945 (net includes gas for redeem + nudge tx; reward credited)"
+    },
+    {
+      "n": 54,
+      "stage": "H",
+      "name": "solver_lock (hashlock 0xac64b6a4…, short timelock)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x671dc27cdda9dd79854acf82fd950fd5f2704a6b0b25b21ed34d5ad6ddf5f23b"
+    },
+    {
+      "n": 55,
+      "stage": "H",
+      "name": "refund_solver (after timelock, by third party)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0xc482abf0d0b0406478b4a668ff9601a397796b363adc83796d93165e72fffd98"
+    },
+    {
+      "n": 56,
+      "stage": "H",
+      "name": "amount+reward (same asset) returned to refund_to",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=1100"
+    },
+    {
+      "n": 57,
+      "stage": "H",
+      "name": "re-lock by the same solver after refund (guard never lifts)",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected in pre-flight simulation (never broadcast) as expected: SolverLockAlreadyExists"
+    },
+    {
+      "n": 58,
+      "stage": "N",
+      "name": "solver_lock(base) + attach_solver_reward(test_asset) atomic multicall (hashlock 0xbe8204c0…)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x6777a31f1787282d2a6817584ecfa3791d6675a7ac7afbaa214e1fc4ef5a36f6"
+    },
+    {
+      "n": 59,
+      "stage": "N",
+      "name": "multicall attach_solver_reward returns true",
+      "kind": "check",
+      "status": "OK",
+      "note": "got [null,true]"
+    },
+    {
+      "n": 60,
+      "stage": "N",
+      "name": "reward_funded true and reward_asset_id is the test asset",
+      "kind": "check",
+      "status": "OK",
+      "note": "funded=true asset=0xa0208c209b0920380bcecc27424e5d66da55f8a1949f079d9a61ceb05512a4a0"
+    },
+    {
+      "n": 61,
+      "stage": "N",
+      "name": "redeem_solver (before reward_timelock, by relayer)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x64a018d711dcec0fe9c638a9a8c6f67711ece032fbf53caf836ae51fe8ac2f48"
+    },
+    {
+      "n": 62,
+      "stage": "N",
+      "name": "principal paid in BASE asset to recipient",
+      "kind": "check",
+      "status": "OK",
+      "note": "base delta=1000"
+    },
+    {
+      "n": 63,
+      "stage": "N",
+      "name": "reward paid in TEST_ASSET to reward_recipient",
+      "kind": "check",
+      "status": "OK",
+      "note": "test_asset delta=100"
+    },
+    {
+      "n": 64,
+      "stage": "J",
+      "name": "sponsored user_lock_for (user funds+signs test_asset, sponsor pays base gas)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0xe17c0d86b44cf74e5ba37d8ab681fccd4452209ce4dc33f2eb25c8c0834ff4b6"
+    },
+    {
+      "n": 65,
+      "stage": "J",
+      "name": "lock created under the user-signed hashlock",
+      "kind": "check",
+      "status": "OK",
+      "note": "got 0xd2e1489d4d23a7fc614f026748319b48965943d3ce7db8010cb584154ee75678"
+    },
+    {
+      "n": 66,
+      "stage": "J",
+      "name": "user paid the principal in test_asset (exactly LOCK_AMOUNT)",
+      "kind": "check",
+      "status": "OK",
+      "note": "user test_asset spent=1000"
+    },
+    {
+      "n": 67,
+      "stage": "J",
+      "name": "user paid NO base gas (untouched)",
+      "kind": "check",
+      "status": "OK",
+      "note": "user base before=144257 after=144257"
+    },
+    {
+      "n": 68,
+      "stage": "J",
+      "name": "sponsor paid base gas only (>0, and no principal)",
+      "kind": "check",
+      "status": "OK",
+      "note": "sponsor base spent=116 (gas)"
+    },
+    {
+      "n": 69,
+      "stage": "J",
+      "name": "redeem_user (pays recipient in test_asset)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x4fe5984d1342fe4d2752f4519fc49b9a9c8dc3c0dd7561aa681b88ba3c0cde0f"
+    },
+    {
+      "n": 70,
+      "stage": "J",
+      "name": "recipient received the principal in test_asset",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=1000"
+    },
+    {
+      "n": 71,
+      "stage": "J2",
+      "name": "found a change/coin output to tamper with",
+      "kind": "check",
+      "status": "OK",
+      "note": "index=1"
+    },
+    {
+      "n": 72,
+      "stage": "J2",
+      "name": "tampered sponsored tx rejected (output redirected after user signed)",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected as expected (matched /InvalidTransactionOutcome|InvalidSignature|invalid-request|VM_HALTED|PredicateVerificationFailed|reason|Validity/i)"
+    },
+    {
+      "n": 73,
+      "stage": "J2",
+      "name": "no lock was created under the tampered hashlock",
+      "kind": "check",
+      "status": "OK",
+      "note": "lock=absent"
+    },
+    {
+      "n": 74,
+      "stage": "V",
+      "name": "get_user_lock_hashes(user, 0, 1000) total=5",
+      "kind": "info",
+      "status": "INFO",
+      "note": "5 hashlocks returned"
+    },
+    {
+      "n": 75,
+      "stage": "V",
+      "name": "pagination never reverts at an out-of-range offset",
+      "kind": "check",
+      "status": "OK",
+      "note": "got 0 entries, total=5"
+    },
+    {
+      "n": 76,
+      "stage": "U1",
+      "name": "user_lock amount=0",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected in pre-flight simulation (never broadcast) as expected: ZeroAmount"
+    },
+    {
+      "n": 77,
+      "stage": "U1",
+      "name": "user_lock timelock_delta=0",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected in pre-flight simulation (never broadcast) as expected: InvalidTimelock"
+    },
+    {
+      "n": 78,
+      "stage": "U1",
+      "name": "user_lock expired quote",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected in pre-flight simulation (never broadcast) as expected: QuoteExpired"
+    },
+    {
+      "n": 79,
+      "stage": "U1",
+      "name": "user_lock zero recipient",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected in pre-flight simulation (never broadcast) as expected: ZeroAddress"
+    },
+    {
+      "n": 80,
+      "stage": "U1",
+      "name": "user_lock_for zero user",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected in pre-flight simulation (never broadcast) as expected: InvalidUser"
+    },
+    {
+      "n": 81,
+      "stage": "U1",
+      "name": "U1-dup fixture user_lock",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x5a3dd9825ec7c00044a2f0f25529185b87a51ba809592e315398eee89e41a5a1"
+    },
+    {
+      "n": 82,
+      "stage": "U1",
+      "name": "user_lock same hashlock again",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected in pre-flight simulation (never broadcast) as expected: SwapAlreadyExists"
+    },
+    {
+      "n": 83,
+      "stage": "U1",
+      "name": "solver_lock reward_timelock_delta >= timelock_delta",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected in pre-flight simulation (never broadcast) as expected: InvalidRewardTimelock"
+    },
+    {
+      "n": 84,
+      "stage": "U1",
+      "name": "U1 solver_lock (long timelock) for early-refund probe",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x5692ae20f6c44af300a5197f7d8e9274223e8a4ce4bcac130a5f960ac129cc58"
+    },
+    {
+      "n": 85,
+      "stage": "U1",
+      "name": "refund_solver before timelock (even by recipient) rejected",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected in pre-flight simulation (never broadcast) as expected: RefundNotAllowed"
+    },
+    {
+      "n": 86,
+      "stage": "U1",
+      "name": "solver_lock duplicate by the same solver rejected",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected in pre-flight simulation (never broadcast) as expected: SolverLockAlreadyExists"
+    },
+    {
+      "n": 87,
+      "stage": "U1",
+      "name": "redeem_user unknown hashlock",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected in pre-flight simulation (never broadcast) as expected: LockNotFound"
+    },
+    {
+      "n": 88,
+      "stage": "U1",
+      "name": "U1-live fixture user_lock",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0xd6d074492706c3f2ef79587ef4fbdb9c3a8c8c14c423d1c13678c554ca3c6b63"
+    },
+    {
+      "n": 89,
+      "stage": "U1",
+      "name": "redeem_user wrong secret (on live fixture)",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected in pre-flight simulation (never broadcast) as expected: HashlockMismatch"
+    },
+    {
+      "n": 90,
+      "stage": "U1",
+      "name": "refund_user early by non-recipient (on live fixture)",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected in pre-flight simulation (never broadcast) as expected: RefundNotAllowed"
+    },
+    {
+      "n": 91,
+      "stage": "U1",
+      "name": "U1-live fixture cleanup: refund by recipient",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x8c333c8c04b862c4e178d9d8369b4091d2dbb4b7f2d4867c73fd423e8b4de159"
+    },
+    {
+      "n": 92,
+      "stage": "U1",
+      "name": "redeem_user on an already-Refunded lock",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected in pre-flight simulation (never broadcast) as expected: LockNotPending"
+    },
+    {
+      "n": 93,
+      "stage": "UN",
+      "name": "UN-wrongasset: solver_lock (base principal, test_asset reward declared, unfunded)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0xd323a83721bd9e2b10d1c33122a436b77312886ba0d81e0bdb5eef1abc0e8afc"
+    },
+    {
+      "n": 94,
+      "stage": "UN",
+      "name": "attach_solver_reward wrong asset (base != declared test_asset)",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected in pre-flight simulation (never broadcast) as expected: RewardAssetMismatch"
+    },
+    {
+      "n": 95,
+      "stage": "UN",
+      "name": "UN-wrongamount: solver_lock (base principal, test_asset reward declared, unfunded)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x96e03408909d7e86b8e6d99292a33159c4e2e390640a1a115e243fdd837c0fdc"
+    },
+    {
+      "n": 96,
+      "stage": "UN",
+      "name": "attach_solver_reward wrong amount (test_asset, reward+1)",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected in pre-flight simulation (never broadcast) as expected: RewardAssetMismatch"
+    },
+    {
+      "n": 97,
+      "stage": "UN",
+      "name": "UN-double: solver_lock (base principal, test_asset reward declared, unfunded)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x1aa11a84c307df2b762cf4ba44416f1d8fe2cc602ce98efeeee59a8afd8710c1"
+    },
+    {
+      "n": 98,
+      "stage": "UN",
+      "name": "UN-double: first attach (correct asset+amount) funds the reward",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0xc3936293c555f37ad3d426ffe6009fdf3790e63fdfad98729411ce4000bad0b6"
+    },
+    {
+      "n": 99,
+      "stage": "UN",
+      "name": "attach_solver_reward twice (second rejected)",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected in pre-flight simulation (never broadcast) as expected: RewardAlreadyFunded"
+    },
+    {
+      "n": 100,
+      "stage": "UN",
+      "name": "attach_solver_reward on nonexistent lock",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected in pre-flight simulation (never broadcast) as expected: LockNotFound"
+    },
+    {
+      "n": 101,
+      "stage": "B2",
+      "name": "user_lock with a bogus payout_curve (hashlock 0x4d8ccd5b…)",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x01998839c6417485ffd21c14b1a0cf4facdec579188be7cfee837f4c0eb974b7"
+    },
+    {
+      "n": 102,
+      "stage": "B2",
+      "name": "redeem_user reverts cleanly when the curve is not a PayoutCurve",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected as expected (matched /revert|reason|VM_HALTED|panic|not.*found|selector|InvalidPayout/i)"
+    },
+    {
+      "n": 103,
+      "stage": "B2",
+      "name": "lock stays Pending after the failed redeem (funds not lost)",
+      "kind": "check",
+      "status": "OK",
+      "note": "status=Pending"
+    },
+    {
+      "n": 104,
+      "stage": "B2",
+      "name": "cleanup: refund_user by recipient",
+      "kind": "tx",
+      "status": "OK",
+      "txId": "0x25cd30ad75c0a6e7d6ddaf544d34b07fe37ceeda58ad92ddfba586f3cfddaf52"
+    },
+    {
+      "n": 105,
+      "stage": "S9",
+      "name": "primary ending balance",
+      "kind": "info",
+      "status": "INFO",
+      "note": "1249646 base units (spent 750150 over the run)"
+    }
+  ]
+}

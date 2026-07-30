@@ -79,7 +79,9 @@ export interface ActionOutcome {
    * cannot represent a negative delta. */
   expectedDeltas?: Map<number | 'contract', bigint>;
   touchedUserHashlock?: string;
-  touchedSolverHashlock?: { hashlock: string; index: number };
+  /** `solverIdx` is the wallet index of the lock's creator -- solver locks are keyed by
+   * `(hashlock, solver identity)`, not by a sequential index. */
+  touchedSolverHashlock?: { hashlock: string; solverIdx: number };
   /** Short human-readable description of exactly what this invocation did (params, indices) --
    * folded into every invariant-assertion message so a violation's minimal repro can be read
    * straight off the failing test's output. */
@@ -115,6 +117,15 @@ function randomSecretAndHashlock(): { secretArg: string; hashlock: string } {
  * long. Kept short (a few seconds) specifically so this harness's total runtime stays well
  * under the "1-3 minutes" budget stated in this phase's task brief even with many runs. */
 const WAIT_CAP_MS = 4_000;
+
+/** Extra sleep past a lock's modeled deadline before attempting a refund. The modeled
+ * `timelockDeadlineMs` is `createdAtMs + delta*1000` with `createdAtMs` sampled BEFORE the
+ * create transaction commits, while the chain's actual `timelock` is stamped at commit time --
+ * so the model can undershoot the chain deadline by up to the create call's commit latency.
+ * Sleeping this margin past the modeled deadline (before the tip-bump) absorbs that skew;
+ * without it, `refund_user`/`refund_solver` occasionally dry-run-fail `RefundNotAllowed` by a
+ * sub-second miss (observed in a real campaign run). */
+const DEADLINE_MARGIN_MS = 1_500;
 
 // ───────────────────────────── shared user-lock core ─────────────────────────────
 
@@ -230,11 +241,15 @@ export async function createSolverLock(ctx: HandlerCtx): Promise<ActionOutcome> 
   const refundToIdx = randInt(0, poolSize - 1);
 
   // 50% reuse an existing known hashlock (possibly one with a user lock too -- the realistic
-  // HTLC shape), else mint a brand-new one.
-  const known = model.allKnownHashlocks();
+  // HTLC shape), else mint a brand-new one. A reused hashlock must not already hold a lock by
+  // THIS funder: (hashlock, solver) is a write-at-most-once key on-chain
+  // (`SolverLockAlreadyExists`, permanent -- SUNIQ's duplicate reprobe in `invariants.ts` is
+  // what deliberately exercises the invalid combination; this handler only ever attempts valid
+  // ones).
+  const reusable = model.allKnownHashlocks().filter((h) => !model.hasEverSolverLocked(h, funderIdx));
   let hashlock: string;
-  if (known.length > 0 && Math.random() < 0.5) {
-    hashlock = pick(known);
+  if (reusable.length > 0 && Math.random() < 0.5) {
+    hashlock = pick(reusable);
   } else {
     const fresh = randomSecretAndHashlock();
     hashlock = fresh.hashlock;
@@ -282,12 +297,10 @@ export async function createSolverLock(ctx: HandlerCtx): Promise<ActionOutcome> 
 
   const funder = env.wallets[funderIdx];
   const createdAtMs = Date.now();
-  const result = await callSolverLock({ train: env.train, caller: funder, assetId, amount: msgAmount, params, dst });
-  const index = Number(bn(result.value as never).toString());
+  await callSolverLock({ train: env.train, caller: funder, assetId, amount: msgAmount, params, dst });
 
   const lock: ShadowSolverLock = {
     hashlock,
-    index,
     amount: bn(principal),
     reward: bn(reward),
     recipientIdx,
@@ -302,10 +315,9 @@ export async function createSolverLock(ctx: HandlerCtx): Promise<ActionOutcome> 
     rewardTimelockDeadlineMs: createdAtMs + rewardTimelockDeltaSec * 1000,
     fuse: isRefundCandidate ? 'short' : 'long',
   };
-  const byIndex = model.solverLocks.get(hashlock) ?? new Map<number, ShadowSolverLock>();
-  byIndex.set(index, lock);
-  model.solverLocks.set(hashlock, byIndex);
-  model.solverLockCount.set(hashlock, index);
+  const bySolver = model.solverLocks.get(hashlock) ?? new Map<number, ShadowSolverLock>();
+  bySolver.set(funderIdx, lock);
+  model.solverLocks.set(hashlock, bySolver);
 
   const expectedDeltas = new Map<number | 'contract', bigint>();
   addDelta(expectedDeltas, funderIdx, -BigInt(msgAmount));
@@ -315,8 +327,8 @@ export async function createSolverLock(ctx: HandlerCtx): Promise<ActionOutcome> 
     action: 'createSolverLock',
     ok: true,
     expectedDeltas,
-    touchedSolverHashlock: { hashlock, index },
-    note: `funder=${funderIdx} recipient=${recipientIdx} rewardRecipient=${rewardRecipientIdx} principal=${principal} reward=${reward} index=${index} rewardTimelockDelta=${rewardTimelockDeltaSec}s hashlock=${hashlock}`,
+    touchedSolverHashlock: { hashlock, solverIdx: funderIdx },
+    note: `funder=solver=${funderIdx} recipient=${recipientIdx} rewardRecipient=${rewardRecipientIdx} principal=${principal} reward=${reward} rewardTimelockDelta=${rewardTimelockDeltaSec}s hashlock=${hashlock}`,
   };
 }
 
@@ -368,7 +380,7 @@ export async function redeemSolver(ctx: HandlerCtx): Promise<ActionOutcome> {
   const redeemerIdx = randInt(0, poolSize - 1);
   const redeemer = env.wallets[redeemerIdx];
 
-  await callRedeemSolver(env.train, redeemer, lock.hashlock, lock.index, secretArg);
+  await callRedeemSolver(env.train, redeemer, lock.hashlock, identityFromAccount(env.wallets[lock.funderIdx]), secretArg);
   lock.status = 'Redeemed';
 
   // Deterministic by construction -- see this file's doc comment.
@@ -384,8 +396,8 @@ export async function redeemSolver(ctx: HandlerCtx): Promise<ActionOutcome> {
     action: 'redeemSolver',
     ok: true,
     expectedDeltas,
-    touchedSolverHashlock: { hashlock: lock.hashlock, index: lock.index },
-    note: `hashlock=${lock.hashlock} index=${lock.index} redeemer=${redeemerIdx} rewardTo=${rewardToIdx ?? 'n/a'} reward=${lock.reward.toString()}`,
+    touchedSolverHashlock: { hashlock: lock.hashlock, solverIdx: lock.funderIdx },
+    note: `hashlock=${lock.hashlock} solver=${lock.funderIdx} redeemer=${redeemerIdx} rewardTo=${rewardToIdx ?? 'n/a'} reward=${lock.reward.toString()}`,
   };
 }
 
@@ -399,7 +411,7 @@ export async function refundUser(ctx: HandlerCtx): Promise<ActionOutcome> {
 
   if (dueSoon.length > 0 && Math.random() < 0.5) {
     const lock = pick(dueSoon);
-    const waitMs = Math.max(0, lock.timelockDeadlineMs - Date.now());
+    const waitMs = Math.max(0, lock.timelockDeadlineMs + DEADLINE_MARGIN_MS - Date.now());
     if (waitMs > 0) await sleep(waitMs);
     const bumpDeltas = await bumpChainTip(ctx);
 
@@ -452,13 +464,13 @@ export async function refundSolver(ctx: HandlerCtx): Promise<ActionOutcome> {
   }
 
   const lock = pick(candidates);
-  const waitMs = Math.max(0, lock.timelockDeadlineMs - Date.now());
+  const waitMs = Math.max(0, lock.timelockDeadlineMs + DEADLINE_MARGIN_MS - Date.now());
   if (waitMs > 0) await sleep(waitMs);
   const bumpDeltas = await bumpChainTip(ctx);
 
   const callerIdx = randInt(0, poolSize - 1);
   const caller = env.wallets[callerIdx];
-  await callRefundSolver(env.train, caller, lock.hashlock, lock.index);
+  await callRefundSolver(env.train, caller, lock.hashlock, identityFromAccount(env.wallets[lock.funderIdx]));
   lock.status = 'Refunded';
 
   const expectedDeltas = new Map<number | 'contract', bigint>(bumpDeltas);
@@ -469,7 +481,7 @@ export async function refundSolver(ctx: HandlerCtx): Promise<ActionOutcome> {
     action: 'refundSolver',
     ok: true,
     expectedDeltas,
-    touchedSolverHashlock: { hashlock: lock.hashlock, index: lock.index },
-    note: `hashlock=${lock.hashlock} index=${lock.index} caller=${callerIdx} refundTo=${lock.refundToIdx} amount=${lock.amount.toString()} reward=${lock.reward.toString()}`,
+    touchedSolverHashlock: { hashlock: lock.hashlock, solverIdx: lock.funderIdx },
+    note: `hashlock=${lock.hashlock} solver=${lock.funderIdx} caller=${callerIdx} refundTo=${lock.refundToIdx} amount=${lock.amount.toString()} reward=${lock.reward.toString()}`,
   };
 }

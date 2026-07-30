@@ -20,6 +20,15 @@ preimage). Locked amounts are native Fuel asset coins (`msg_amount()`/
 `Identity` (`Address | ContractId`). Every state-changing entrypoint is
 reentrancy-guarded and follows checks-effects-interactions.
 
+Solver locks are keyed by `(hashlock, solver)` — the lock creator's
+`Identity` — with at most **one lock per key, ever**: a repeat `solver_lock`
+by the same solver reverts `SolverLockAlreadyExists` before any funds move,
+so a blind RPC-retry can never double-fund a swap (probe
+`get_solver_lock(hashlock, solver)` — `None` means the lock never landed).
+The guard is permanent (survives refund/redeem; a re-fill needs a different
+solver identity); different solvers can still each lock under one hashlock.
+There is no solver-lock index or count getter.
+
 See **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)** for the full design:
 the swap lifecycle, payout curves, the gasless rail, the security model, and
 the completed Fuel Sepolia end-to-end report.

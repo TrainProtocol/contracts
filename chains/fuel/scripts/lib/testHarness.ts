@@ -381,30 +381,33 @@ export interface CallSolverLockArgs {
   data?: Uint8Array;
 }
 
-/** Calls `Train::solver_lock`, funded and signed by `caller`. Returns the decoded 1-based
- * solver-lock index (`value`). */
-export async function callSolverLock(args: CallSolverLockArgs): Promise<CallResult<number>> {
+/** Calls `Train::solver_lock`, funded and signed by `caller`. Returns nothing in `value` --
+ * the identity-keyed API has no index to return (the lock is keyed by
+ * `(hashlock, caller identity)`; probe it via `getSolverLock(train, hashlock, solver)`). */
+export async function callSolverLock(args: CallSolverLockArgs): Promise<CallResult<void>> {
   const train = connectAs(args.train, args.caller);
   const scope = train.functions
     .solver_lock(args.params, args.dst, args.data ?? new Uint8Array())
     .callParams({ forward: [args.amount, args.assetId] });
-  return runCall<number>(scope);
+  return runCall<void>(scope);
 }
 
-/** Calls `Train::attach_solver_reward(hashlock, index)` as `caller`, forwarding the reward coin
- * (`reward` of `rewardAssetId`). This is step two of the two-step different-asset funding flow:
- * `solver_lock` locks the principal and declares the reward; this escrows it. */
+/** Calls `Train::attach_solver_reward(hashlock, solver)` as `caller`, forwarding the reward coin
+ * (`reward` of `rewardAssetId`). `solver` is the lock creator's identity (attaching itself is
+ * permissionless -- `caller` need not be the solver). This is step two of the two-step
+ * different-asset funding flow: `solver_lock` locks the principal and declares the reward; this
+ * escrows it. */
 export async function callAttachSolverReward(args: {
   train: Contract;
   caller: WalletUnlocked;
   hashlock: string;
-  index: BigNumberish;
+  solver: IdentityInput;
   reward: BigNumberish;
   rewardAssetId: string;
 }): Promise<CallResult<boolean>> {
   const train = connectAs(args.train, args.caller);
   const scope = train.functions
-    .attach_solver_reward(args.hashlock, args.index)
+    .attach_solver_reward(args.hashlock, args.solver)
     .callParams({ forward: [args.reward, args.rewardAssetId] });
   return runCall<boolean>(scope);
 }
@@ -433,25 +436,25 @@ export interface SolverLockWithAttachedRewardArgs {
  * Empirically verified against the installed `fuels` 0.103.0 SDK + a real local `fuel-core`
  * node: `Contract.multiCall([...])` submits both calls in a single transaction, each carrying its
  * own `callParams({ forward: [amount, assetId] })` coin, and either both commit or neither does.
- * The lock is a fresh hashlock, so its solver-lock index is deterministically 1, which the attach
- * call targets. Atomicity is a UX nicety only -- the two calls are equally correct run
- * separately (see `solver_lock`'s doc comment and the `reward_funded` gate).
+ * The attach call targets `(hashlock, caller identity)` -- the exact key `solver_lock` just
+ * wrote, since the caller signs both calls. Atomicity is a UX nicety only -- the two calls are
+ * equally correct run separately (see `solver_lock`'s doc comment and the `reward_funded` gate).
  */
 export async function solverLockWithAttachedReward(
   args: SolverLockWithAttachedRewardArgs,
-): Promise<CallResult<[number, boolean]>> {
+): Promise<CallResult<[void, boolean]>> {
   const train = connectAs(args.train, args.caller);
   const lockScope = train.functions
     .solver_lock(args.params, args.dst, args.data ?? new Uint8Array())
     .callParams({ forward: [args.amount, args.assetId] });
   const attachScope = train.functions
-    .attach_solver_reward(args.params.hashlock, 1)
+    .attach_solver_reward(args.params.hashlock, identityFromAccount(args.caller))
     .callParams({ forward: [args.reward, args.rewardAssetId] });
   const { transactionId, waitForResult } = await train.multiCall([lockScope, attachScope]).call();
   const { value, logs, transactionResult } = await waitForResult();
   return {
     transactionId,
-    value: value as [number, boolean],
+    value: value as [void, boolean],
     logs,
     transactionResult,
   };
@@ -468,16 +471,17 @@ export async function callRedeemUser(
   return runCall<boolean>(connected.functions.redeem_user(hashlock, secret));
 }
 
-/** Calls `Train::redeem_solver(hashlock, index, secret)` as `caller`. */
+/** Calls `Train::redeem_solver(hashlock, solver, secret)` as `caller`. `solver` is the lock
+ * creator's identity (the caller may be anyone holding the secret). */
 export async function callRedeemSolver(
   train: Contract,
   caller: WalletUnlocked,
   hashlock: string,
-  index: BigNumberish,
+  solver: IdentityInput,
   secret: BigNumberish,
 ): Promise<CallResult<boolean>> {
   const connected = connectAs(train, caller);
-  return runCall<boolean>(connected.functions.redeem_solver(hashlock, index, secret));
+  return runCall<boolean>(connected.functions.redeem_solver(hashlock, solver, secret));
 }
 
 /** Calls `Train::refund_user(hashlock)` as `caller`. */
@@ -490,15 +494,16 @@ export async function callRefundUser(
   return runCall<boolean>(connected.functions.refund_user(hashlock));
 }
 
-/** Calls `Train::refund_solver(hashlock, index)` as `caller`. */
+/** Calls `Train::refund_solver(hashlock, solver)` as `caller`. `solver` is the lock creator's
+ * identity (refunding is permissionless once the timelock has passed). */
 export async function callRefundSolver(
   train: Contract,
   caller: WalletUnlocked,
   hashlock: string,
-  index: BigNumberish,
+  solver: IdentityInput,
 ): Promise<CallResult<boolean>> {
   const connected = connectAs(train, caller);
-  return runCall<boolean>(connected.functions.refund_solver(hashlock, index));
+  return runCall<boolean>(connected.functions.refund_solver(hashlock, solver));
 }
 
 // ───────────────────────────── View helpers ─────────────────────────────
@@ -510,20 +515,16 @@ export async function getUserLock(train: Contract, hashlock: string): Promise<un
   return value ?? null;
 }
 
-/** `Train::get_solver_lock(hashlock, index)`, unwrapped to `null` when no such lock exists. */
+/** `Train::get_solver_lock(hashlock, solver)`, unwrapped to `null` when `solver` never locked
+ * under `hashlock`. `null` doubles as the solver's idempotency probe ("did my lock land?") --
+ * checkable on multiple independent providers before ever retrying `solver_lock`. */
 export async function getSolverLock(
   train: Contract,
   hashlock: string,
-  index: BigNumberish,
+  solver: IdentityInput,
 ): Promise<unknown | null> {
-  const { value } = await train.functions.get_solver_lock(hashlock, index).get();
+  const { value } = await train.functions.get_solver_lock(hashlock, solver).get();
   return value ?? null;
-}
-
-/** `Train::get_solver_lock_count(hashlock)`. */
-export async function getSolverLockCount(train: Contract, hashlock: string): Promise<number> {
-  const { value } = await train.functions.get_solver_lock_count(hashlock).get();
-  return value;
 }
 
 /** `Train::get_user_lock_hashes(user, offset, limit)` -- returns `[hashlocks, total]`. */

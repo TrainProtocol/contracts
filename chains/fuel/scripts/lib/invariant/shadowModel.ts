@@ -1,6 +1,6 @@
 /**
  * In-memory "shadow model" for the stateful invariant-fuzzing harness (see `docs/ARCHITECTURE.md`'s
- * invariant table -- SOLV/CONS/LWF/PAG/SIDX -- for the invariants this backs). This is NOT a simulation of the contract --
+ * invariant table -- SOLV/CONS/LWF/PAG/SUNIQ -- for the invariants this backs). This is NOT a simulation of the contract --
  * it never computes anything the contract itself would compute. It only records what the
  * driver's handlers (`./handlers.ts`) know MUST now be true after a real transaction they just
  * submitted to a real local node succeeded, so the invariant checks (`./invariants.ts`) have
@@ -41,8 +41,6 @@ export interface ShadowUserLock {
 
 export interface ShadowSolverLock {
   hashlock: string;
-  /** 1-based, matches the contract's own indexing. */
-  index: number;
   amount: BN; // principal only, mirrors `SolverLockData.amount` (excludes reward)
   reward: BN;
   recipientIdx: number;
@@ -63,11 +61,12 @@ export interface ShadowSolverLock {
  * one shared model, rather than one of each per run, was chosen for this phase). */
 export class ShadowModel {
   userLocks = new Map<string, ShadowUserLock>();
-  /** hashlock -> (index -> lock). A `Map` (not array) at the inner level so index gaps/holes
-   * are never silently assumed contiguous by this model itself -- the contract's own contiguity
-   * (1..count, no gaps) is exactly what SIDX independently verifies against real chain state. */
+  /** hashlock -> (solver wallet index (`funderIdx`, the lock's creator) -> lock). Entries are
+   * NEVER removed, whatever the lock's status becomes -- mirroring the contract, where a
+   * (hashlock, solver) key is written at most once, ever (`SolverLockAlreadyExists`), so this
+   * inner map doubles as the "has this (hashlock, solver) ever been used" record that SUNIQ's
+   * permanent-uniqueness reprobe keys off. */
   solverLocks = new Map<string, Map<number, ShadowSolverLock>>();
-  solverLockCount = new Map<string, number>();
   /** Every hashlock a `user_lock`/`user_lock_for` call has EVER succeeded under, regardless of
    * that lock's current status -- this is the exact set LWF's "hashlock squatting is permanent"
    * clause is about. Solver-lock-only hashlocks are deliberately NOT
@@ -122,10 +121,18 @@ export class ShadowModel {
 
   /** Every hashlock this run has ever minted a secret for (user-lock or solver-lock-only) --
    * used by `createSolverLock` to occasionally reuse an existing hashlock rather than always
-   * minting a fresh one (exercises multiple solver locks under one hashlock, and user+solver
-   * locks sharing one hashlock, which is the realistic HTLC shape). */
+   * minting a fresh one (exercises multiple DIFFERENT solvers locking under one hashlock, and
+   * user+solver locks sharing one hashlock, which is the realistic HTLC shape). */
   allKnownHashlocks(): string[] {
     return [...this.knownSecrets.keys()];
+  }
+
+  /** Whether wallet `funderIdx` has EVER created a solver lock under `hashlock` (any status,
+   * including Redeemed/Refunded) -- the exact condition under which the contract's permanent
+   * `SolverLockAlreadyExists` guard fires. Used by `createSolverLock` to only ever attempt
+   * VALID (hashlock, solver) combinations, and by SUNIQ's duplicate reprobe. */
+  hasEverSolverLocked(hashlock: string, funderIdx: number): boolean {
+    return this.solverLocks.get(hashlock)?.has(funderIdx) ?? false;
   }
 }
 

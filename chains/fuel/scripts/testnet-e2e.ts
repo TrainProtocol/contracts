@@ -548,14 +548,15 @@ export async function main(): Promise<void> {
       rewardRecipient: identityFromAccount(roles.rewardRecipient),
       refundTo: identityFromAccount(roles.refundTo),
     });
-    const locked = await tx('F', `solver_lock (hashlock ${hashlock.slice(0, 10)}…, same-asset reward)`, () =>
+    await tx('F', `solver_lock (hashlock ${hashlock.slice(0, 10)}…, same-asset reward)`, () =>
       callSolverLock({ train, caller: roles.solver, assetId: baseAssetId, amount: LOCK_AMOUNT + REWARD_AMOUNT, params, dst: makeDestinationInfo() }),
     );
-    check('F', 'first index is 1', Number(locked.value) === 1, `index=${locked.value}`);
+    const fLock = await getSolverLock(train, hashlock, identityFromAccount(roles.solver));
+    check('F', 'lock readable under (hashlock, solver identity) -- the idempotency probe', fLock !== null, fLock ? 'present' : 'absent');
 
     const recipientBefore = await roles.recipient.getBalance(baseAssetId);
     const rewardBefore = await roles.rewardRecipient.getBalance(baseAssetId);
-    await tx('F', 'redeem_solver (before reward_timelock, by relayer)', () => callRedeemSolver(train, roles.relayer, hashlock, 1, secret));
+    await tx('F', 'redeem_solver (before reward_timelock, by relayer)', () => callRedeemSolver(train, roles.relayer, hashlock, identityFromAccount(roles.solver), secret));
     const recipientAfter = await roles.recipient.getBalance(baseAssetId);
     const rewardAfter = await roles.rewardRecipient.getBalance(baseAssetId);
     check('F', 'principal -> recipient', recipientAfter.sub(recipientBefore).eq(LOCK_AMOUNT), `delta=${recipientAfter.sub(recipientBefore).toString()}`);
@@ -582,7 +583,7 @@ export async function main(): Promise<void> {
     const recipientBefore = await roles.recipient.getBalance(baseAssetId);
     const rewardRcptBefore = await roles.rewardRecipient.getBalance(baseAssetId);
     await advancePastBoundary(provider, roles.relayer, SHORT_REWARD_TIMELOCK);
-    await tx('G', 'redeem_solver (after reward_timelock, by relayer -> keeper bounty)', () => callRedeemSolver(train, roles.relayer, hashlock, 1, secret));
+    await tx('G', 'redeem_solver (after reward_timelock, by relayer -> keeper bounty)', () => callRedeemSolver(train, roles.relayer, hashlock, identityFromAccount(roles.solver), secret));
     const relayerAfter = await roles.relayer.getBalance(baseAssetId);
     const recipientAfter = await roles.recipient.getBalance(baseAssetId);
     const rewardRcptAfter = await roles.rewardRecipient.getBalance(baseAssetId);
@@ -609,9 +610,27 @@ export async function main(): Promise<void> {
     );
     const before = await roles.refundTo.getBalance(baseAssetId);
     await advancePastBoundary(provider, roles.thirdParty, SHORT_TIMELOCK);
-    await tx('H', 'refund_solver (after timelock, by third party)', () => callRefundSolver(train, roles.thirdParty, hashlock, 1));
+    await tx('H', 'refund_solver (after timelock, by third party)', () => callRefundSolver(train, roles.thirdParty, hashlock, identityFromAccount(roles.solver)));
     const after = await roles.refundTo.getBalance(baseAssetId);
     check('H', 'amount+reward (same asset) returned to refund_to', after.sub(before).eq(LOCK_AMOUNT + REWARD_AMOUNT), `delta=${after.sub(before).toString()}`);
+
+    // The per-solver uniqueness guard is PERMANENT: even after the refund just above, the same
+    // solver can never re-lock this (hashlock, solver) slot -- a re-fill needs a new identity.
+    await expectRevert('H', 're-lock by the same solver after refund (guard never lifts)', 'SolverLockAlreadyExists', () =>
+      connectAs(train, roles.solver)
+        .functions.solver_lock(
+          makeSolverLockParams({
+            recipient: identityFromAccount(roles.recipient),
+            assetId: baseAssetId,
+            hashlock,
+            timelockDelta: LONG_TIMELOCK,
+            refundTo: identityFromAccount(roles.refundTo),
+          }),
+          makeDestinationInfo(),
+          new Uint8Array(),
+        )
+        .callParams({ forward: [LOCK_AMOUNT, baseAssetId] }),
+    );
   }
 
   // ── Flow N: solver_lock DIFFERENT-asset reward (principal in base, reward in test_asset) ──
@@ -643,13 +662,13 @@ export async function main(): Promise<void> {
       });
       return { transactionId: r.transactionId, value: r.value };
     });
-    check('N', 'multicall returns [index=1, attach=true]', Number(res.value[0]) === 1 && res.value[1] === true, `got ${JSON.stringify(res.value)}`);
-    const lock = (await getSolverLock(train, hashlock, 1)) as { reward_funded: boolean; reward_asset_id: { bits: string } };
+    check('N', 'multicall attach_solver_reward returns true', res.value[1] === true, `got ${JSON.stringify(res.value)}`);
+    const lock = (await getSolverLock(train, hashlock, identityFromAccount(roles.solver))) as { reward_funded: boolean; reward_asset_id: { bits: string } };
     check('N', 'reward_funded true and reward_asset_id is the test asset', lock.reward_funded === true && lock.reward_asset_id.bits.toLowerCase() === testAsset.assetId.toLowerCase(), `funded=${lock.reward_funded} asset=${lock.reward_asset_id.bits}`);
 
     const recipientBase0 = await provider.getBalance(roles.recipient.address, baseAssetId);
     const rewardRcptTA0 = await provider.getBalance(roles.rewardRecipient.address, testAsset.assetId);
-    await tx('N', 'redeem_solver (before reward_timelock, by relayer)', () => callRedeemSolver(train, roles.relayer, hashlock, 1, secret));
+    await tx('N', 'redeem_solver (before reward_timelock, by relayer)', () => callRedeemSolver(train, roles.relayer, hashlock, identityFromAccount(roles.solver), secret));
     const recipientBase1 = await provider.getBalance(roles.recipient.address, baseAssetId);
     const rewardRcptTA1 = await provider.getBalance(roles.rewardRecipient.address, testAsset.assetId);
     check('N', 'principal paid in BASE asset to recipient', recipientBase1.sub(recipientBase0).eq(LOCK_AMOUNT), `base delta=${recipientBase1.sub(recipientBase0).toString()}`);
@@ -849,7 +868,25 @@ export async function main(): Promise<void> {
         }),
       );
       await expectRevert('U1', 'refund_solver before timelock (even by recipient) rejected', 'RefundNotAllowed', () =>
-        connectAs(train, roles.recipient).functions.refund_solver(hashlock, 1),
+        connectAs(train, roles.recipient).functions.refund_solver(hashlock, identityFromAccount(roles.solver)),
+      );
+
+      // The same (hashlock, solver) fixture doubles as the duplicate-lock probe: a blind
+      // retry of solver_lock by the same solver must be rejected before any funds move.
+      await expectRevert('U1', 'solver_lock duplicate by the same solver rejected', 'SolverLockAlreadyExists', () =>
+        connectAs(train, roles.solver)
+          .functions.solver_lock(
+            makeSolverLockParams({
+              recipient: identityFromAccount(roles.recipient),
+              assetId: baseAssetId,
+              hashlock,
+              timelockDelta: LONG_TIMELOCK,
+              refundTo: identityFromAccount(roles.refundTo),
+            }),
+            makeDestinationInfo(),
+            new Uint8Array(),
+          )
+          .callParams({ forward: [LOCK_AMOUNT, baseAssetId] }),
       );
     }
 
@@ -911,11 +948,13 @@ export async function main(): Promise<void> {
       return hashlock;
     };
 
+    const solverIdentity = identityFromAccount(roles.solver);
+
     // Wrong asset: forward BASE where test_asset is declared.
     const wrongAssetLock = await mkDiffAssetLock('UN-wrongasset');
     await expectRevert('UN', 'attach_solver_reward wrong asset (base != declared test_asset)', 'RewardAssetMismatch', () =>
       connectAs(train, roles.solver)
-        .functions.attach_solver_reward(wrongAssetLock, 1)
+        .functions.attach_solver_reward(wrongAssetLock, solverIdentity)
         .callParams({ forward: [REWARD_AMOUNT, baseAssetId] }),
     );
 
@@ -923,7 +962,7 @@ export async function main(): Promise<void> {
     const wrongAmountLock = await mkDiffAssetLock('UN-wrongamount');
     await expectRevert('UN', 'attach_solver_reward wrong amount (test_asset, reward+1)', 'RewardAssetMismatch', () =>
       connectAs(train, roles.solver)
-        .functions.attach_solver_reward(wrongAmountLock, 1)
+        .functions.attach_solver_reward(wrongAmountLock, solverIdentity)
         .callParams({ forward: [REWARD_AMOUNT + 1, testAsset.assetId] }),
     );
 
@@ -931,7 +970,7 @@ export async function main(): Promise<void> {
     const doubleAttachLock = await mkDiffAssetLock('UN-double');
     await tx('UN', 'UN-double: first attach (correct asset+amount) funds the reward', async () => {
       const { transactionId, waitForResult } = await connectAs(train, roles.solver)
-        .functions.attach_solver_reward(doubleAttachLock, 1)
+        .functions.attach_solver_reward(doubleAttachLock, solverIdentity)
         .callParams({ forward: [REWARD_AMOUNT, testAsset.assetId] })
         .call();
       await waitForResult();
@@ -939,14 +978,14 @@ export async function main(): Promise<void> {
     });
     await expectRevert('UN', 'attach_solver_reward twice (second rejected)', 'RewardAlreadyFunded', () =>
       connectAs(train, roles.solver)
-        .functions.attach_solver_reward(doubleAttachLock, 1)
+        .functions.attach_solver_reward(doubleAttachLock, solverIdentity)
         .callParams({ forward: [REWARD_AMOUNT, testAsset.assetId] }),
     );
 
     // Attach on a never-created lock.
     await expectRevert('UN', 'attach_solver_reward on nonexistent lock', 'LockNotFound', () =>
       connectAs(train, roles.solver)
-        .functions.attach_solver_reward(randomHashlock(), 1)
+        .functions.attach_solver_reward(randomHashlock(), solverIdentity)
         .callParams({ forward: [REWARD_AMOUNT, testAsset.assetId] }),
     );
   }

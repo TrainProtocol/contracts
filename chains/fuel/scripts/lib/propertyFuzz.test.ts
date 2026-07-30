@@ -39,10 +39,10 @@ import {
   callUserLock,
   callUserLockFor,
   getSolverLock,
-  getSolverLockCount,
   getUserLock,
   getUserLockHashes,
   identityFromAccount,
+  identityFromAddress,
   makeDestinationInfo,
   makeSolverLockParams,
   makeUserLockParams,
@@ -176,19 +176,21 @@ test(
 );
 
 test(
-  'property: solver_lock count/index invariants for random reward/timelock sequences',
+  'property: solver_lock per-(hashlock, solver) uniqueness invariants for random reward/timelock sequences',
   async () => {
+    // 4 distinct solver wallets (one per possible lock in a generated sequence -- each
+    // (hashlock, solver) key may be written at most ONCE, ever) + recipient + rewardRecipient.
     const env = await setupTestEnvironment({
-      walletCount: 3,
+      walletCount: 6,
       assets: [TestAssetId.A],
       amountPerCoin: 200_000_000_000,
     });
     const { train, wallets, cleanup } = env;
     try {
       const assetId = TestAssetId.A.value;
-      const solverCaller = wallets[0];
-      const recipient = identityFromAccount(wallets[1]);
-      const rewardRecipient = identityFromAccount(wallets[2]);
+      const solverWallets = [wallets[0], wallets[1], wallets[2], wallets[3]];
+      const recipient = identityFromAccount(wallets[4]);
+      const rewardRecipient = identityFromAccount(wallets[5]);
 
       const lockSpecArb = fc.record({
         principal: fc.integer({ min: 1, max: 2_000_000 }),
@@ -199,12 +201,13 @@ test(
 
       await fc.assert(
         fc.asyncProperty(fc.array(lockSpecArb, { minLength: 1, maxLength: 4 }), async (specs) => {
-          // Fresh hashlock per generated CASE (not per lock) -- exercises index growth 1..N
-          // under one hashlock, which is the actual invariant under test.
+          // Fresh hashlock per generated CASE (not per lock) -- exercises many DIFFERENT
+          // solvers each taking their own (hashlock, solver) slot under one shared hashlock
+          // (multi-solver fill), which is the actual invariant under test.
           const hashlock = randomHashlock();
-          let expectedIndex = 0;
 
-          for (const spec of specs) {
+          for (let i = 0; i < specs.length; i += 1) {
+            const spec = specs[i];
             const { principal, reward, timelockDelta } = spec;
             // `reward > 0` requires `reward_timelock_delta < timelock_delta` (validated
             // on-chain); construct a value that always satisfies this rather than hoping a
@@ -212,8 +215,16 @@ test(
             const rewardTimelockDelta = reward > 0 ? Math.min(spec.rewardTimelockDeltaRaw, timelockDelta - 1) : 0;
             const msgAmount = principal + reward; // msg_amount() > reward, guaranteed since principal >= 1
 
-            const beforeCount = bn(await getSolverLockCount(train, hashlock)).toNumber();
-            assert.equal(beforeCount, expectedIndex, 'count before creation must equal the running index');
+            // Each lock in the sequence comes from its OWN solver wallet -- the same solver
+            // repeating under one hashlock is exactly what the guard forbids (probed below).
+            const solverWallet = solverWallets[i];
+            const solverIdentity = identityFromAccount(solverWallet);
+
+            assert.equal(
+              await getSolverLock(train, hashlock, solverIdentity),
+              null,
+              'a never-locked (hashlock, solver) must read back none before creation',
+            );
 
             const params = makeSolverLockParams({
               hashlock,
@@ -226,32 +237,41 @@ test(
             });
             const dst = makeDestinationInfo();
 
-            const result = await callSolverLock({
+            await callSolverLock({
               train,
-              caller: solverCaller,
+              caller: solverWallet,
               assetId,
               amount: msgAmount,
               params,
               dst,
             });
-            expectedIndex += 1;
-            const returnedIndex = bn(result.value as never).toNumber();
-            assert.equal(returnedIndex, expectedIndex, 'solver_lock must return the 1-based index == new count');
 
-            const afterCount = bn(await getSolverLockCount(train, hashlock)).toNumber();
-            assert.equal(afterCount, beforeCount + 1, 'count must increment by exactly 1 per creation');
-            assert.equal(afterCount, expectedIndex);
-
-            const lock = (await getSolverLock(train, hashlock, expectedIndex)) as Record<string, unknown> | null;
-            assert.ok(lock, 'the newly created solver lock must be readable at its returned index');
+            const lock = (await getSolverLock(train, hashlock, solverIdentity)) as Record<string, unknown> | null;
+            assert.ok(lock, 'the newly created solver lock must be readable at (hashlock, solver identity)');
             assert.equal(lock.status, 'Pending');
             assert.equal(bn(lock.amount as never).toString(), bn(principal).toString(), 'principal round-trip');
             assert.equal(bn(lock.reward as never).toString(), bn(reward).toString(), 'reward round-trip');
+
+            // The retry/replay guard: an immediate duplicate by the SAME solver reverts,
+            // whatever the generated parameters were.
+            await assert.rejects(
+              () => callSolverLock({ train, caller: solverWallet, assetId, amount: msgAmount, params, dst }),
+              /SolverLockAlreadyExists/,
+              'a duplicate solver_lock by the same solver under the same hashlock must revert',
+            );
           }
+
+          // An identity that never locked under this hashlock stays none, no matter how many
+          // other solvers did.
+          assert.equal(
+            await getSolverLock(train, hashlock, identityFromAddress(randomHashlock())),
+            null,
+            'get_solver_lock for a never-locked identity must return none',
+          );
         }),
         { numRuns: 10 },
       );
-      console.log('property (solver_lock count/index): 10/10 random sequences passed');
+      console.log('property (solver_lock per-solver uniqueness): 10/10 random sequences passed');
     } finally {
       cleanup();
     }

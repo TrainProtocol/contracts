@@ -45,7 +45,6 @@ import {
   callUserLock,
   callUserLockFor,
   getSolverLock,
-  getSolverLockCount,
   getUserLock,
   getUserLockHashes,
   getUserLocks,
@@ -250,8 +249,9 @@ describe('Train core', () => {
     );
   });
 
-  test('solver_lock same-asset reward split: correct amount/reward, index starts at 1, and a second solver lock under the same hashlock gets index 2', async () => {
+  test('solver_lock same-asset reward split: correct amount/reward keyed by (hashlock, solver), and a DIFFERENT solver can still lock the same hashlock', async () => {
     const solver = env.wallets[USER_A];
+    const otherSolver = env.wallets[SPARE_E];
     const recipient = env.wallets[USER_B];
     const rewardRecipient = env.wallets[USER_C];
     const hashlock = randomHashlock();
@@ -267,7 +267,7 @@ describe('Train core', () => {
       timelockDelta: 3600,
       rewardTimelockDelta: 1800,
     });
-    const first = await callSolverLock({
+    await callSolverLock({
       train: env.train,
       caller: solver,
       assetId: ASSET,
@@ -275,17 +275,19 @@ describe('Train core', () => {
       params,
       dst: makeDestinationInfo(),
     });
-    assert.equal(Number(first.value), 1, 'first solver lock under a fresh hashlock must get index 1');
 
-    const lock1 = (await getSolverLock(env.train, hashlock, 1)) as { amount: unknown; reward: unknown } | null;
-    assert.ok(lock1);
+    const lock1 = (await getSolverLock(env.train, hashlock, identityFromAccount(solver))) as {
+      amount: unknown;
+      reward: unknown;
+      sender: { Address: { bits: string } };
+    } | null;
+    assert.ok(lock1, 'the lock must be readable under (hashlock, solver identity)');
     assert.equal(bn(lock1.amount as never).toString(), String(principal));
     assert.equal(bn(lock1.reward as never).toString(), String(reward));
+    assert.equal(lock1.sender.Address.bits.toLowerCase(), solver.address.toB256().toLowerCase());
 
-    const countAfterFirst = await getSolverLockCount(env.train, hashlock);
-    assert.equal(Number(countAfterFirst), 1);
-
-    // Second solver lock under the SAME hashlock -- index must increment to 2.
+    // Second solver lock under the SAME hashlock from a DIFFERENT solver -- multi-solver fill
+    // is preserved: each solver gets its own (hashlock, solver) slot.
     const params2 = makeSolverLockParams({
       hashlock,
       recipient: identityFromAccount(recipient),
@@ -293,22 +295,168 @@ describe('Train core', () => {
       reward: 0,
       timelockDelta: 3600,
     });
-    const second = await callSolverLock({
+    await callSolverLock({
       train: env.train,
-      caller: solver,
+      caller: otherSolver,
       assetId: ASSET,
       amount: 50_000,
       params: params2,
       dst: makeDestinationInfo(),
     });
-    assert.equal(Number(second.value), 2, 'second solver lock under the same hashlock must get index 2');
-    const countAfterSecond = await getSolverLockCount(env.train, hashlock);
-    assert.equal(Number(countAfterSecond), 2);
 
-    const lock2 = (await getSolverLock(env.train, hashlock, 2)) as { amount: unknown; reward: unknown } | null;
-    assert.ok(lock2);
+    const lock2 = (await getSolverLock(env.train, hashlock, identityFromAccount(otherSolver))) as {
+      amount: unknown;
+      reward: unknown;
+    } | null;
+    assert.ok(lock2, 'a different solver must be able to lock under the same hashlock');
     assert.equal(bn(lock2.amount as never).toString(), '50000');
     assert.equal(bn(lock2.reward as never).toString(), '0');
+
+    // The first solver's lock is untouched by the second solver's.
+    const lock1Again = (await getSolverLock(env.train, hashlock, identityFromAccount(solver))) as {
+      amount: unknown;
+    } | null;
+    assert.ok(lock1Again);
+    assert.equal(bn(lock1Again.amount as never).toString(), String(principal));
+  });
+
+  // ─────────────── Per-solver uniqueness guard (retry/replay safety) ───────────────
+
+  test('SolverLockAlreadyExists: a duplicate solver_lock by the same solver reverts, and the reverted attempt moves none of the solver funds', async () => {
+    const solver = env.wallets[USER_A];
+    const recipient = env.wallets[USER_B];
+    const hashlock = randomHashlock();
+    const principal = 60_000;
+
+    const params = makeSolverLockParams({
+      hashlock,
+      recipient: identityFromAccount(recipient),
+      assetId: ASSET,
+      timelockDelta: 3600,
+    });
+    await callSolverLock({ train: env.train, caller: solver, assetId: ASSET, amount: principal, params, dst: makeDestinationInfo() });
+
+    // The blind-retry shape: the exact same call again (same params, same solver).
+    const solverBalanceBefore = await solver.getBalance(ASSET);
+    await assertReverts(
+      () => callSolverLock({ train: env.train, caller: solver, assetId: ASSET, amount: principal, params, dst: makeDestinationInfo() }),
+      'SolverLockAlreadyExists',
+      'a second solver_lock by the same solver under the same hashlock must revert SolverLockAlreadyExists',
+    );
+    const solverBalanceAfter = await solver.getBalance(ASSET);
+    assert.equal(
+      solverBalanceAfter.sub(solverBalanceBefore).toString(),
+      '0',
+      'the reverted duplicate must not move any of the solver locked-asset funds (retry cannot double-fund)',
+    );
+
+    // The stored lock is exactly the first one, untouched.
+    const lock = (await getSolverLock(env.train, hashlock, identityFromAccount(solver))) as {
+      amount: unknown;
+      status: string;
+    } | null;
+    assert.ok(lock);
+    assert.equal(bn(lock.amount as never).toString(), String(principal));
+    assert.equal(lock.status, 'Pending');
+  });
+
+  test('SolverLockAlreadyExists: re-lock by the same solver STILL reverts after refund_solver -- the guard is permanent, a re-fill needs a different identity', async () => {
+    const solver = env.wallets[USER_A];
+    const recipient = env.wallets[USER_B];
+    const hashlock = randomHashlock();
+    const principal = 12_000;
+
+    const params = makeSolverLockParams({
+      hashlock,
+      recipient: identityFromAccount(recipient),
+      assetId: ASSET,
+      refundTo: identityFromAccount(solver),
+      timelockDelta: 3,
+    });
+    await callSolverLock({ train: env.train, caller: solver, assetId: ASSET, amount: principal, params, dst: makeDestinationInfo() });
+
+    await advanceRealTimePast(env, 4000);
+    const refunded = await callRefundSolver(env.train, solver, hashlock, identityFromAccount(solver));
+    assert.equal(refunded.value, true);
+    const lock = (await getSolverLock(env.train, hashlock, identityFromAccount(solver))) as { status: string } | null;
+    assert.ok(lock);
+    assert.equal(lock.status, 'Refunded');
+
+    await assertReverts(
+      () => callSolverLock({ train: env.train, caller: solver, assetId: ASSET, amount: principal, params, dst: makeDestinationInfo() }),
+      'SolverLockAlreadyExists',
+      're-locking a refunded (hashlock, solver) slot must still revert -- refund never lifts the guard',
+    );
+
+    // A deliberate re-fill of the same hashlock IS possible -- from a different solver identity.
+    const otherSolver = env.wallets[SPARE_E];
+    const refillParams = makeSolverLockParams({
+      hashlock,
+      recipient: identityFromAccount(recipient),
+      assetId: ASSET,
+      timelockDelta: 3600,
+    });
+    await callSolverLock({ train: env.train, caller: otherSolver, assetId: ASSET, amount: principal, params: refillParams, dst: makeDestinationInfo() });
+    const refill = (await getSolverLock(env.train, hashlock, identityFromAccount(otherSolver))) as { status: string } | null;
+    assert.ok(refill, 'a different solver identity must be able to re-fill the refunded hashlock');
+    assert.equal(refill.status, 'Pending');
+  });
+
+  test('SolverLockAlreadyExists: re-lock by the same solver reverts after redeem_solver too', async () => {
+    const solver = env.wallets[USER_A];
+    const recipient = env.wallets[USER_B];
+    const { secretArg, hashlock } = makeSecretPair();
+    const principal = 7_000;
+
+    const params = makeSolverLockParams({
+      hashlock,
+      recipient: identityFromAccount(recipient),
+      assetId: ASSET,
+      timelockDelta: 3600,
+    });
+    await callSolverLock({ train: env.train, caller: solver, assetId: ASSET, amount: principal, params, dst: makeDestinationInfo() });
+    await callRedeemSolver(env.train, solver, hashlock, identityFromAccount(solver), secretArg);
+
+    await assertReverts(
+      () => callSolverLock({ train: env.train, caller: solver, assetId: ASSET, amount: principal, params, dst: makeDestinationInfo() }),
+      'SolverLockAlreadyExists',
+      're-locking a redeemed (hashlock, solver) slot must still revert -- redeem never lifts the guard',
+    );
+  });
+
+  test('get_solver_lock for an identity that never locked returns none (the solver idempotency probe)', async () => {
+    const solver = env.wallets[USER_A];
+    const recipient = env.wallets[USER_B];
+    const hashlock = randomHashlock();
+
+    // Probe before anyone locks: nothing under (hashlock, solver).
+    assert.equal(
+      await getSolverLock(env.train, hashlock, identityFromAccount(solver)),
+      null,
+      'a never-locked (hashlock, solver) must read back as none',
+    );
+
+    const params = makeSolverLockParams({
+      hashlock,
+      recipient: identityFromAccount(recipient),
+      assetId: ASSET,
+      timelockDelta: 3600,
+    });
+    await callSolverLock({ train: env.train, caller: solver, assetId: ASSET, amount: 5_000, params, dst: makeDestinationInfo() });
+
+    // The probe flips for the solver that locked...
+    assert.ok(await getSolverLock(env.train, hashlock, identityFromAccount(solver)));
+    // ...but stays none for any identity that never locked under this hashlock.
+    assert.equal(
+      await getSolverLock(env.train, hashlock, randomIdentity()),
+      null,
+      'an identity that never locked must still read back as none under a hashlock with other locks',
+    );
+    assert.equal(
+      await getSolverLock(env.train, hashlock, identityFromAccount(env.wallets[USER_C])),
+      null,
+      'another wallet that never locked must also read back as none',
+    );
   });
 
   test('redeem_solver BEFORE reward_timelock sends the reward to reward_recipient', async () => {
@@ -334,7 +482,7 @@ describe('Train core', () => {
     const rewardRecipientBefore = await rewardRecipient.getBalance(ASSET);
     const redeemerBefore = await solver.getBalance(ASSET); // redeemer == solver here, distinct from rewardRecipient
 
-    const redeemed = await callRedeemSolver(env.train, solver, hashlock, 1, secretArg);
+    const redeemed = await callRedeemSolver(env.train, solver, hashlock, identityFromAccount(solver), secretArg);
     assert.equal(redeemed.value, true);
 
     const recipientAfter = await recipient.getBalance(ASSET);
@@ -347,7 +495,7 @@ describe('Train core', () => {
       'reward must go to reward_recipient when redeemed before reward_timelock',
     );
 
-    const lock = (await getSolverLock(env.train, hashlock, 1)) as { status: string } | null;
+    const lock = (await getSolverLock(env.train, hashlock, identityFromAccount(solver))) as { status: string } | null;
     assert.ok(lock);
     assert.equal(lock.status, 'Redeemed');
   });
@@ -377,7 +525,7 @@ describe('Train core', () => {
     const rewardRecipientBefore = await rewardRecipient.getBalance(ASSET);
     const keeperBefore = await keeper.getBalance(ASSET);
 
-    const redeemed = await callRedeemSolver(env.train, keeper, hashlock, 1, secretArg);
+    const redeemed = await callRedeemSolver(env.train, keeper, hashlock, identityFromAccount(solver), secretArg);
     assert.equal(redeemed.value, true);
 
     const rewardRecipientAfter = await rewardRecipient.getBalance(ASSET);
@@ -460,12 +608,12 @@ describe('Train core', () => {
     // Even the lock's own `recipient` (who WOULD be allowed to early-refund a user lock) cannot
     // early-refund a solver lock -- there is no early-recipient carve-out for solver locks.
     await assertReverts(
-      () => callRefundSolver(env.train, recipient, hashlock, 1),
+      () => callRefundSolver(env.train, recipient, hashlock, identityFromAccount(solver)),
       'RefundNotAllowed',
       'the recipient must not get an early-refund path on a solver lock',
     );
     await assertReverts(
-      () => callRefundSolver(env.train, solver, hashlock, 1),
+      () => callRefundSolver(env.train, solver, hashlock, identityFromAccount(solver)),
       'RefundNotAllowed',
       'not even the solver (sender) gets an early-refund path',
     );
@@ -494,7 +642,7 @@ describe('Train core', () => {
     await advanceRealTimePast(env, 4000);
 
     const solverBefore = await solver.getBalance(ASSET);
-    const refunded = await callRefundSolver(env.train, anyone, hashlock, 1);
+    const refunded = await callRefundSolver(env.train, anyone, hashlock, identityFromAccount(solver));
     assert.equal(refunded.value, true, 'any caller must be able to refund a solver lock once its timelock has expired');
     const solverAfter = await solver.getBalance(ASSET);
     assert.equal(
@@ -503,7 +651,7 @@ describe('Train core', () => {
       'refund_to (the solver here) must receive amount + reward (same-asset reward path)',
     );
 
-    const lock = (await getSolverLock(env.train, hashlock, 1)) as { status: string } | null;
+    const lock = (await getSolverLock(env.train, hashlock, identityFromAccount(solver))) as { status: string } | null;
     assert.ok(lock);
     assert.equal(lock.status, 'Refunded');
   });
@@ -573,10 +721,9 @@ describe('Train core', () => {
     });
 
     // Step 1: solver_lock forwards the PRINCIPAL ONLY (asset A). Reward is declared but unfunded.
-    const idx = await callSolverLock({ train: env.train, caller: solver, assetId: ASSET, amount: principal, params, dst: makeDestinationInfo() });
-    assert.equal(Number(idx.value), 1);
+    await callSolverLock({ train: env.train, caller: solver, assetId: ASSET, amount: principal, params, dst: makeDestinationInfo() });
 
-    let lock = (await getSolverLock(env.train, hashlock, 1)) as {
+    let lock = (await getSolverLock(env.train, hashlock, identityFromAccount(solver))) as {
       amount: unknown; reward: unknown; reward_funded: boolean; reward_asset_id: { bits: string };
     } | null;
     assert.ok(lock);
@@ -586,17 +733,17 @@ describe('Train core', () => {
     assert.equal(lock.reward_asset_id.bits.toLowerCase(), ASSET_B.toLowerCase());
 
     // Step 2: attach the reward in asset B.
-    const attached = await callAttachSolverReward({ train: env.train, caller: solver, hashlock, index: 1, reward, rewardAssetId: ASSET_B });
+    const attached = await callAttachSolverReward({ train: env.train, caller: solver, hashlock, solver: identityFromAccount(solver), reward, rewardAssetId: ASSET_B });
     assert.equal(attached.value, true);
 
-    lock = (await getSolverLock(env.train, hashlock, 1)) as never;
+    lock = (await getSolverLock(env.train, hashlock, identityFromAccount(solver))) as never;
     assert.equal((lock as { reward_funded: boolean }).reward_funded, true, 'reward_funded flips true after attach');
 
     // Redeem before reward_timelock -> recipient gets principal in A, reward_recipient gets reward in B.
     const recipientBeforeA = await recipient.getBalance(ASSET);
     const rewardRecipientBeforeB = await rewardRecipient.getBalance(ASSET_B);
 
-    const redeemed = await callRedeemSolver(env.train, solver, hashlock, 1, secretArg);
+    const redeemed = await callRedeemSolver(env.train, solver, hashlock, identityFromAccount(solver), secretArg);
     assert.equal(redeemed.value, true);
 
     assert.equal((await recipient.getBalance(ASSET)).sub(recipientBeforeA).toString(), String(principal), 'recipient receives the principal in asset A');
@@ -626,10 +773,9 @@ describe('Train core', () => {
       train: env.train, caller: solver, assetId: ASSET, amount: principal,
       rewardAssetId: ASSET_B, reward, params, dst: makeDestinationInfo(),
     });
-    assert.equal(Number(res.value[0]), 1, 'solver_lock returns index 1');
     assert.equal(res.value[1], true, 'attach_solver_reward returns true');
 
-    const lock = (await getSolverLock(env.train, hashlock, 1)) as { reward_funded: boolean; amount: unknown; reward: unknown } | null;
+    const lock = (await getSolverLock(env.train, hashlock, identityFromAccount(solver))) as { reward_funded: boolean; amount: unknown; reward: unknown } | null;
     assert.ok(lock);
     assert.equal(lock.reward_funded, true, 'both calls committed atomically -> reward_funded true');
     assert.equal(bn(lock.amount as never).toString(), String(principal));
@@ -649,7 +795,7 @@ describe('Train core', () => {
 
     await assertReverts(
       // Correct amount but WRONG asset (A instead of the declared B).
-      () => callAttachSolverReward({ train: env.train, caller: solver, hashlock, index: 1, reward: 5_000, rewardAssetId: ASSET }),
+      () => callAttachSolverReward({ train: env.train, caller: solver, hashlock, solver: identityFromAccount(solver), reward: 5_000, rewardAssetId: ASSET }),
       'RewardAssetMismatch',
       'attaching the wrong asset must revert RewardAssetMismatch',
     );
@@ -668,7 +814,7 @@ describe('Train core', () => {
 
     await assertReverts(
       // Correct asset (B) but WRONG amount (declared reward is 5_000).
-      () => callAttachSolverReward({ train: env.train, caller: solver, hashlock, index: 1, reward: 4_999, rewardAssetId: ASSET_B }),
+      () => callAttachSolverReward({ train: env.train, caller: solver, hashlock, solver: identityFromAccount(solver), reward: 4_999, rewardAssetId: ASSET_B }),
       'RewardAssetMismatch',
       'attaching the wrong amount must revert RewardAssetMismatch',
     );
@@ -686,11 +832,11 @@ describe('Train core', () => {
     });
     await callSolverLock({ train: env.train, caller: solver, assetId: ASSET, amount: 40_000, params, dst: makeDestinationInfo() });
 
-    const first = await callAttachSolverReward({ train: env.train, caller: solver, hashlock, index: 1, reward, rewardAssetId: ASSET_B });
+    const first = await callAttachSolverReward({ train: env.train, caller: solver, hashlock, solver: identityFromAccount(solver), reward, rewardAssetId: ASSET_B });
     assert.equal(first.value, true);
 
     await assertReverts(
-      () => callAttachSolverReward({ train: env.train, caller: solver, hashlock, index: 1, reward, rewardAssetId: ASSET_B }),
+      () => callAttachSolverReward({ train: env.train, caller: solver, hashlock, solver: identityFromAccount(solver), reward, rewardAssetId: ASSET_B }),
       'RewardAlreadyFunded',
       'a second attach on an already-funded lock must revert RewardAlreadyFunded',
     );
@@ -709,22 +855,22 @@ describe('Train core', () => {
     });
     await callSolverLock({ train: env.train, caller: solver, assetId: ASSET, amount: 30_000 + reward, params, dst: makeDestinationInfo() });
 
-    const lock = (await getSolverLock(env.train, hashlock, 1)) as { reward_funded: boolean } | null;
+    const lock = (await getSolverLock(env.train, hashlock, identityFromAccount(solver))) as { reward_funded: boolean } | null;
     assert.ok(lock);
     assert.equal(lock.reward_funded, true, 'same-asset reward is funded at creation');
 
     await assertReverts(
-      () => callAttachSolverReward({ train: env.train, caller: solver, hashlock, index: 1, reward, rewardAssetId: ASSET }),
+      () => callAttachSolverReward({ train: env.train, caller: solver, hashlock, solver: identityFromAccount(solver), reward, rewardAssetId: ASSET }),
       'RewardAlreadyFunded',
       'attaching to a same-asset (already-funded) lock must revert RewardAlreadyFunded',
     );
   });
 
-  test('LockNotFound: attach on a nonexistent hashlock/index reverts', async () => {
+  test('LockNotFound: attach on a nonexistent (hashlock, solver) reverts', async () => {
     const solver = env.wallets[USER_A];
     const hashlock = randomHashlock(); // never locked
     await assertReverts(
-      () => callAttachSolverReward({ train: env.train, caller: solver, hashlock, index: 1, reward: 1_000, rewardAssetId: ASSET_B }),
+      () => callAttachSolverReward({ train: env.train, caller: solver, hashlock, solver: identityFromAccount(solver), reward: 1_000, rewardAssetId: ASSET_B }),
       'LockNotFound',
       'attach on a never-created solver lock must revert LockNotFound',
     );
@@ -748,14 +894,14 @@ describe('Train core', () => {
     // Redeem with the unfunded reward -> only the principal moves; nothing in asset B.
     const recipientBeforeA = await recipient.getBalance(ASSET);
     const rewardRecipientBeforeB = await rewardRecipient.getBalance(ASSET_B);
-    const redeemed = await callRedeemSolver(env.train, solver, hashlock, 1, secretArg);
+    const redeemed = await callRedeemSolver(env.train, solver, hashlock, identityFromAccount(solver), secretArg);
     assert.equal(redeemed.value, true);
     assert.equal((await recipient.getBalance(ASSET)).sub(recipientBeforeA).toString(), String(principal), 'principal paid to recipient in asset A');
     assert.equal((await rewardRecipient.getBalance(ASSET_B)).sub(rewardRecipientBeforeB).toString(), '0', 'no reward paid for an unfunded reward');
 
     // Lock is now Redeemed -> attach must reject on state, not on asset/amount.
     await assertReverts(
-      () => callAttachSolverReward({ train: env.train, caller: solver, hashlock, index: 1, reward, rewardAssetId: ASSET_B }),
+      () => callAttachSolverReward({ train: env.train, caller: solver, hashlock, solver: identityFromAccount(solver), reward, rewardAssetId: ASSET_B }),
       'LockNotPending',
       'attach on an already-redeemed lock must revert LockNotPending',
     );
@@ -781,7 +927,7 @@ describe('Train core', () => {
 
     const refundToBeforeA = await refundTo.getBalance(ASSET);
     const refundToBeforeB = await refundTo.getBalance(ASSET_B);
-    const refunded = await callRefundSolver(env.train, solver, hashlock, 1);
+    const refunded = await callRefundSolver(env.train, solver, hashlock, identityFromAccount(solver));
     assert.equal(refunded.value, true);
     assert.equal((await refundTo.getBalance(ASSET)).sub(refundToBeforeA).toString(), String(principal), 'refund_to receives exactly the principal in asset A');
     assert.equal((await refundTo.getBalance(ASSET_B)).sub(refundToBeforeB).toString(), '0', 'no asset-B refund for an unfunded reward');
@@ -801,13 +947,13 @@ describe('Train core', () => {
       timelockDelta: 3, rewardTimelockDelta: 1,
     });
     await callSolverLock({ train: env.train, caller: solver, assetId: ASSET, amount: principal, params, dst: makeDestinationInfo() });
-    await callAttachSolverReward({ train: env.train, caller: solver, hashlock, index: 1, reward, rewardAssetId: ASSET_B });
+    await callAttachSolverReward({ train: env.train, caller: solver, hashlock, solver: identityFromAccount(solver), reward, rewardAssetId: ASSET_B });
 
     await advanceRealTimePast(env, 4000);
 
     const refundToBeforeA = await refundTo.getBalance(ASSET);
     const refundToBeforeB = await refundTo.getBalance(ASSET_B);
-    const refunded = await callRefundSolver(env.train, solver, hashlock, 1);
+    const refunded = await callRefundSolver(env.train, solver, hashlock, identityFromAccount(solver));
     assert.equal(refunded.value, true);
     assert.equal((await refundTo.getBalance(ASSET)).sub(refundToBeforeA).toString(), String(principal), 'refund_to receives the principal in asset A');
     assert.equal((await refundTo.getBalance(ASSET_B)).sub(refundToBeforeB).toString(), String(reward), 'refund_to receives the funded reward in asset B');
@@ -1208,13 +1354,13 @@ describe('Train core', () => {
     );
   });
 
-  test('LockNotFound: refund_solver on a hashlock/index that was never locked reverts', async () => {
+  test('LockNotFound: refund_solver on a (hashlock, solver) that was never locked reverts', async () => {
     const user = env.wallets[USER_A];
     const hashlock = randomHashlock(); // never locked at all
     await assertReverts(
-      () => callRefundSolver(env.train, user, hashlock, 1),
+      () => callRefundSolver(env.train, user, hashlock, identityFromAccount(user)),
       'LockNotFound',
-      'refunding a never-locked solver hashlock/index must revert LockNotFound',
+      'refunding a never-locked (hashlock, solver) must revert LockNotFound',
     );
   });
 
@@ -1238,10 +1384,10 @@ describe('Train core', () => {
     const { secretArg, hashlock } = makeSecretPair();
     const params = makeSolverLockParams({ hashlock, recipient: identityFromAccount(recipient), assetId: ASSET });
     await callSolverLock({ train: env.train, caller: solver, assetId: ASSET, amount: 5000, params, dst: makeDestinationInfo() });
-    await callRedeemSolver(env.train, solver, hashlock, 1, secretArg);
+    await callRedeemSolver(env.train, solver, hashlock, identityFromAccount(solver), secretArg);
 
     await assertReverts(
-      () => callRedeemSolver(env.train, solver, hashlock, 1, secretArg),
+      () => callRedeemSolver(env.train, solver, hashlock, identityFromAccount(solver), secretArg),
       'LockNotPending',
       'redeeming an already-redeemed solver lock a second time must revert LockNotPending',
     );

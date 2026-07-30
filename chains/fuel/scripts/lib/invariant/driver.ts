@@ -8,7 +8,7 @@
  * it would multiply this phase's dominant fixed cost (node launch + contract deploy, several
  * seconds) by the run count for no real isolation benefit -- every hashlock in this harness is
  * freshly random (`crypto.randomBytes(32)`), so two "runs" sharing one chain can never collide on
- * storage keys, and the invariants themselves (SOLV/CONS/LWF/PAG/SIDX) are either GLOBAL sums
+ * storage keys, and the invariants themselves (SOLV/CONS/LWF/PAG/SUNIQ) are either GLOBAL sums
  * (SOLV) or keyed per-hashlock/per-wallet (everything else) -- neither cares whether the state it
  * is reading grew across one run or many. `numRuns` therefore really means "how many independent
  * ACTION SEQUENCES to statistically sample", not "how many isolated chains to boot", and the
@@ -42,8 +42,8 @@ import {
   assertNeverUsedHashlockIsEmpty,
   assertPaginationNeverReverts,
   assertSolvency,
-  assertSolverIndexBounds,
   assertSolverLockStatus,
+  assertSolverLockUniqueness,
   assertSwapAlreadyExists,
   assertUserLockStatus,
   snapshotBalances,
@@ -141,11 +141,11 @@ export async function runInvariantCampaign(env: TestEnvironment, opts: DriverOpt
           await assertUserLockStatus(env, outcome.touchedUserHashlock, lock.status, noteFull);
         }
         if (outcome.touchedSolverHashlock) {
-          const { hashlock, index } = outcome.touchedSolverHashlock;
-          const lock = model.solverLocks.get(hashlock)?.get(index);
-          assert.ok(lock, `internal harness error: touched solver lock ${hashlock}/${index} missing from shadow model`);
-          await assertSolverLockStatus(env, hashlock, index, lock.status, noteFull);
-          await assertSolverIndexBounds(env, model, hashlock, noteFull);
+          const { hashlock, solverIdx } = outcome.touchedSolverHashlock;
+          const lock = model.solverLocks.get(hashlock)?.get(solverIdx);
+          assert.ok(lock, `internal harness error: touched solver lock ${hashlock}/wallets[${solverIdx}] missing from shadow model`);
+          await assertSolverLockStatus(env, hashlock, solverIdx, lock.status, noteFull);
+          await assertSolverLockUniqueness(env, model, assetId, hashlock, solverIdx, noteFull);
         }
         if (
           (outcome.action === 'createUserLock' || outcome.action === 'redeemUser' || outcome.action === 'refundUser') &&

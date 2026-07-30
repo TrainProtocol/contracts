@@ -1,7 +1,7 @@
 /**
  * Stateful invariant-fuzzing harness for the Fuel/Sway "Train" HTLC port, run against a REAL
  * local `fuel-core` node (via `../testHarness`'s `setupTestEnvironment`) -- not a pure in-memory
- * simulation. Checks five invariants (SOLV/CONS/LWF/PAG/SIDX -- see `docs/ARCHITECTURE.md`'s
+ * simulation. Checks five invariants (SOLV/CONS/LWF/PAG/SUNIQ -- see `docs/ARCHITECTURE.md`'s
  * invariant table, or `./invariants.ts` for the exact assertions), and
  * `./handlers.ts`/`./driver.ts`'s file doc comments for the full design rationale (shadow-model
  * shape, timelock "fuse" profiles, why one shared node/model is used for the whole campaign).
@@ -57,7 +57,7 @@ describe('Train invariant fuzzing (stateful action sequences, real local node)',
   });
 
   test(
-    `${NUM_RUNS} sequences x up to ${ACTIONS_PER_RUN} actions hold SOLV/CONS/LWF/PAG/SIDX throughout (real node, real balances)`,
+    `${NUM_RUNS} sequences x up to ${ACTIONS_PER_RUN} actions hold SOLV/CONS/LWF/PAG/SUNIQ throughout (real node, real balances)`,
     async () => {
       const result = await runInvariantCampaign(env, {
         numRuns: NUM_RUNS,
@@ -73,7 +73,7 @@ describe('Train invariant fuzzing (stateful action sequences, real local node)',
           'handlers/preconditions are miscalibrated, not that the invariants held vacuously',
       );
       // Every handler must have fired at least once across the whole campaign -- otherwise this
-      // run never actually exercised one of SOLV/CONS/LWF/PAG/SIDX's relevant code paths.
+      // run never actually exercised one of SOLV/CONS/LWF/PAG/SUNIQ's relevant code paths.
       for (const action of ['createUserLock', 'createSolverLock', 'redeemUser', 'redeemSolver', 'refundUser', 'refundSolver']) {
         assert.ok((result.actionCounts[action] ?? 0) > 0, `handler '${action}' never fired across the whole campaign`);
       }

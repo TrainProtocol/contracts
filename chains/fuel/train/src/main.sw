@@ -101,12 +101,16 @@ pub enum TrainError {
     /// `attach_solver_reward` where the forwarded coin does not exactly match the lock's
     /// declared `(reward_asset_id, reward)`.
     RewardAssetMismatch: (),
+    /// `solver_lock` where the calling solver has already created a solver lock under this
+    /// hashlock -- at most ONE solver lock per (hashlock, solver), EVER (the guard never
+    /// lifts, not even after a refund/redeem; see `solver_lock`).
+    SolverLockAlreadyExists: (),
 }
 
 // ───────────────────────────── Types ─────────────────────────────
 
 /// Lock lifecycle states (the protocol's `LockStatus`). `Empty` is the
-/// implicit state of any hashlock/index that has never been written (detected via
+/// implicit state of any hashlock / (hashlock, solver) key that has never been written (detected via
 /// `StorageKey::try_read()` returning `None`, not via a persisted `Empty` value).
 pub enum LockStatus {
     Empty: (),
@@ -257,11 +261,10 @@ pub struct UserLocked {
 /// Emitted when a solver creates a lock (`solver_lock`).
 pub struct SolverLocked {
     pub hashlock: b256,
+    /// The solver that created and funded the lock -- also the lock's storage key alongside
+    /// `hashlock` (at most one solver lock per (hashlock, sender), ever).
     pub sender: Identity,
     pub recipient: Identity,
-    /// The 1-based solver-lock index under this hashlock (monotonic; multiple solver locks
-    /// may exist per hashlock).
-    pub index: u64,
     pub src_chain: String,
     pub asset_id: AssetId,
     pub amount: u64,
@@ -282,7 +285,9 @@ pub struct SolverLocked {
 /// `attach_solver_reward` (the second step of the two-step different-asset funding flow).
 pub struct SolverRewardAttached {
     pub hashlock: b256,
-    pub index: u64,
+    /// The solver whose lock's reward was funded (the lock's creator, not necessarily the
+    /// attach caller -- attaching is permissionless).
+    pub solver: Identity,
     pub reward_asset_id: AssetId,
     pub reward: u64,
 }
@@ -297,7 +302,8 @@ pub struct UserRefunded {
 /// Emitted when a solver lock is refunded (amount + reward, no curve, returned to `refund_to`).
 pub struct SolverRefunded {
     pub hashlock: b256,
-    pub index: u64,
+    /// The solver whose lock was refunded.
+    pub solver: Identity,
     pub refund_to: Identity,
     pub amount: u64,
     pub reward: u64,
@@ -315,7 +321,8 @@ pub struct UserRedeemed {
 /// Emitted when a solver lock is redeemed with the secret preimage.
 pub struct SolverRedeemed {
     pub hashlock: b256,
-    pub index: u64,
+    /// The solver whose lock was redeemed.
+    pub solver: Identity,
     pub redeemer: Identity,
     pub secret: u256,
     pub payout: u64,
@@ -356,17 +363,28 @@ abi Train {
     ) -> b256;
 
     /// Create a solver lock to fulfill a swap. The caller both funds and is attributed as
-    /// `sender`. Returns the 1-based solver-lock index under `params.hashlock`.
+    /// `sender`, and is the lock's storage key alongside `params.hashlock`.
+    ///
+    /// At most ONE solver lock per (hashlock, caller), EVER: a repeat call by the same caller
+    /// under the same hashlock reverts `SolverLockAlreadyExists` before any state is written
+    /// (and, Fuel forwarding the coin atomically with the call, the revert returns the
+    /// forwarded coin untouched), so a blind retry -- e.g. after an unreliable or malicious
+    /// RPC reported the first transaction as missing -- can never double-fund the same swap.
+    /// Probe idempotently via `get_solver_lock(hashlock, solver)` (on several independent
+    /// providers if needed): `None` means the lock never landed. The guard never lifts, not
+    /// even after a refund or redeem; a deliberate re-fill of the same hashlock requires a
+    /// different solver identity. Different solvers can still each lock under one hashlock.
     #[payable]
     #[storage(read, write)]
-    fn solver_lock(params: SolverLockParams, dst: DestinationInfo, data: Bytes) -> u64;
+    fn solver_lock(params: SolverLockParams, dst: DestinationInfo, data: Bytes);
 
     /// Fund the reward of a different-asset solver lock (step two of the two-step funding flow;
     /// see `solver_lock`). Forwards exactly the lock's declared `(reward_asset_id, reward)`.
-    /// Permissionless: anyone may fund the declared reward on the solver's behalf.
+    /// Permissionless: anyone may fund the declared reward on the solver's behalf (`solver` is
+    /// the lock's creator, not necessarily the caller).
     #[payable]
     #[storage(read, write)]
-    fn attach_solver_reward(hashlock: b256, index: u64) -> bool;
+    fn attach_solver_reward(hashlock: b256, solver: Identity) -> bool;
 
     /// Refund a user lock (full amount, no curve, returned to `refund_to`). The `recipient`
     /// may refund at any time; anyone else only after `timelock`.
@@ -375,32 +393,33 @@ abi Train {
 
     /// Refund a solver lock (amount + reward, no curve, returned to `refund_to`). Callable by
     /// anyone, but only after `timelock` (no early-recipient path, unlike `refund_user`).
+    /// `solver` is the lock creator's identity. Note the refund does NOT lift the per-solver
+    /// uniqueness guard -- a refunded solver re-fills from a different identity (see
+    /// `solver_lock`).
     #[storage(read, write)]
-    fn refund_solver(hashlock: b256, index: u64) -> bool;
+    fn refund_solver(hashlock: b256, solver: Identity) -> bool;
 
     /// Redeem a user lock with the secret preimage. Permissionless: any caller holding the
     /// secret can trigger it, but the payout always goes to the lock's `recipient`.
     #[storage(read, write)]
     fn redeem_user(hashlock: b256, secret: u256) -> bool;
 
-    /// Redeem a solver lock with the secret preimage. The payout curve applies to `amount`
-    /// only, never to `reward`; the reward routes to `reward_recipient` before
-    /// `reward_timelock`, otherwise to the redeemer (keeper bounty).
+    /// Redeem a solver lock with the secret preimage. `solver` is the lock creator's identity.
+    /// The payout curve applies to `amount` only, never to `reward`; the reward routes to
+    /// `reward_recipient` before `reward_timelock`, otherwise to the redeemer (keeper bounty).
     #[storage(read, write)]
-    fn redeem_solver(hashlock: b256, index: u64, secret: u256) -> bool;
+    fn redeem_solver(hashlock: b256, solver: Identity, secret: u256) -> bool;
 
     /// Get user lock details (zero-valued fields / `None` if no such lock exists).
     #[storage(read)]
     fn get_user_lock(hashlock: b256) -> Option<UserLock>;
 
-    /// Get solver lock details (zero-valued fields / `None` if no such lock exists).
+    /// Get solver lock details (`None` if `solver` never locked under `hashlock`). Doubles as
+    /// the solver's idempotency probe -- `None` means "my lock never landed", checkable on
+    /// several independent providers before ever retrying `solver_lock`. Discovery of OTHER
+    /// solvers' locks stays event-driven (`SolverLocked`).
     #[storage(read)]
-    fn get_solver_lock(hashlock: b256, index: u64) -> Option<SolverLock>;
-
-    /// Get the number of solver locks created under a hashlock (also the highest valid
-    /// 1-based index).
-    #[storage(read)]
-    fn get_solver_lock_count(hashlock: b256) -> u64;
+    fn get_solver_lock(hashlock: b256, solver: Identity) -> Option<SolverLock>;
 
     /// Paginated hashlocks of the user locks created by / attributed to `user`. Returns the
     /// page in `[offset, min(offset + limit, total))` plus `total`, the full number of
@@ -422,12 +441,13 @@ storage {
     user_locks: StorageMap<b256, UserLockData> = StorageMap::<b256, UserLockData> {},
     /// hashlock => payout curve config bytes for the user lock (out-of-line; see above)
     user_lock_curve_data: StorageMap<b256, StorageBytes> = StorageMap::<b256, StorageBytes> {},
-    /// (hashlock, index) => SolverLock (core, storage-safe fields only)
-    solver_locks: StorageMap<(b256, u64), SolverLockData> = StorageMap::<(b256, u64), SolverLockData> {},
-    /// (hashlock, index) => payout curve config bytes for the solver lock
-    solver_lock_curve_data: StorageMap<(b256, u64), StorageBytes> = StorageMap::<(b256, u64), StorageBytes> {},
-    /// hashlock => count of solver locks created under it
-    solver_lock_count: StorageMap<b256, u64> = StorageMap::<b256, u64> {},
+    /// (hashlock, solver) => SolverLock (core, storage-safe fields only). At most ONE lock per
+    /// (hashlock, solver), EVER -- the permanent per-solver uniqueness guard in
+    /// `validate_solver_lock_params` is what makes a blind `solver_lock` retry double-fund-safe
+    /// (see `solver_lock`'s ABI doc comment).
+    solver_locks: StorageMap<(b256, Identity), SolverLockData> = StorageMap::<(b256, Identity), SolverLockData> {},
+    /// (hashlock, solver) => payout curve config bytes for the solver lock
+    solver_lock_curve_data: StorageMap<(b256, Identity), StorageBytes> = StorageMap::<(b256, Identity), StorageBytes> {},
     /// user => the hashlocks of the user locks created by / attributed to them
     user_lock_hashes: StorageMap<Identity, StorageVec<b256>> = StorageMap::<Identity, StorageVec<b256>> {},
 }
@@ -450,8 +470,8 @@ fn read_user_lock_data(hashlock: b256) -> Option<UserLockData> {
 }
 
 #[storage(read)]
-fn read_solver_lock_data(hashlock: b256, index: u64) -> Option<SolverLockData> {
-    storage.solver_locks.get((hashlock, index)).try_read()
+fn read_solver_lock_data(hashlock: b256, solver: Identity) -> Option<SolverLockData> {
+    storage.solver_locks.get((hashlock, solver)).try_read()
 }
 
 #[storage(read)]
@@ -460,8 +480,8 @@ fn read_user_curve_data(hashlock: b256) -> Option<Bytes> {
 }
 
 #[storage(read)]
-fn read_solver_curve_data(hashlock: b256, index: u64) -> Option<Bytes> {
-    storage.solver_lock_curve_data.get((hashlock, index)).read_slice()
+fn read_solver_curve_data(hashlock: b256, solver: Identity) -> Option<Bytes> {
+    storage.solver_lock_curve_data.get((hashlock, solver)).read_slice()
 }
 
 /// Writes curve config bytes out-of-line, only if non-empty (an empty/`None` config never
@@ -474,9 +494,9 @@ fn write_user_curve_data(hashlock: b256, data: Bytes) {
 }
 
 #[storage(write)]
-fn write_solver_curve_data(hashlock: b256, index: u64, data: Bytes) {
+fn write_solver_curve_data(hashlock: b256, solver: Identity, data: Bytes) {
     if data.len() > 0 {
-        storage.solver_lock_curve_data.get((hashlock, index)).write_slice(data);
+        storage.solver_lock_curve_data.get((hashlock, solver)).write_slice(data);
     }
 }
 
@@ -506,9 +526,9 @@ fn to_public_user_lock(data: UserLockData, hashlock: b256) -> UserLock {
 
 /// Assemble the public `SolverLock` view; see `to_public_user_lock` above.
 #[storage(read)]
-fn to_public_solver_lock(data: SolverLockData, hashlock: b256, index: u64) -> SolverLock {
+fn to_public_solver_lock(data: SolverLockData, hashlock: b256, solver: Identity) -> SolverLock {
     let curve_data = if data.payout_curve.is_some() {
-        read_solver_curve_data(hashlock, index)
+        read_solver_curve_data(hashlock, solver)
     } else {
         None
     };
@@ -580,12 +600,18 @@ fn validate_user_lock_params(
     now
 }
 
-/// Shared validation for `solver_lock`. Solver locks have no quote expiry and no uniqueness
-/// check (a hashlock may hold many indexed solver locks), but add reward-leg checks. Returns
-/// `now` for reuse by the caller. (No `#[storage(...)]` attribute: unlike
-/// `validate_user_lock_params`, this never reads storage -- there is no "already exists" check
-/// for solver locks.)
+/// Shared validation for `solver_lock`, mirroring `validate_user_lock_params`. Solver locks
+/// have no quote expiry; uniqueness is per (hashlock, caller) -- a hashlock may hold locks
+/// from many DIFFERENT solvers, but a repeat by the same solver reverts
+/// `SolverLockAlreadyExists` (a PERMANENT retry/replay guard, see `solver_lock`'s ABI doc
+/// comment). Adds reward-leg checks. Runs before any state write -- and since Fuel forwards
+/// the coin atomically with the call (there is no separate "pull" step, unlike EVM's ERC20
+/// `transferFrom`), a revert here also hands the forwarded coin back untouched. Returns `now`
+/// for reuse by the caller.
+#[storage(read)]
 fn validate_solver_lock_params(
+    hashlock: b256,
+    caller: Identity,
     reward: u64,
     timelock_delta: u64,
     reward_timelock_delta: u64,
@@ -596,6 +622,13 @@ fn validate_solver_lock_params(
     asset_id: AssetId,
 ) -> u64 {
     let now = timestamp();
+    // The permanent per-solver uniqueness guard: at most one solver lock per (hashlock,
+    // caller), ever -- checked against the lock's EXISTENCE (not its status), so neither a
+    // refund nor a redeem ever lifts it.
+    require(
+        storage.solver_locks.get((hashlock, caller)).try_read().is_none(),
+        TrainError::SolverLockAlreadyExists,
+    );
     // A same-asset reward is bundled into the single forwarded coin (msg_amount() == principal +
     // reward), so guard the `msg_amount() - reward` subtraction; a different-asset reward is
     // funded separately (`attach_solver_reward`), so the forwarded coin IS the whole principal.
@@ -739,12 +772,14 @@ impl Train for Contract {
     ///     the `reward_funded` gate in `redeem_solver`/`refund_solver`.
     #[payable]
     #[storage(read, write)]
-    fn solver_lock(params: SolverLockParams, dst: DestinationInfo, data: Bytes) -> u64 {
+    fn solver_lock(params: SolverLockParams, dst: DestinationInfo, data: Bytes) {
         reentrancy_guard();
 
         let asset_id = msg_asset_id();
         let caller = msg_sender().unwrap();
         let now = validate_solver_lock_params(
+            params.hashlock,
+            caller,
             params.reward,
             params.timelock_delta,
             params.reward_timelock_delta,
@@ -766,9 +801,6 @@ impl Train for Contract {
         let timelock = now + params.timelock_delta;
         let reward_timelock = now + params.reward_timelock_delta;
 
-        let index = storage.solver_lock_count.get(params.hashlock).try_read().unwrap_or(0) + 1;
-        storage.solver_lock_count.insert(params.hashlock, index);
-
         let lock_data = SolverLockData {
             secret: 0,
             amount,
@@ -786,10 +818,10 @@ impl Train for Contract {
             reward_funded,
             payout_curve: params.payout_curve,
         };
-        storage.solver_locks.insert((params.hashlock, index), lock_data);
+        storage.solver_locks.insert((params.hashlock, caller), lock_data);
         write_solver_curve_data(
             params.hashlock,
-            index,
+            caller,
             params.payout_curve_data.unwrap_or(Bytes::new()),
         );
 
@@ -797,7 +829,6 @@ impl Train for Contract {
             hashlock: params.hashlock,
             sender: caller,
             recipient: params.recipient,
-            index,
             src_chain: params.src_chain,
             asset_id,
             amount,
@@ -813,16 +844,14 @@ impl Train for Contract {
             dst_token: dst.dst_token,
             data,
         });
-
-        index
     }
 
     #[payable]
     #[storage(read, write)]
-    fn attach_solver_reward(hashlock: b256, index: u64) -> bool {
+    fn attach_solver_reward(hashlock: b256, solver: Identity) -> bool {
         reentrancy_guard();
 
-        let existing = read_solver_lock_data(hashlock, index);
+        let existing = read_solver_lock_data(hashlock, solver);
         require(existing.is_some(), TrainError::LockNotFound);
         let mut lock = existing.unwrap();
         require(lock.status == LockStatus::Pending, TrainError::LockNotPending);
@@ -835,11 +864,11 @@ impl Train for Contract {
         );
 
         lock.reward_funded = true;
-        storage.solver_locks.insert((hashlock, index), lock);
+        storage.solver_locks.insert((hashlock, solver), lock);
 
         log(SolverRewardAttached {
             hashlock,
-            index,
+            solver,
             reward_asset_id: lock.reward_asset_id,
             reward: lock.reward,
         });
@@ -875,21 +904,21 @@ impl Train for Contract {
     }
 
     #[storage(read, write)]
-    fn refund_solver(hashlock: b256, index: u64) -> bool {
+    fn refund_solver(hashlock: b256, solver: Identity) -> bool {
         reentrancy_guard();
 
-        let existing = read_solver_lock_data(hashlock, index);
+        let existing = read_solver_lock_data(hashlock, solver);
         require(existing.is_some(), TrainError::LockNotFound);
         let mut lock = existing.unwrap();
         require(lock.status == LockStatus::Pending, TrainError::LockNotPending);
         require(timestamp() >= lock.timelock, TrainError::RefundNotAllowed);
 
         lock.status = LockStatus::Refunded;
-        storage.solver_locks.insert((hashlock, index), lock);
+        storage.solver_locks.insert((hashlock, solver), lock);
 
         log(SolverRefunded {
             hashlock,
-            index,
+            solver,
             refund_to: lock.refund_to,
             amount: lock.amount,
             reward: lock.reward,
@@ -961,10 +990,10 @@ impl Train for Contract {
     }
 
     #[storage(read, write)]
-    fn redeem_solver(hashlock: b256, index: u64, secret: u256) -> bool {
+    fn redeem_solver(hashlock: b256, solver: Identity, secret: u256) -> bool {
         reentrancy_guard();
 
-        let existing = read_solver_lock_data(hashlock, index);
+        let existing = read_solver_lock_data(hashlock, solver);
         require(existing.is_some(), TrainError::LockNotFound);
         let mut lock = existing.unwrap();
         require(sha256(secret) == hashlock, TrainError::HashlockMismatch);
@@ -972,7 +1001,7 @@ impl Train for Contract {
 
         lock.status = LockStatus::Redeemed;
         lock.secret = secret;
-        storage.solver_locks.insert((hashlock, index), lock);
+        storage.solver_locks.insert((hashlock, solver), lock);
 
         let now = timestamp();
         let redeemer = msg_sender().unwrap();
@@ -985,7 +1014,7 @@ impl Train for Contract {
         };
 
         let curve_data = if lock.payout_curve.is_some() {
-            read_solver_curve_data(hashlock, index)
+            read_solver_curve_data(hashlock, solver)
         } else {
             None
         };
@@ -997,7 +1026,7 @@ impl Train for Contract {
 
         log(SolverRedeemed {
             hashlock,
-            index,
+            solver,
             redeemer,
             secret,
             payout,
@@ -1028,16 +1057,11 @@ impl Train for Contract {
     }
 
     #[storage(read)]
-    fn get_solver_lock(hashlock: b256, index: u64) -> Option<SolverLock> {
-        match read_solver_lock_data(hashlock, index) {
-            Some(data) => Some(to_public_solver_lock(data, hashlock, index)),
+    fn get_solver_lock(hashlock: b256, solver: Identity) -> Option<SolverLock> {
+        match read_solver_lock_data(hashlock, solver) {
+            Some(data) => Some(to_public_solver_lock(data, hashlock, solver)),
             None => None,
         }
-    }
-
-    #[storage(read)]
-    fn get_solver_lock_count(hashlock: b256) -> u64 {
-        storage.solver_lock_count.get(hashlock).try_read().unwrap_or(0)
     }
 
     #[storage(read)]

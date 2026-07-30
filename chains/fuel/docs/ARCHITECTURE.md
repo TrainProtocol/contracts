@@ -33,11 +33,19 @@ either a wallet or a contract.
   `timelock_delta`, a `quote_expiry`, and an optional `payout_curve` +
   `payout_curve_data`. One user lock per hashlock (`SwapAlreadyExists`).
 - **Solver lock** (`solver_lock`): a solver locks the forwarded coin (minus an
-  optional `reward`) under the same `h`, indexed `1, 2, …` so multiple solvers
-  can compete (`get_solver_lock_count`/`get_solver_lock`). Carries its own
-  `timelock_delta`, `reward_timelock_delta`, `reward_recipient`, `refund_to`,
-  and optional `payout_curve`. The reward may be a **different asset** than the
-  principal — see "Different-asset solver reward" below.
+  optional `reward`) under the same `h`, keyed by **`(hashlock, solver)`** —
+  the caller's `Identity` — so multiple *different* solvers can still compete
+  under one hashlock, each in its own slot (`get_solver_lock(hashlock,
+  solver)`). At most **one solver lock per `(hashlock, solver)`, ever**: a
+  repeat `solver_lock` by the same caller under the same hashlock reverts
+  `SolverLockAlreadyExists` before any state is written (see the retry-safety
+  bullet under Security model below). There is no sequential index and no
+  count getter — `get_solver_lock` returning `None` *is* the "my lock never
+  landed" probe, and discovery of other solvers' locks is event-driven
+  (`SolverLocked`). Carries its own `timelock_delta`, `reward_timelock_delta`,
+  `reward_recipient`, `refund_to`, and optional `payout_curve`. The reward may
+  be a **different asset** than the principal — see "Different-asset solver
+  reward" below.
 - **Redeem** (`redeem_user` / `redeem_solver`): anyone presenting the correct
   `secret` (`sha256(secret) == hashlock`) redeems. The `payout` (curve-adjusted
   `amount`, or the full `amount` when no curve is set) goes to `recipient`;
@@ -162,6 +170,26 @@ the user.
   a zero `user` (`InvalidUser`). Checked via `is_zero_identity`, which
   compares against `Address::zero()`/`ContractId::zero()` depending on the
   `Identity` variant (there is no single universal "zero identity").
+- **Solver-lock retry/replay guard (one per `(hashlock, solver)`, permanent).**
+  Solver locks are keyed by `(hashlock, solver)` — the lock creator's
+  `Identity` — and a second `solver_lock` by the same caller under the same
+  hashlock reverts with the dedicated `SolverLockAlreadyExists` error before
+  any state is written; the revert also hands back the forwarded coin (Fuel
+  forwards it atomically with the call), so the rejected duplicate moves no
+  funds. This is what makes a *blind retry* safe: a solver whose RPC lied
+  about a submitted transaction ("not found") cannot double-fund the same
+  swap by resubmitting — without the guard, both locks would become
+  permissionlessly redeemable the moment the secret goes public, paying the
+  recipient twice and costing the solver the second escrow. The guard checks
+  the lock's *existence*, not its status, so it **never lifts** — not after a
+  refund, not after a redeem; a deliberate re-fill of the same hashlock
+  requires a different solver identity. Retry-safe infra flow: probe
+  `get_solver_lock(hashlock, my_identity)` (on several independent providers
+  if needed) — `None` means the lock never landed and a resubmit is safe;
+  `Some` means it landed and the "missing tx" was provider noise. Different
+  solvers each still get their own slot under one hashlock (multi-solver fill
+  is preserved). The old sequential index and `get_solver_lock_count` getter
+  are gone entirely; `solver_lock` returns nothing.
 - **Payout bound** `0 < payout <= amount` on every curve result
   (`InvalidPayout`), so `excess` never underflows.
 - **Timelock overflow guard**: `timelock_delta <= u64::max() - now` before
@@ -191,7 +219,7 @@ local node:
 | **CONS** | Across any single action, every actor's and the contract's balance changes by exactly the signed amount that action's own accounting expects; an untouched wallet shows a delta of precisely zero. |
 | **LWF** | A lock's `status` only ever transitions `Pending → {Redeemed, Refunded}`; a never-used hashlock stays `Empty`; once any `user_lock`/`user_lock_for` has succeeded under a hashlock, every later `user_lock` attempt under it reverts `SwapAlreadyExists` forever, even after redeem/refund. |
 | **PAG** | `get_user_locks`/`get_user_lock_hashes` never revert for any `(offset, limit)` pair. |
-| **SIDX** | For every hashlock with at least one solver lock, `get_solver_lock(hashlock, index)` returns `Some` for every `index` in `[1, count]` and `None` for `count + 1`. |
+| **SUNIQ** | Solver locks are keyed `(hashlock, solver)`, at most one per key, ever: every `(hashlock, solver)` the campaign created reads back `Some` (attributed to that solver), an identity that never locked reads back `None`, and a real duplicate `solver_lock` attempt by a lock's own creator always reverts `SolverLockAlreadyExists` — whatever the lock's current status (the guard survives refund and redeem). |
 
 ## Security considerations & trust assumptions
 
@@ -230,7 +258,8 @@ availability, or operational assumptions.
   - **Different asset**: `solver_lock` forwards only the principal
     (`msg_amount() == principal`) and records the reward as declared-but-
     unfunded (`reward_funded = false`); a follow-up `attach_solver_reward(
-    hashlock, index)` forwards exactly the declared `(reward_asset_id,
+    hashlock, solver)` — `solver` being the lock creator's `Identity` —
+    forwards exactly the declared `(reward_asset_id,
     reward)` and flips `reward_funded` true (`RewardAlreadyFunded` /
     `RewardAssetMismatch` guard against double-funding and wrong coins). It is
     permissionless — anyone may fund the declared reward on the solver's
@@ -265,7 +294,7 @@ availability, or operational assumptions.
     .solver_lock(params, dst, data)
     .callParams({ forward: [amount, assetId] });        // asset A
   const attachScope = train.functions
-    .attach_solver_reward(hashlock, index)
+    .attach_solver_reward(hashlock, solverIdentity)     // the caller's own Identity
     .callParams({ forward: [reward, rewardAssetId] });  // asset B
   await train.multiCall([lockScope, attachScope]).call();
   ```
@@ -305,7 +334,10 @@ Fuel Sepolia run:
   - `trainCore.test.ts` — the core HTLC state machine and guards (lock,
     redeem, refund, reward-timelock boundary, refund asymmetry, hashlock
     mismatch, payout-curve identity path, `user_lock_for` attribution,
-    windowed pagination).
+    windowed pagination, and the per-`(hashlock, solver)` uniqueness guard —
+    duplicate `solver_lock` reverts with no funds moved, the guard survives
+    refund/redeem, a different solver still locks fine, and `get_solver_lock`
+    returns `None` for a never-locked identity).
   - `harnessSmoke.test.ts` — a minimal round-trip smoke test validating the
     shared test-harness plumbing itself.
   - `sponsoredTx.test.ts` — Rail 1 (sponsored transaction), including the
@@ -319,7 +351,7 @@ Fuel Sepolia run:
   (`scripts/lib/invariant/invariant.test.ts`): a
   bespoke, hand-built driver (no reusable Echidna/Medusa harness exists for
   Sway) running bounded-length random action sequences against a real node
-  and checking the SOLV/CONS/LWF/PAG/SIDX properties above after every step.
+  and checking the SOLV/CONS/LWF/PAG/SUNIQ properties above after every step.
 - **Fuel Sepolia end-to-end run** (`scripts/testnet-e2e.ts`): every flow this
   port supports — user lock, user lock with a payout curve, refund by
   recipient before timelock, refund by a third party after timelock,
@@ -329,13 +361,25 @@ Fuel Sepolia run:
   the principal paid in the base asset and the reward in a distinct
   `test_asset`), and Rail 1 sponsored `user_lock_for` — each with a happy path
   plus adversarial/validation failure cases (including the different-asset
-  negatives: `RewardAssetMismatch`, `RewardAlreadyFunded`, `LockNotFound`), and
+  negatives: `RewardAssetMismatch`, `RewardAlreadyFunded`, `LockNotFound`, and
+  the solver double-lock guard negatives — a duplicate `solver_lock` by the
+  same solver, and a re-lock by the same solver after its lock was refunded,
+  both rejected `SolverLockAlreadyExists`), and
   every actor role on its own distinct address. Run against real deployed
   contracts on Fuel Sepolia (provider `https://testnet.fuel.network/v1/graphql`),
-  targeting (2026-07-24 redeploy; see `DEPLOYMENTS.md` and `reports/`):
-  - Train: `0x869027a726e61ee274e9612b8fbccafa7188e1d73f47dec76aeba4a778964b68`
+  targeting (2026-07-30 redeploy carrying the identity-keyed solver-lock API;
+  105 report rows, 37 mined txs, 20 expected pre-flight rejections, 0 failures
+  — see `DEPLOYMENTS.md` and
+  `reports/testnet-e2e-2026-07-30T14-06-30-026Z.md`):
+  - Train: `0x445464bf4d8f2ad1cdffefa8345438f6769c44fc4aedf0eb9c2e34f5756f5750`
+    (deploy tx
+    `0x89ef685f04e462507d516ff3801c486276b898fee7eff3aac548a672fce1f247`;
+    supersedes the 2026-07-24 pre-guard deployment at `0x869027…78964b68`)
   - ConstantPayoutCurve: `0xfc598e7d022590a0eecc2f58c9ba865ace7c2ca5acae881dced5f2dbb37eb33b`
+    (bytecode untouched by the rework — reused at its existing address)
 
   The different-asset reward is now proven on-chain against a real second asset,
   not only in the local suite. The gasless rail is likewise proven only
   on-chain, against real wallets, rather than with any mocked signer or node.
+  The per-`(hashlock, solver)` uniqueness guard is likewise proven against the
+  live deployment, not only locally.

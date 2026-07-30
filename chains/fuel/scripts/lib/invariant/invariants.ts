@@ -1,5 +1,5 @@
 /**
- * The invariant checks themselves (SOLV/CONS/LWF/PAG/SIDX -- see `docs/ARCHITECTURE.md`'s
+ * The invariant checks themselves (SOLV/CONS/LWF/PAG/SUNIQ -- see `docs/ARCHITECTURE.md`'s
  * invariant table for the one-line description of each). Every function here asserts (via `node:assert/
  * strict`) against REAL on-chain state (`../testHarness`'s view getters, `provider.
  * getContractBalance`, `wallet.getBalance`) -- nothing here is checked against the shadow model
@@ -10,15 +10,18 @@ import assert from 'node:assert/strict';
 import { bn } from 'fuels';
 
 import {
+  callSolverLock,
   callUserLock,
   getSolverLock,
-  getSolverLockCount,
   getUserLock,
   getUserLockHashes,
   getUserLocks,
   identityFromAccount,
+  identityFromAddress,
   makeDestinationInfo,
+  makeSolverLockParams,
   makeUserLockParams,
+  randomHashlock,
   type IdentityInput,
   type TestEnvironment,
 } from '../testHarness';
@@ -121,19 +124,20 @@ export async function assertUserLockStatus(
 export async function assertSolverLockStatus(
   env: TestEnvironment,
   hashlock: string,
-  index: number,
+  solverIdx: number,
   expectedStatus: ShadowLockStatus,
   actionNote: string,
 ): Promise<void> {
-  const lock = (await getSolverLock(env.train, hashlock, index)) as { status: string } | null;
+  const solver = identityFromAccount(env.wallets[solverIdx]);
+  const lock = (await getSolverLock(env.train, hashlock, solver)) as { status: string } | null;
   assert.ok(
     lock,
-    `LWF violated after (${actionNote}): get_solver_lock(${hashlock}, ${index}) returned None (expected status ${expectedStatus})`,
+    `LWF violated after (${actionNote}): get_solver_lock(${hashlock}, wallets[${solverIdx}]) returned None (expected status ${expectedStatus})`,
   );
   assert.equal(
     lock.status,
     statusToWireString(expectedStatus),
-    `LWF violated after (${actionNote}): hashlock=${hashlock} index=${index} expected status ${expectedStatus}, on-chain status is ${lock.status}`,
+    `LWF violated after (${actionNote}): hashlock=${hashlock} solver=wallets[${solverIdx}] expected status ${expectedStatus}, on-chain status is ${lock.status}`,
   );
 }
 
@@ -209,36 +213,73 @@ export async function assertPaginationNeverReverts(
   }
 }
 
-// ───────────────────────────── SIDX ─────────────────────────────
+// ───────────────────────────── SUNIQ ─────────────────────────────
 
-/** SIDX: for a hashlock with `count` solver locks, `get_solver_lock(hashlock, i)` must be `Some`
- * for every `i` in `[1, count]` and `None` for `i = count + 1`. */
-export async function assertSolverIndexBounds(
+/** SUNIQ: solver locks are keyed by `(hashlock, solver identity)`, at most ONE per key, EVER.
+ * Verified three ways against real chain state:
+ *   1. every (hashlock, solver) the shadow model knows about reads back `Some` -- and the
+ *      identity-keyed read returns THAT solver's own lock (`sender` round-trips);
+ *   2. an identity that never locked under `hashlock` reads back `None` (the solver's
+ *      idempotency probe: "did my lock land?");
+ *   3. a REAL duplicate `solver_lock` attempt by the touched lock's own creator reverts
+ *      `SolverLockAlreadyExists` -- probed with an actual expected-to-revert call (mirroring
+ *      `assertSwapAlreadyExists`), regardless of the lock's current status, since the guard is
+ *      permanent (never lifted by refund or redeem). */
+export async function assertSolverLockUniqueness(
   env: TestEnvironment,
   model: ShadowModel,
+  assetId: string,
   hashlock: string,
+  touchedSolverIdx: number,
   actionNote: string,
 ): Promise<void> {
-  const expectedCount = model.solverLockCount.get(hashlock) ?? 0;
-  const actualCount = Number(await getSolverLockCount(env.train, hashlock));
-  assert.equal(
-    actualCount,
-    expectedCount,
-    `SIDX violated after (${actionNote}): get_solver_lock_count(${hashlock})=${actualCount}, shadow model expects ${expectedCount}`,
-  );
+  const bySolver = model.solverLocks.get(hashlock) ?? new Map();
 
-  for (let idx = 1; idx <= expectedCount; idx += 1) {
-    const lock = await getSolverLock(env.train, hashlock, idx);
+  // (1) every known (hashlock, solver) is Some, and attributed to the right solver.
+  for (const solverIdx of bySolver.keys()) {
+    const wallet = env.wallets[solverIdx];
+    const lock = (await getSolverLock(env.train, hashlock, identityFromAccount(wallet))) as {
+      sender: { Address?: { bits: string }; ContractId?: { bits: string } };
+    } | null;
     assert.ok(
       lock,
-      `SIDX violated after (${actionNote}): get_solver_lock(${hashlock}, ${idx}) returned None, but 1 <= ${idx} <= count=${expectedCount}`,
+      `SUNIQ violated after (${actionNote}): get_solver_lock(${hashlock}, wallets[${solverIdx}]) returned None for a lock this run created`,
+    );
+    const senderBits = (lock.sender.Address?.bits ?? lock.sender.ContractId?.bits ?? '').toLowerCase();
+    assert.equal(
+      senderBits,
+      wallet.address.toB256().toLowerCase(),
+      `SUNIQ violated after (${actionNote}): get_solver_lock(${hashlock}, wallets[${solverIdx}]).sender is not wallets[${solverIdx}] itself`,
     );
   }
 
-  const beyond = await getSolverLock(env.train, hashlock, expectedCount + 1);
+  // (2) a never-used identity reads back None under this same hashlock.
+  const neverLocked = await getSolverLock(env.train, hashlock, identityFromAddress(randomHashlock()));
   assert.equal(
-    beyond,
+    neverLocked,
     null,
-    `SIDX violated after (${actionNote}): get_solver_lock(${hashlock}, ${expectedCount + 1}) returned Some, expected None (count=${expectedCount})`,
+    `SUNIQ violated after (${actionNote}): get_solver_lock(${hashlock}, <never-used identity>) returned Some, expected None`,
+  );
+
+  // (3) the permanent one-per-(hashlock, solver) guard: a real duplicate attempt by the touched
+  // lock's creator must revert SolverLockAlreadyExists, whatever the lock's status is now.
+  const dupSolver = env.wallets[touchedSolverIdx];
+  const dupParams = makeSolverLockParams({
+    hashlock,
+    recipient: identityFromAccount(dupSolver),
+    assetId,
+  });
+  await assert.rejects(
+    () =>
+      callSolverLock({
+        train: env.train,
+        caller: dupSolver,
+        assetId,
+        amount: 1,
+        params: dupParams,
+        dst: makeDestinationInfo(),
+      }),
+    /SolverLockAlreadyExists/,
+    `SUNIQ violated after (${actionNote}): a second solver_lock by wallets[${touchedSolverIdx}] under already-used hashlock=${hashlock} did not revert SolverLockAlreadyExists`,
   );
 }

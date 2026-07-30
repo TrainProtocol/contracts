@@ -1,9 +1,9 @@
 # Train Protocol (Fuel) — Contract Deployments
 
-**Deployed from:** branch `main-add-fuel`, working tree atop commit `519feed`
-(the port itself — `train`/`interfaces`/`payout_curve`, the deploy tooling, and
-the test suite — is uncommitted at the time of this deployment; see
-`git status`).
+**Deployed from:** branch `main-add-fuel`, working tree atop commit `3f7e036`
+(the solver double-lock guard rework — identity-keyed solver locks,
+`SolverLockAlreadyExists` — was uncommitted at the moment of this deployment
+and committed immediately after, in the same change set as this file).
 **Toolchain used to build the deployed bytecode:** `forc` 0.68.7 / `std`
 v0.68.7 (the `train` fuelup toolchain), `fuels` (fuels-ts) `^0.103.0`; the deploy
 transactions were sent through fuels-ts 0.103.0. `sway_libs` is **not** a
@@ -12,9 +12,11 @@ dependency — its only used symbol, `reentrancy_guard`, is vendored verbatim in
 forc/std > 0.67). This matches exactly what a fresh `forc build` reproduces today.
 **Deployment salt seed:** `train.protocol.v2.fuel` (default; see
 "Determinism & salt convention" below).
-**Last updated:** 2026-07-24 (redeployed `Train` after four security-review
-fixes to `train/src/main.sw` changed its bytecode; `ConstantPayoutCurve` was
-unchanged and reused at its existing address — see the deploy note below).
+**Last updated:** 2026-07-30 (redeployed `Train` after the solver double-lock
+guard rework — solver locks re-keyed to `(hashlock, solver)` with a permanent
+`SolverLockAlreadyExists` uniqueness guard, index/count API removed — changed
+its bytecode; `ConstantPayoutCurve` was unchanged and reused at its existing
+address — see the deploy note below).
 
 ## What Fuel's determinism guarantee actually is
 
@@ -69,7 +71,7 @@ the same network any number of times.
 
 | Component | Address | Deploy tx |
 |---|---|---|
-| `Train` | `0x869027a726e61ee274e9612b8fbccafa7188e1d73f47dec76aeba4a778964b68` | `0xd3d33340f68b7898ccdca41c71e78662c375944abcf3a0a58d58f147799b165a` |
+| `Train` | `0x445464bf4d8f2ad1cdffefa8345438f6769c44fc4aedf0eb9c2e34f5756f5750` | `0x89ef685f04e462507d516ff3801c486276b898fee7eff3aac548a672fce1f247` |
 | `ConstantPayoutCurve` | `0xfc598e7d022590a0eecc2f58c9ba865ace7c2ca5acae881dced5f2dbb37eb33b` | `0xbdddc9be5a38c92c9062a02f67c85f3ca314adbfa9e5d7c99395be1cd83ad2e9` |
 
 - **Network:** Fuel Sepolia Testnet
@@ -78,18 +80,24 @@ the same network any number of times.
   `https://app-testnet.fuel.network/tx/<txId>` for a transaction,
   or the contract address path for a contract)
 - **Deployed via:** `scripts/deploy.ts`'s `deployAll` (deterministic salt,
-  idempotent). In this redeploy **only `Train` was freshly deployed** — four
-  security-review fixes to `train/src/main.sw` (removing the dead
-  `TrainError::InvalidToken` variant, which changed the error-enum layout, plus
-  an unconditional `reward_timelock_delta` overflow guard) changed its bytecode
-  root, so its deterministic contract ID changed and the prior `Train` address
-  (`0x72e9bc…61168c1b`) is superseded. `ConstantPayoutCurve` was **not** touched
-  by those fixes: its bytecode is byte-identical, so `deployAll` predicted the
-  same contract ID, found it already on-chain, and reused it (its deploy tx above
-  is the original deploy of that unchanged bytecode, still live).
-- **Status:** live, verified end-to-end on 2026-07-24 (103 report rows, 37 mined
-  txs, 18 expected reverts, 0 failures; see the report under `reports/` and
-  `docs/ARCHITECTURE.md`'s Testing section for the run breakdown).
+  idempotent). In this redeploy **only `Train` was freshly deployed** — the
+  solver double-lock guard rework of `train/src/main.sw` (solver locks re-keyed
+  from `(hashlock, index)` to `(hashlock, solver Identity)`, a permanent
+  `SolverLockAlreadyExists` per-solver uniqueness guard, deletion of the
+  `solver_lock_count` map/getter, and the identity-keyed
+  `redeem_solver`/`refund_solver`/`attach_solver_reward`/`get_solver_lock` API)
+  changed its bytecode root, so its deterministic contract ID changed and the
+  prior `Train` address (`0x869027…78964b68`, 2026-07-24) is superseded.
+  `ConstantPayoutCurve` was **not** touched by the rework: its bytecode is
+  byte-identical, so `deployAll` predicted the same contract ID, found it
+  already on-chain, and reused it (its deploy tx above is the original deploy
+  of that unchanged bytecode, still live).
+- **Status:** live, verified end-to-end on 2026-07-30 (105 report rows, 37 mined
+  txs, 20 expected pre-flight rejections — including the two new
+  `SolverLockAlreadyExists` negatives: a duplicate `solver_lock` by the same
+  solver, and a re-lock by the same solver after its lock was refunded — and
+  0 failures; see the report under `reports/` and `docs/ARCHITECTURE.md`'s
+  Testing section for the run breakdown).
 
 > **`test_asset` (e2e fixture, not part of the protocol).** The Sepolia e2e run
 > also deploys a throwaway `test_asset` contract — a minimal permissionless
@@ -98,7 +106,7 @@ the same network any number of times.
 > redeployed with a random salt on every run (no stable address, mints no real
 > value) and is deliberately **not** listed in the tables above as a protocol
 > contract. The most recent run's instance was
-> `0xc12e96e9cf8e261fd14b3846f4b64150b4edde7413c4773d2997695e95a16641`.
+> `0x41cd620129d3bfd61c199b8007f474deddeee81261c3843968dfcf5c5c5d4bf8`.
 - **Source verification:** Fuel has **no** contract source-verification
   feature — there is no Etherscan/Voyager-style verify-and-publish, no
   `forc verify`, and no Sourcify equivalent (tracked upstream as the still-open
@@ -117,7 +125,7 @@ Not deployed.
 
 | Network | Train | ConstantPayoutCurve | Status |
 |---|---|---|---|
-| Fuel Sepolia | `0x869027…78964b68` | `0xfc598e…b37eb33b` | Deployed, e2e-verified |
+| Fuel Sepolia | `0x445464…756f5750` | `0xfc598e…b37eb33b` | Deployed, e2e-verified |
 | Fuel Mainnet | — | — | Not deployed |
 
 ## Operational notes
