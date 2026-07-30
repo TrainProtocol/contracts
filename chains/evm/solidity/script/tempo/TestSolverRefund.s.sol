@@ -17,10 +17,10 @@ contract TestSolverRefund is TempoConfig {
     bytes32 hs = _hashlock(ss);
 
     vm.startBroadcast(userPk);
-    uint256 idx = train.solverLock(_solverParamsT(hs, 60), _dstT(), '');
+    train.solverLock(_solverParamsT(hs, 60), _dstT(), '');
     vm.stopBroadcast();
 
-    console.log('Locked solver lock with a 60s timelock, index:', idx);
+    console.log('Locked solver lock with a 60s timelock, solver:', user);
     console.log('Wait ~60s, then run TestSolverRefundClaim with the SAME REFUND_SALT.');
     console.log('  solver hashlock:', vm.toString(hs));
   }

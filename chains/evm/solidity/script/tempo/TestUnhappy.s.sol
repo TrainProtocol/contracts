@@ -6,19 +6,21 @@ import { TempoConfig } from './TempoConfig.s.sol';
 import { Train } from '../../src/tempo/Train.sol';
 
 /// @notice Negative-path scenarios on Tempo: wrong-secret redeem (`HashlockMismatch`),
-///         double-redeem (`LockNotPending`), and an early non-recipient refund attempt
-///         (`RefundNotAllowed`). Each attempt is a plain `.call` (not the typed interface) with an
-///         explicit gas stipend, so forge records a fixed gas limit instead of calling
-///         `eth_estimateGas` (which would itself revert) -- letting the deliberately-reverting
-///         transaction actually broadcast. `forge script --broadcast` still halts the whole run
-///         the moment any transaction it sends reverts on-chain (there's no "expected revert,
-///         continue anyway" flag), so each scenario is its own entrypoint, run as three separate
-///         `--sig` invocations rather than one `run()` -- a revert in scenario 1 must not block
-///         scenarios 2 and 3 from broadcasting. Broadcast as the user.
+///         double-redeem (`LockNotPending`), an early non-recipient refund attempt
+///         (`RefundNotAllowed`), and a same-solver duplicate `solverLock`
+///         (`SolverLockAlreadyExists` — the v3 double-funding guard). Each attempt is a plain
+///         `.call` (not the typed interface) with an explicit gas stipend, so forge records a
+///         fixed gas limit instead of calling `eth_estimateGas` (which would itself revert) --
+///         letting the deliberately-reverting transaction actually broadcast. `forge script
+///         --broadcast` still halts the whole run the moment any transaction it sends reverts
+///         on-chain (there's no "expected revert, continue anyway" flag), so each scenario is its
+///         own entrypoint, run as separate `--sig` invocations rather than one `run()` -- a revert
+///         in scenario 1 must not block the later scenarios from broadcasting. Broadcast as the user.
 /// @dev $env:FOUNDRY_PROFILE="tempo"
-///   forge script script/tempo/TestUnhappy.s.sol --sig 'wrongSecret()'  --rpc-url tempo_testnet --broadcast --skip-simulation
-///   forge script script/tempo/TestUnhappy.s.sol --sig 'doubleRedeem()' --rpc-url tempo_testnet --broadcast --skip-simulation
-///   forge script script/tempo/TestUnhappy.s.sol --sig 'earlyRefund()'  --rpc-url tempo_testnet --broadcast --skip-simulation
+///   forge script script/tempo/TestUnhappy.s.sol --sig 'wrongSecret()'         --rpc-url tempo_testnet --broadcast --skip-simulation
+///   forge script script/tempo/TestUnhappy.s.sol --sig 'doubleRedeem()'        --rpc-url tempo_testnet --broadcast --skip-simulation
+///   forge script script/tempo/TestUnhappy.s.sol --sig 'earlyRefund()'         --rpc-url tempo_testnet --broadcast --skip-simulation
+///   forge script script/tempo/TestUnhappy.s.sol --sig 'duplicateSolverLock()' --rpc-url tempo_testnet --broadcast --skip-simulation
 contract TestUnhappy is TempoConfig {
   /// [1] Wrong-secret redeem — create a normal lock, then redeem with a secret that does not
   ///     hash to its hashlock.
@@ -65,6 +67,26 @@ contract TestUnhappy is TempoConfig {
     _logRevertReason(ret3);
   }
 
+  /// [4] Same-solver duplicate solverLock — the v3 retry/double-funding guard. The first
+  ///     solverLock succeeds; an identical retry by the same solver under the same hashlock must
+  ///     revert with SolverLockAlreadyExists BEFORE pulling any funds (solver locks are keyed by
+  ///     (hashlock, solver) and the guard never lifts).
+  function duplicateSolverLock() external {
+    _load();
+    uint256 s4 = _secret('unhappy-duplicate-solver');
+    bytes32 h4 = _hashlock(s4);
+    uint256 balBefore = PATH_USD.balanceOf(user);
+    vm.startBroadcast(userPk);
+    train.solverLock(_solverParamsT(h4, 3600), _dstT(), ''); // first lock succeeds
+    (bool ok4, bytes memory ret4) =
+      address(train).call{ gas: 300_000 }(abi.encodeCall(train.solverLock, (_solverParamsT(h4, 3600), _dstT(), '')));
+    vm.stopBroadcast();
+    console.log('[4] duplicate solverLock (same solver, same hashlock) reverted as expected:', !ok4);
+    _logRevertReason(ret4);
+    console.log('    pathUSD spent by the reverted retry (must be 0 beyond the first lock):');
+    console.log('    balance delta (6dp):', balBefore - PATH_USD.balanceOf(user));
+  }
+
   /// @dev Decodes a custom-error selector out of low-level call return data, if present, for
   ///      readable console output (forge doesn't auto-decode custom errors from raw call results).
   function _logRevertReason(bytes memory ret) internal pure {
@@ -79,6 +101,8 @@ contract TestUnhappy is TempoConfig {
       console.log('    reason: LockNotPending()');
     } else if (selector == Train.RefundNotAllowed.selector) {
       console.log('    reason: RefundNotAllowed()');
+    } else if (selector == Train.SolverLockAlreadyExists.selector) {
+      console.log('    reason: SolverLockAlreadyExists()');
     } else {
       console.log('    reason: unrecognized selector', vm.toString(selector));
     }

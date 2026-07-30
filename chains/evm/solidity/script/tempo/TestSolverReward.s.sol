@@ -20,11 +20,11 @@ contract TestSolverReward is TempoConfig {
     uint256 s1 = _secret('solver-reward-before');
     bytes32 h1 = _hashlock(s1);
     vm.startBroadcast(userPk);
-    uint256 idx1 = train.solverLock(_solverParamsT(h1, 3600), _dstT(), '');
-    train.redeemSolver(h1, idx1, s1);
+    train.solverLock(_solverParamsT(h1, 3600), _dstT(), '');
+    train.redeemSolver(h1, user, s1);
     vm.stopBroadcast();
-    Train.SolverLock memory lock1 = train.getSolverLock(h1, idx1);
-    console.log('[1] redeemSolver before rewardTimelock OK, index:', idx1);
+    Train.SolverLock memory lock1 = train.getSolverLock(h1, user);
+    console.log('[1] redeemSolver before rewardTimelock OK, solver:', user);
     console.log('    lock.rewardRecipient:', lock1.rewardRecipient);
     console.log('    lock.status         :', uint256(lock1.status)); // 3 = Redeemed
 
@@ -35,10 +35,10 @@ contract TestSolverReward is TempoConfig {
     uint256 s2 = _secret('solver-reward-after');
     bytes32 h2 = _hashlock(s2);
     vm.startBroadcast(userPk);
-    uint256 idx2 = train.solverLock(_solverParamsT(h2, 1), _dstT(), '');
-    train.redeemSolver(h2, idx2, s2);
+    train.solverLock(_solverParamsT(h2, 1), _dstT(), '');
+    train.redeemSolver(h2, user, s2);
     vm.stopBroadcast();
-    console.log('[2] redeemSolver at/after rewardTimelock OK, index:', idx2);
+    console.log('[2] redeemSolver at/after rewardTimelock OK, solver:', user);
     console.log('    (reward routed to redeemer branch - rewardTimelock had already elapsed)');
   }
 }

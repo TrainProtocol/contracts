@@ -18,7 +18,7 @@ contract TestSolverRefundClaim is TempoConfig {
 
     uint256 balBefore = PATH_USD.balanceOf(user);
     vm.startBroadcast(userPk);
-    train.refundSolver(hs, 1); // index 1 = first (only) solver lock for this hashlock
+    train.refundSolver(hs, user); // solver locks are keyed by solver address; the lock was created by user
     vm.stopBroadcast();
 
     console.log('Refunded solver lock (amount + reward) to refundTo = user.');

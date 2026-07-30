@@ -45,9 +45,9 @@ abstract contract TrainHandler is Properties {
         uint48 tld = uint48(clampBetween(tldSeed, 2, MAX_TIMELOCK));
         (uint256 s, bytes32 hl) = _freshLock();
         vm.prank(actor);
-        try train.solverLock(_solverParams(hl, amount, reward, tld), _dst(), "") returns (uint256 idx) {
-            solverRefs.push(SolverRef(hl, idx, s));
-            _propSolverLockCreated(hl, idx, amount, reward);
+        try train.solverLock(_solverParams(hl, amount, reward, tld), _dst(), "") {
+            solverRefs.push(SolverRef(hl, actor, s));
+            _propSolverLockCreated(hl, actor, amount, reward);
         } catch {}
     }
 
@@ -83,9 +83,22 @@ abstract contract TrainHandler is Properties {
         Train.SolverLockParams memory p = _solverParams(hl, amount, reward, tld);
         p.payoutCurve = curve;
         vm.prank(actor);
-        try train.solverLock(p, _dst(), "") returns (uint256 idx) {
-            solverRefs.push(SolverRef(hl, idx, s));
-            _propSolverLockCreated(hl, idx, amount, reward);
+        try train.solverLock(p, _dst(), "") {
+            solverRefs.push(SolverRef(hl, actor, s));
+            _propSolverLockCreated(hl, actor, amount, reward);
+        } catch {}
+    }
+
+    /// @dev [DUP] At most ONE solver lock per (hashlock, solver), ever: replaying solverLock as the
+    ///      recorded creator under the same hashlock must always revert (SolverLockAlreadyExists),
+    ///      even after the original lock was redeemed or refunded. The catch is the expected path.
+    function handler_solverLockDuplicateReverts(uint256 pick) public {
+        if (solverRefs.length == 0) return;
+        SolverRef storage ref = solverRefs[pick % solverRefs.length];
+        Train.SolverLockParams memory p = _solverParams(ref.hashlock, 1, 0, 2);
+        vm.prank(ref.solver);
+        try train.solverLock(p, _dst(), "") {
+            t(false, "DUP: duplicate solverLock by same solver did not revert");
         } catch {}
     }
 
@@ -107,7 +120,7 @@ abstract contract TrainHandler is Properties {
     function handler_redeemSolver(uint256 pick, uint256 actorSeed) public {
         if (solverRefs.length == 0) return;
         SolverRef storage ref = solverRefs[pick % solverRefs.length];
-        Train.SolverLock memory l = train.getSolverLock(ref.hashlock, ref.index);
+        Train.SolverLock memory l = train.getSolverLock(ref.hashlock, ref.solver);
         if (l.status != Train.LockStatus.Pending) return;
         actor = actors[actorSeed % actors.length];
         uint256 recipBefore = token.balanceOf(recipientAddr);
@@ -116,7 +129,7 @@ abstract contract TrainHandler is Properties {
         uint256 callerBefore = token.balanceOf(actor);
         uint256 ts = block.timestamp;
         vm.prank(actor);
-        try train.redeemSolver(ref.hashlock, ref.index, ref.secret) {
+        try train.redeemSolver(ref.hashlock, ref.solver, ref.secret) {
             _propSolverRedeemed(
                 recipBefore, refundBefore, rewardBefore, callerBefore, actor, l.amount, l.reward, l.rewardTimelock, ts, l.payoutCurve
             );
@@ -157,14 +170,14 @@ abstract contract TrainHandler is Properties {
     function handler_refundSolver(uint256 pick, uint256 actorSeed) public {
         if (solverRefs.length == 0) return;
         SolverRef storage ref = solverRefs[pick % solverRefs.length];
-        Train.SolverLock memory l = train.getSolverLock(ref.hashlock, ref.index);
+        Train.SolverLock memory l = train.getSolverLock(ref.hashlock, ref.solver);
         if (l.status != Train.LockStatus.Pending) return;
         if (block.timestamp <= l.timelock) skipTime(uint256(l.timelock) - block.timestamp + 1);
         actor = actors[actorSeed % actors.length];
         uint256 refundBefore = token.balanceOf(refundAddr);
         uint256 callerBefore = token.balanceOf(actor);
         vm.prank(actor);
-        try train.refundSolver(ref.hashlock, ref.index) {
+        try train.refundSolver(ref.hashlock, ref.solver) {
             _propSolverRefunded(refundBefore, callerBefore, actor, l.amount, l.reward);
         } catch {}
     }

@@ -14,7 +14,7 @@ import '../mocks/TestToken.sol';
 ///          `testFuzz_solverLock_mixedTokens_erc20Amount_ethReward` (the "one leg native" mixed-token
 ///          case cannot occur on Tempo — every token is ERC20/TIP-20).
 ///      Everywhere else NATIVE_ETH was used purely as convenience funding for token-agnostic logic
-///      (quote-expiry boundary, redeem/refund roundtrips, reward routing, solver-lock count, paginated
+///      (quote-expiry boundary, redeem/refund roundtrips, reward routing, per-solver locks, paginated
 ///      getters), it is switched to the ERC20 `token` fixture (same-token amount+reward where the
 ///      original used ETH for both legs) rather than dropped.
 contract TrainFuzzTest is Test {
@@ -271,13 +271,13 @@ contract TrainFuzzTest is Test {
     );
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _dst(), '');
+    train.solverLock(params, _dst(), '');
 
     uint256 receiverBalanceBefore = token.balanceOf(receiver);
     uint256 rewardRecipientBefore = token.balanceOf(rewardRecipient);
 
     vm.prank(relayer);
-    train.redeemSolver(hashlock, index, secret);
+    train.redeemSolver(hashlock, solver, secret);
 
     assertEq(token.balanceOf(receiver), receiverBalanceBefore + amount);
     assertEq(token.balanceOf(rewardRecipient), rewardRecipientBefore + reward);
@@ -310,7 +310,7 @@ contract TrainFuzzTest is Test {
     );
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _dst(), '');
+    train.solverLock(params, _dst(), '');
 
     // rewardTimelock = block.timestamp + rewardTimelockDelta
     // Warp past the rewardTimelock
@@ -320,7 +320,7 @@ contract TrainFuzzTest is Test {
     uint256 relayerBalanceBefore = token.balanceOf(relayer);
 
     vm.prank(relayer);
-    train.redeemSolver(hashlock, index, secret);
+    train.redeemSolver(hashlock, solver, secret);
 
     assertEq(token.balanceOf(receiver), receiverBalanceBefore + amount);
     assertEq(token.balanceOf(relayer), relayerBalanceBefore + reward);
@@ -351,14 +351,14 @@ contract TrainFuzzTest is Test {
     );
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _dst(), '');
+    train.solverLock(params, _dst(), '');
 
     vm.warp(block.timestamp + timelockDelta + 1);
 
     uint256 solverBalanceBefore = token.balanceOf(solver);
 
     vm.prank(receiver);
-    train.refundSolver(hashlock, index);
+    train.refundSolver(hashlock, solver);
 
     assertEq(token.balanceOf(solver), solverBalanceBefore + amount + reward);
   }
@@ -387,7 +387,7 @@ contract TrainFuzzTest is Test {
     uint256 contractTokenBefore = token.balanceOf(address(train));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _dst(), '');
+    train.solverLock(params, _dst(), '');
 
     assertEq(token.balanceOf(solver), solverTokenBefore - amount - reward);
     assertEq(token.balanceOf(address(train)), contractTokenBefore + amount + reward);
@@ -395,12 +395,12 @@ contract TrainFuzzTest is Test {
     uint256 receiverTokenBefore = token.balanceOf(receiver);
 
     vm.prank(relayer);
-    train.redeemSolver(hashlock, index, secret);
+    train.redeemSolver(hashlock, solver, secret);
 
     assertEq(token.balanceOf(receiver), receiverTokenBefore + amount + reward);
   }
 
-  function testFuzz_solverLockCount_increments(uint8 locks) public {
+  function testFuzz_solverLock_manySolvers_sameHashlock(uint8 locks) public {
     locks = uint8(bound(locks, 1, 8));
     bytes32 hashlock = sha256(abi.encodePacked(uint256(12345)));
 
@@ -416,12 +416,21 @@ contract TrainFuzzTest is Test {
     );
 
     for (uint256 i = 0; i < locks; i++) {
-      vm.prank(solver);
-      uint256 index = train.solverLock(params, _dst(), '');
-      assertEq(index, i + 1);
+      address freshSolver = makeAddr(string.concat('solver', vm.toString(i)));
+      token.mint(freshSolver, 1 ether);
+      vm.prank(freshSolver);
+      token.approve(address(train), type(uint256).max);
+
+      vm.prank(freshSolver);
+      train.solverLock(params, _dst(), '');
     }
 
-    assertEq(train.getSolverLockCount(hashlock), locks);
+    for (uint256 i = 0; i < locks; i++) {
+      address freshSolver = makeAddr(string.concat('solver', vm.toString(i)));
+      Train.SolverLock memory lock = train.getSolverLock(hashlock, freshSolver);
+      assertEq(lock.sender, freshSolver);
+      assertEq(uint8(lock.status), uint8(Train.LockStatus.Pending));
+    }
   }
 
   function testFuzz_getUserLockHashes_tracksMultipleLocks(uint8 numLocks) public {

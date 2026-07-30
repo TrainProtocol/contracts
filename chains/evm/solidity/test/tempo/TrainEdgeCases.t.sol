@@ -176,23 +176,23 @@ contract TrainEdgeCasesTest is Test {
 
   function test_redeemSolver_twice_revertsLockNotPending() public {
     vm.prank(solver);
-    uint256 idx = train.solverLock(_solver(1 ether, address(token), 0), _dst(), '');
+    train.solverLock(_solver(1 ether, address(token), 0), _dst(), '');
     vm.prank(relayer);
-    train.redeemSolver(hashlock, idx, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
     vm.prank(relayer);
     vm.expectRevert(Train.LockNotPending.selector);
-    train.redeemSolver(hashlock, idx, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
   }
 
   function test_refundSolver_twice_revertsLockNotPending() public {
     vm.prank(solver);
-    uint256 idx = train.solverLock(_solver(1 ether, address(token), 0), _dst(), '');
+    train.solverLock(_solver(1 ether, address(token), 0), _dst(), '');
     vm.warp(block.timestamp + 3601);
     vm.prank(relayer);
-    train.refundSolver(hashlock, idx);
+    train.refundSolver(hashlock, solver);
     vm.prank(relayer);
     vm.expectRevert(Train.LockNotPending.selector);
-    train.refundSolver(hashlock, idx);
+    train.refundSolver(hashlock, solver);
   }
 
   // ── Dust ──
@@ -209,8 +209,8 @@ contract TrainEdgeCasesTest is Test {
   function test_solverLock_dust_oneWeiEach_sameToken() public {
     token.mint(solver, 10);
     vm.prank(solver);
-    uint256 idx = train.solverLock(_solver(1, address(token), 1), _dst(), '');
-    Train.SolverLock memory lock = train.getSolverLock(hashlock, idx);
+    train.solverLock(_solver(1, address(token), 1), _dst(), '');
+    Train.SolverLock memory lock = train.getSolverLock(hashlock, solver);
     assertEq(lock.amount, 1);
     assertEq(lock.reward, 1);
   }

@@ -297,10 +297,9 @@ contract TrainTest is Test {
     Train.SolverLockParams memory params = _defaultSolverParams(amount, address(token), reward, address(token));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
-    assertEq(index, 1);
-    Train.SolverLock memory lock = train.getSolverLock(hashlock, 1);
+    Train.SolverLock memory lock = train.getSolverLock(hashlock, solver);
     assertEq(lock.amount, amount);
     assertEq(lock.reward, reward);
     assertEq(lock.rewardRecipient, rewardRecipient);
@@ -313,8 +312,8 @@ contract TrainTest is Test {
     params.rewardTimelockDelta = timelockDelta; // equal is fine when reward == 0
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
-    assertEq(index, 1);
+    train.solverLock(params, _defaultDestination(), '');
+    assertEq(uint8(train.getSolverLock(hashlock, solver).status), uint8(Train.LockStatus.Pending));
   }
 
   function test_solverLock_RevertsOnInvalidRewardTimelock() public {
@@ -362,18 +361,83 @@ contract TrainTest is Test {
     train.solverLock(params, _defaultDestination(), '');
   }
 
-  function test_solverLockCount_Increments() public {
+  function test_solverLock_SecondSolver_SameHashlock_Succeeds() public {
     Train.SolverLockParams memory params = _defaultSolverParams(1 ether, address(token), 0, address(token));
 
     vm.prank(solver);
-    uint256 index1 = train.solverLock(params, _defaultDestination(), '');
-    assertEq(index1, 1);
+    train.solverLock(params, _defaultDestination(), '');
+
+    address payable solver2 = payable(makeAddr('solver2'));
+    token.mint(solver2, 1000 ether);
+    vm.prank(solver2);
+    token.approve(address(train), type(uint256).max);
+
+    vm.prank(solver2);
+    train.solverLock(params, _defaultDestination(), '');
+
+    Train.SolverLock memory lock1 = train.getSolverLock(hashlock, solver);
+    Train.SolverLock memory lock2 = train.getSolverLock(hashlock, solver2);
+    assertEq(lock1.sender, solver);
+    assertEq(uint8(lock1.status), uint8(Train.LockStatus.Pending));
+    assertEq(lock2.sender, solver2);
+    assertEq(uint8(lock2.status), uint8(Train.LockStatus.Pending));
+  }
+
+  function test_solverLock_RevertsOnDuplicateSameSolver() public {
+    Train.SolverLockParams memory params = _defaultSolverParams(1 ether, address(token), 0, address(token));
 
     vm.prank(solver);
-    uint256 index2 = train.solverLock(params, _defaultDestination(), '');
-    assertEq(index2, 2);
+    train.solverLock(params, _defaultDestination(), '');
 
-    assertEq(train.getSolverLockCount(hashlock), 2);
+    uint256 solverBalanceBefore = token.balanceOf(solver);
+
+    vm.prank(solver);
+    vm.expectRevert(Train.SolverLockAlreadyExists.selector);
+    train.solverLock(params, _defaultDestination(), '');
+
+    assertEq(token.balanceOf(solver), solverBalanceBefore);
+  }
+
+  function test_solverLock_DuplicateAfterRefund_StillReverts() public {
+    (uint48 timelockDelta, ) = _getTimelockDeltas();
+    Train.SolverLockParams memory params = _defaultSolverParams(1 ether, address(token), 0, address(token));
+
+    vm.prank(solver);
+    train.solverLock(params, _defaultDestination(), '');
+
+    vm.warp(block.timestamp + timelockDelta + 1);
+
+    vm.prank(relayer);
+    train.refundSolver(hashlock, solver);
+
+    vm.prank(solver);
+    vm.expectRevert(Train.SolverLockAlreadyExists.selector);
+    train.solverLock(params, _defaultDestination(), '');
+  }
+
+  function test_solverLock_DuplicateAfterRedeem_Reverts() public {
+    Train.SolverLockParams memory params = _defaultSolverParams(1 ether, address(token), 0, address(token));
+
+    vm.prank(solver);
+    train.solverLock(params, _defaultDestination(), '');
+
+    vm.prank(relayer);
+    train.redeemSolver(hashlock, solver, SECRET);
+
+    vm.prank(solver);
+    vm.expectRevert(Train.SolverLockAlreadyExists.selector);
+    train.solverLock(params, _defaultDestination(), '');
+  }
+
+  function test_getSolverLock_UnknownSolver_ReturnsEmpty() public {
+    Train.SolverLockParams memory params = _defaultSolverParams(1 ether, address(token), 0, address(token));
+
+    vm.prank(solver);
+    train.solverLock(params, _defaultDestination(), '');
+
+    Train.SolverLock memory lock = train.getSolverLock(hashlock, makeAddr('nobody'));
+    assertEq(lock.sender, address(0));
+    assertEq(uint8(lock.status), uint8(Train.LockStatus.Empty));
   }
 
   // ============ Redeem / Refund Solver Tests ============
@@ -384,13 +448,13 @@ contract TrainTest is Test {
     Train.SolverLockParams memory params = _defaultSolverParams(amount, address(token), reward, address(token));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     uint256 receiverBalanceBefore = token.balanceOf(receiver);
     uint256 rewardRecipientBefore = token.balanceOf(rewardRecipient);
 
     vm.prank(relayer);
-    train.redeemSolver(hashlock, index, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
 
     assertEq(token.balanceOf(receiver), receiverBalanceBefore + amount);
     assertEq(token.balanceOf(rewardRecipient), rewardRecipientBefore + reward);
@@ -403,7 +467,7 @@ contract TrainTest is Test {
     Train.SolverLockParams memory params = _defaultSolverParams(amount, address(token), reward, address(token));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     vm.warp(block.timestamp + rewardTimelockDelta + 1);
 
@@ -411,11 +475,11 @@ contract TrainTest is Test {
     uint256 relayerBalanceBefore = token.balanceOf(relayer);
 
     vm.prank(relayer);
-    train.redeemSolver(hashlock, index, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
 
     assertEq(token.balanceOf(receiver), receiverBalanceBefore + amount);
     assertEq(token.balanceOf(relayer), relayerBalanceBefore + reward);
-    Train.SolverLock memory lock = train.getSolverLock(hashlock, index);
+    Train.SolverLock memory lock = train.getSolverLock(hashlock, solver);
     assertEq(uint8(lock.status), uint8(Train.LockStatus.Redeemed));
   }
 
@@ -423,26 +487,26 @@ contract TrainTest is Test {
     Train.SolverLockParams memory params = _defaultSolverParams(1 ether, address(token), 0.1 ether, address(token));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     vm.expectRevert(Train.HashlockMismatch.selector);
-    train.redeemSolver(hashlock, index, 99999);
+    train.redeemSolver(hashlock, solver, 99999);
   }
 
   function test_redeemSolver_RevertsOnLockNotFound() public {
     vm.expectRevert(Train.LockNotFound.selector);
-    train.redeemSolver(hashlock, 1, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
   }
 
   function test_refundSolver_RevertsBeforeTimelock() public {
     Train.SolverLockParams memory params = _defaultSolverParams(1 ether, address(token), 0, address(token));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     vm.prank(receiver);
     vm.expectRevert(Train.RefundNotAllowed.selector);
-    train.refundSolver(hashlock, index);
+    train.refundSolver(hashlock, solver);
   }
 
   function test_refundSolver_ReturnsAmountAndRewardAfterTimelock() public {
@@ -452,14 +516,14 @@ contract TrainTest is Test {
     Train.SolverLockParams memory params = _defaultSolverParams(amount, address(token), reward, address(token));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     vm.warp(block.timestamp + timelockDelta + 1);
 
     uint256 solverBalanceBefore = token.balanceOf(solver);
 
     vm.prank(receiver);
-    train.refundSolver(hashlock, index);
+    train.refundSolver(hashlock, solver);
 
     assertEq(token.balanceOf(solver), solverBalanceBefore + amount + reward);
   }
@@ -468,13 +532,13 @@ contract TrainTest is Test {
     Train.SolverLockParams memory params = _defaultSolverParams(1 ether, address(token), 0.1 ether, address(token));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     vm.prank(relayer);
-    train.redeemSolver(hashlock, index, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
 
     vm.expectRevert(Train.LockNotPending.selector);
-    train.refundSolver(hashlock, index);
+    train.refundSolver(hashlock, solver);
   }
 
   function test_solverLock_StateTransitions_RedeemAfterRefundReverts() public {
@@ -482,20 +546,20 @@ contract TrainTest is Test {
     Train.SolverLockParams memory params = _defaultSolverParams(1 ether, address(token), 0.1 ether, address(token));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     vm.warp(block.timestamp + timelockDelta + 1);
 
     vm.prank(receiver);
-    train.refundSolver(hashlock, index);
+    train.refundSolver(hashlock, solver);
 
     vm.expectRevert(Train.LockNotPending.selector);
-    train.redeemSolver(hashlock, index, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
   }
 
   function test_refundSolver_RevertsOnLockNotFound() public {
     vm.expectRevert(Train.LockNotFound.selector);
-    train.refundSolver(hashlock, 1);
+    train.refundSolver(hashlock, solver);
   }
 
   function test_redeemSolver_ERC20_SameTokenRewardToReceiverBeforeRewardTimelock() public {
@@ -505,12 +569,12 @@ contract TrainTest is Test {
     params.rewardRecipient = receiver;
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     uint256 receiverBalanceBefore = token.balanceOf(receiver);
 
     vm.prank(relayer);
-    train.redeemSolver(hashlock, index, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
 
     assertEq(token.balanceOf(receiver), receiverBalanceBefore + amount + reward);
   }
@@ -522,14 +586,14 @@ contract TrainTest is Test {
     Train.SolverLockParams memory params = _defaultSolverParams(amount, address(token), reward, address(token));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     vm.warp(block.timestamp + timelockDelta + 1);
 
     uint256 solverBalanceBefore = token.balanceOf(solver);
 
     vm.prank(receiver);
-    train.refundSolver(hashlock, index);
+    train.refundSolver(hashlock, solver);
 
     assertEq(token.balanceOf(solver), solverBalanceBefore + amount + reward);
   }
@@ -583,7 +647,6 @@ contract TrainTest is Test {
       hashlock,
       solver,
       receiver,
-      1,
       'ETH',
       address(token),
       amount,
@@ -628,14 +691,14 @@ contract TrainTest is Test {
     Train.SolverLockParams memory params = _defaultSolverParams(1 ether, address(token), 0.1 ether, address(token));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     vm.warp(block.timestamp + timelockDelta);
 
     uint256 solverBalanceBefore = token.balanceOf(solver);
 
     vm.prank(relayer);
-    train.refundSolver(hashlock, index);
+    train.refundSolver(hashlock, solver);
 
     assertEq(token.balanceOf(solver), solverBalanceBefore + 1.1 ether);
   }
@@ -647,7 +710,7 @@ contract TrainTest is Test {
     Train.SolverLockParams memory params = _defaultSolverParams(amount, address(token), reward, address(token));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     // Warp to exactly rewardTimelock (timelock - rewardTimelockDelta)
     vm.warp(block.timestamp + timelockDelta - rewardTimelockDelta);
@@ -655,7 +718,7 @@ contract TrainTest is Test {
     uint256 relayerBalanceBefore = token.balanceOf(relayer);
 
     vm.prank(relayer);
-    train.redeemSolver(hashlock, index, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
 
     // At exact boundary, rewardTimelock > block.timestamp is false, so reward goes to redeemer
     assertEq(token.balanceOf(relayer), relayerBalanceBefore + reward);
@@ -709,13 +772,12 @@ contract TrainTest is Test {
     uint256 solverToken2Before = token2.balanceOf(solver);
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
-    assertEq(index, 1);
     assertEq(token.balanceOf(solver), solverToken1Before - amount);
     assertEq(token2.balanceOf(solver), solverToken2Before - reward);
 
-    Train.SolverLock memory lock = train.getSolverLock(hashlock, 1);
+    Train.SolverLock memory lock = train.getSolverLock(hashlock, solver);
     assertEq(lock.token, address(token));
     assertEq(lock.rewardToken, address(token2));
   }
@@ -726,13 +788,13 @@ contract TrainTest is Test {
     Train.SolverLockParams memory params = _defaultSolverParams(amount, address(token), reward, address(token2));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     uint256 receiverToken1Before = token.balanceOf(receiver);
     uint256 rewardRecipientToken2Before = token2.balanceOf(rewardRecipient);
 
     vm.prank(relayer);
-    train.redeemSolver(hashlock, index, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
 
     assertEq(token.balanceOf(receiver), receiverToken1Before + amount);
     assertEq(token2.balanceOf(rewardRecipient), rewardRecipientToken2Before + reward);
@@ -745,7 +807,7 @@ contract TrainTest is Test {
     Train.SolverLockParams memory params = _defaultSolverParams(amount, address(token), reward, address(token2));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     vm.warp(block.timestamp + timelockDelta + 1);
 
@@ -753,7 +815,7 @@ contract TrainTest is Test {
     uint256 solverToken2Before = token2.balanceOf(solver);
 
     vm.prank(relayer);
-    train.refundSolver(hashlock, index);
+    train.refundSolver(hashlock, solver);
 
     assertEq(token.balanceOf(solver), solverToken1Before + amount);
     assertEq(token2.balanceOf(solver), solverToken2Before + reward);
@@ -768,13 +830,13 @@ contract TrainTest is Test {
     params.rewardRecipient = receiver; // Same as recipient
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     uint256 receiverBalanceBefore = token.balanceOf(receiver);
 
     // Recipient redeems before rewardTimelock
     vm.prank(receiver);
-    train.redeemSolver(hashlock, index, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
 
     // Receiver gets both amount and reward (combined transfer optimization)
     assertEq(token.balanceOf(receiver), receiverBalanceBefore + amount + reward);
@@ -785,13 +847,13 @@ contract TrainTest is Test {
     Train.SolverLockParams memory params = _defaultSolverParams(amount, address(token), 0, address(token));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     uint256 receiverBalanceBefore = token.balanceOf(receiver);
     uint256 relayerBalanceBefore = token.balanceOf(relayer);
 
     vm.prank(relayer);
-    train.redeemSolver(hashlock, index, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
 
     assertEq(token.balanceOf(receiver), receiverBalanceBefore + amount);
     assertEq(token.balanceOf(relayer), relayerBalanceBefore); // No reward
@@ -814,7 +876,7 @@ contract TrainTest is Test {
 
   function test_getSolverLock_NonExistent_ReturnsEmptyStruct() public view {
     bytes32 nonExistentHashlock = sha256(abi.encodePacked(uint256(99999)));
-    Train.SolverLock memory lock = train.getSolverLock(nonExistentHashlock, 1);
+    Train.SolverLock memory lock = train.getSolverLock(nonExistentHashlock, solver);
 
     assertEq(lock.secret, 0);
     assertEq(lock.amount, 0);
@@ -827,13 +889,6 @@ contract TrainTest is Test {
     assertEq(lock.rewardRecipient, address(0));
     assertEq(lock.token, address(0));
     assertEq(lock.rewardToken, address(0));
-  }
-
-  function test_getSolverLockCount_NonExistent_ReturnsZero() public view {
-    bytes32 nonExistentHashlock = sha256(abi.encodePacked(uint256(99999)));
-    uint256 count = train.getSolverLockCount(nonExistentHashlock);
-
-    assertEq(count, 0);
   }
 
   function test_getUserLockHashes_SingleLock() public {
@@ -1182,15 +1237,15 @@ contract TrainTest is Test {
     Train.SolverLockParams memory params = _defaultSolverParams(1 ether, address(token), 0.1 ether, address(token));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     vm.warp(block.timestamp + timelockDelta + 1);
 
     vm.expectEmit(true, true, false, true);
-    emit Train.SolverRefunded(hashlock, index, solver, 1 ether, 0.1 ether);
+    emit Train.SolverRefunded(hashlock, solver, solver, 1 ether, 0.1 ether);
 
     vm.prank(relayer);
-    train.refundSolver(hashlock, index);
+    train.refundSolver(hashlock, solver);
   }
 
   function test_redeemUser_EmitsUserRedeemedEvent() public {
@@ -1210,13 +1265,13 @@ contract TrainTest is Test {
     Train.SolverLockParams memory params = _defaultSolverParams(1 ether, address(token), 0.1 ether, address(token));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     vm.expectEmit(true, true, false, true);
-    emit Train.SolverRedeemed(hashlock, index, relayer, SECRET, 1 ether, 0, rewardRecipient, 0.1 ether);
+    emit Train.SolverRedeemed(hashlock, solver, relayer, SECRET, 1 ether, 0, rewardRecipient, 0.1 ether);
 
     vm.prank(relayer);
-    train.redeemSolver(hashlock, index, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
   }
 
   // ============ Contract Balance Verification ============
@@ -1274,32 +1329,32 @@ contract TrainTest is Test {
     assertEq(uint8(lock2.status), uint8(Train.LockStatus.Pending));
   }
 
-  function test_multipleSolverLocks_SameHashlock_IndependentIndices() public {
+  function test_multipleSolverLocks_SameHashlock_IndependentSolvers() public {
     Train.SolverLockParams memory params = _defaultSolverParams(1 ether, address(token), 0, address(token));
 
-    // Create multiple solver locks for same hashlock
-    vm.prank(solver);
-    uint256 index1 = train.solverLock(params, _defaultDestination(), '');
+    // Create multiple solver locks for same hashlock from three distinct solvers
+    address payable solverA = payable(makeAddr('solverA'));
+    address payable solverB = payable(makeAddr('solverB'));
+    address payable solverC = payable(makeAddr('solverC'));
+    address payable[3] memory solvers = [solverA, solverB, solverC];
 
-    vm.prank(solver);
-    uint256 index2 = train.solverLock(params, _defaultDestination(), '');
+    for (uint256 i = 0; i < solvers.length; i++) {
+      token.mint(solvers[i], 1000 ether);
+      vm.prank(solvers[i]);
+      token.approve(address(train), type(uint256).max);
 
-    vm.prank(solver);
-    uint256 index3 = train.solverLock(params, _defaultDestination(), '');
+      vm.prank(solvers[i]);
+      train.solverLock(params, _defaultDestination(), '');
+    }
 
-    assertEq(index1, 1);
-    assertEq(index2, 2);
-    assertEq(index3, 3);
-    assertEq(train.getSolverLockCount(hashlock), 3);
-
-    // Redeem only index 2
+    // Redeem only the second solver's lock
     vm.prank(relayer);
-    train.redeemSolver(hashlock, index2, SECRET);
+    train.redeemSolver(hashlock, solverB, SECRET);
 
     // Verify status of each
-    assertEq(uint8(train.getSolverLock(hashlock, 1).status), uint8(Train.LockStatus.Pending));
-    assertEq(uint8(train.getSolverLock(hashlock, 2).status), uint8(Train.LockStatus.Redeemed));
-    assertEq(uint8(train.getSolverLock(hashlock, 3).status), uint8(Train.LockStatus.Pending));
+    assertEq(uint8(train.getSolverLock(hashlock, solverA).status), uint8(Train.LockStatus.Pending));
+    assertEq(uint8(train.getSolverLock(hashlock, solverB).status), uint8(Train.LockStatus.Redeemed));
+    assertEq(uint8(train.getSolverLock(hashlock, solverC).status), uint8(Train.LockStatus.Pending));
   }
 
   // ============ Data Parameter Tests ============
@@ -1352,7 +1407,6 @@ contract TrainTest is Test {
       hashlock,
       solver,
       receiver,
-      1,
       'ETH',
       address(token),
       amount,
@@ -1413,7 +1467,7 @@ contract TrainTest is Test {
     Train.SolverLockParams memory params = _defaultSolverParams(amount, address(token), reward, address(token));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     uint256 receiverTokenBefore = token.balanceOf(receiver);
     uint256 rewardRecipientTokenBefore = token.balanceOf(rewardRecipient);
@@ -1421,7 +1475,7 @@ contract TrainTest is Test {
     uint256 contractTokenBefore = token.balanceOf(address(train));
 
     vm.prank(relayer);
-    train.redeemSolver(hashlock, index, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
 
     // Verify balance changes
     assertEq(token.balanceOf(receiver), receiverTokenBefore + amount, 'Receiver should get token amount');
@@ -1445,7 +1499,7 @@ contract TrainTest is Test {
     Train.SolverLockParams memory params = _defaultSolverParams(amount, address(token), reward, address(token));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     vm.warp(block.timestamp + rewardTimelockDelta + 1);
 
@@ -1455,7 +1509,7 @@ contract TrainTest is Test {
     uint256 contractTokenBefore = token.balanceOf(address(train));
 
     vm.prank(relayer);
-    train.redeemSolver(hashlock, index, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
 
     // Verify balance changes
     assertEq(token.balanceOf(receiver), receiverTokenBefore + amount, 'Receiver should get token amount');
@@ -1483,7 +1537,7 @@ contract TrainTest is Test {
     Train.SolverLockParams memory params = _defaultSolverParams(amount, address(token), reward, address(token));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     vm.warp(block.timestamp + timelockDelta + 1);
 
@@ -1491,7 +1545,7 @@ contract TrainTest is Test {
     uint256 contractTokenBefore = token.balanceOf(address(train));
 
     vm.prank(relayer);
-    train.refundSolver(hashlock, index);
+    train.refundSolver(hashlock, solver);
 
     // Verify balance changes
     assertEq(
@@ -1542,7 +1596,7 @@ contract TrainTest is Test {
     Train.SolverLockParams memory params = _defaultSolverParams(amount, address(token), reward, address(token2));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     uint256 receiverToken1Before = token.balanceOf(receiver);
     uint256 rewardRecipientToken2Before = token2.balanceOf(rewardRecipient);
@@ -1551,7 +1605,7 @@ contract TrainTest is Test {
     uint256 contractToken2Before = token2.balanceOf(address(train));
 
     vm.prank(relayer);
-    train.redeemSolver(hashlock, index, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
 
     // Verify balance changes
     assertEq(token.balanceOf(receiver), receiverToken1Before + amount, 'Receiver should get token1 amount');
@@ -1580,7 +1634,7 @@ contract TrainTest is Test {
     Train.SolverLockParams memory params = _defaultSolverParams(amount, address(token), reward, address(token2));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     vm.warp(block.timestamp + rewardTimelockDelta + 1);
 
@@ -1591,7 +1645,7 @@ contract TrainTest is Test {
     uint256 contractToken2Before = token2.balanceOf(address(train));
 
     vm.prank(relayer);
-    train.redeemSolver(hashlock, index, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
 
     // Verify balance changes
     assertEq(token.balanceOf(receiver), receiverToken1Before + amount, 'Receiver should get token1 amount');
@@ -1624,7 +1678,7 @@ contract TrainTest is Test {
     Train.SolverLockParams memory params = _defaultSolverParams(amount, address(token), reward, address(token2));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     vm.warp(block.timestamp + timelockDelta + 1);
 
@@ -1634,7 +1688,7 @@ contract TrainTest is Test {
     uint256 contractToken2Before = token2.balanceOf(address(train));
 
     vm.prank(relayer);
-    train.refundSolver(hashlock, index);
+    train.refundSolver(hashlock, solver);
 
     // Verify balance changes
     assertEq(token.balanceOf(solver), solverToken1Before + amount, 'Solver should get token1 amount back');
@@ -1660,13 +1714,13 @@ contract TrainTest is Test {
     params.rewardRecipient = receiver; // Same as recipient
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     uint256 receiverTokenBefore = token.balanceOf(receiver);
     uint256 contractTokenBefore = token.balanceOf(address(train));
 
     vm.prank(relayer);
-    train.redeemSolver(hashlock, index, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
 
     // Receiver gets both amount and reward (optimized single transfer)
     assertEq(
@@ -1706,13 +1760,13 @@ contract TrainTest is Test {
     Train.SolverLockParams memory params = _defaultSolverParams(amount, address(token), 0, address(token));
 
     vm.prank(solver);
-    uint256 index = train.solverLock(params, _defaultDestination(), '');
+    train.solverLock(params, _defaultDestination(), '');
 
     uint256 receiverTokenBefore = token.balanceOf(receiver);
     uint256 contractTokenBefore = token.balanceOf(address(train));
 
     vm.prank(relayer);
-    train.redeemSolver(hashlock, index, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
 
     assertEq(token.balanceOf(receiver), receiverTokenBefore + amount, 'Receiver should get token amount');
     assertEq(token.balanceOf(address(train)), contractTokenBefore - amount, 'Contract token should decrease by amount');

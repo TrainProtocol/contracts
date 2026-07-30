@@ -81,7 +81,7 @@ abstract contract Base is StringUtils, Clamp, Deployer, Math {
 
     struct SolverRef {
         bytes32 hashlock;
-        uint256 index;
+        address solver;
         uint256 secret;
     }
     SolverRef[] internal solverRefs; // every created solver lock

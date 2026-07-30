@@ -28,7 +28,7 @@ abstract contract Properties is PropertiesAsserts, Snapshots {
             if (l.status == Train.LockStatus.Pending) obligations += l.amount;
         }
         for (uint256 i; i < solverRefs.length; i++) {
-            Train.SolverLock memory l = train.getSolverLock(solverRefs[i].hashlock, solverRefs[i].index);
+            Train.SolverLock memory l = train.getSolverLock(solverRefs[i].hashlock, solverRefs[i].solver);
             if (l.status == Train.LockStatus.Pending) obligations += l.amount + l.reward;
         }
         eq(token.balanceOf(address(train)), obligations, "SOLV: train balance != sum of pending obligations");
@@ -68,7 +68,7 @@ abstract contract Properties is PropertiesAsserts, Snapshots {
     function property_solverLocksWellFormed() public {
         for (uint256 i; i < solverRefs.length; i++) {
             bytes32 hl = solverRefs[i].hashlock;
-            Train.SolverLock memory l = train.getSolverLock(hl, solverRefs[i].index);
+            Train.SolverLock memory l = train.getSolverLock(hl, solverRefs[i].solver);
             t(l.status != Train.LockStatus.Empty, "SWF: created solver lock has Empty status");
             t(l.sender != address(0), "SWF: zero sender (phantom lock)");
             t(l.recipient == recipientAddr, "SWF: recipient drifted from creation value");
@@ -106,12 +106,13 @@ abstract contract Properties is PropertiesAsserts, Snapshots {
         eq(sumTotals, userHashlocks.length, "ENUM: per-owner totals != registry count");
     }
 
-    /// @notice [SCNT] Every registered solver-lock index lies within the on-chain monotonic count for
-    ///         its hashlock (1-based, post-increment). Covers VT-01/02/03, VS-13.
-    function property_solverIndicesInRange() public {
+    /// @notice [SLU] Solver locks are keyed by (hashlock, solver): every recorded solver lock exists
+    ///         on-chain and is attributed to its creator (`sender == the recorded solver`), so a lock
+    ///         can never be overwritten or re-attributed to another sender. Covers VT-01/02/03, VS-13.
+    function property_solverLockUniquePerSolver() public {
         for (uint256 i; i < solverRefs.length; i++) {
-            uint256 count = train.getSolverLockCount(solverRefs[i].hashlock);
-            t(solverRefs[i].index >= 1 && solverRefs[i].index <= count, "SCNT: solver index out of [1, count]");
+            Train.SolverLock memory l = train.getSolverLock(solverRefs[i].hashlock, solverRefs[i].solver);
+            t(l.sender == solverRefs[i].solver, "SLU: recorded solver lock not attributed to its creator");
         }
     }
 
@@ -130,8 +131,8 @@ abstract contract Properties is PropertiesAsserts, Snapshots {
     /// @notice [SLC] A fresh solver lock is Pending and the same-token proportional split is exact:
     ///         stored amount/reward match the request and sum to the total pulled in. Covers ST-06,
     ///         RT-06/07.
-    function _propSolverLockCreated(bytes32 hl, uint256 idx, uint256 reqAmount, uint256 reqReward) internal {
-        Train.SolverLock memory l = train.getSolverLock(hl, idx);
+    function _propSolverLockCreated(bytes32 hl, address solver, uint256 reqAmount, uint256 reqReward) internal {
+        Train.SolverLock memory l = train.getSolverLock(hl, solver);
         eq(uint256(l.status), uint256(Train.LockStatus.Pending), "SLC: new solver lock not Pending");
         eq(l.amount, reqAmount, "SLC: stored amount != requested");
         eq(l.reward, reqReward, "SLC: stored reward != requested");
