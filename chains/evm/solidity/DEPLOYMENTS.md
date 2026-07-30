@@ -60,97 +60,39 @@ were sent as direct `cast send <CreateX> "deployCreate2(bytes32,bytes)" <salt> <
 same factory, same salt, same initcode, hence the same addresses (all receipts `status 0x1`, code
 confirmed on-chain).
 
-## Mainnets — v3 (not yet deployed)
+## Mainnets — v3 (Train deployed 2026-07-30)
 
-Same three EVM addresses expected if deployed from this source with salt `train.protocol.v3` via
-CreateX. Tron mainnet will get new, unrelated addresses.
+**`Train` is live at `0x265978c3e2E5dB9C3Ea665cC40C5925A5fc13Ee8` on all seven mainnets below**, deployed from this
+source with salt `train.protocol.v3` via CreateX — the same address as the v3 testnet set.
+Runtime bytecode is byte-identical on every chain (15,108 bytes; Train has no immutables).
+Deploy gas measured at **3,311,670** per chain.
 
-| Network | Chain ID | Status | Explorer |
-| --- | --- | --- | --- |
-| Ethereum | 1 | Not deployed | [etherscan.io](https://etherscan.io) |
-| Arbitrum One | 42161 | Not deployed | [arbiscan.io](https://arbiscan.io) |
-| Base | 8453 | Not deployed | [basescan.org](https://basescan.org) |
-| OP Mainnet | 10 | Not deployed | [optimistic.etherscan.io](https://optimistic.etherscan.io) |
-| BNB Smart Chain | 56 | Not deployed | [bscscan.com](https://bscscan.com) |
-| Linea | 59144 | Not deployed | [lineascan.build](https://lineascan.build) |
-| Monad | 143 | Not deployed | [monadscan.com](https://monadscan.com) |
-| Tron | 728126428 (0x2b6653dc) | Not deployed | [tronscan.org](https://tronscan.org) |
+**Scope:** Train only. `ConstantPayoutCurve` and `TrainRouter` are deliberately NOT deployed on
+mainnets — locks pass `payoutCurve = address(0)` (full payout), and the gasless rails are
+unavailable until TrainRouter ships. Their v3 addresses stay reserved at
+`0xf5522F01B44D95f3A8d8be5d78F3eee91d26543C` / `0xF406475230bE1A65d06bd87A2724F78F4b6A2928`.
 
-## Tron Addresses — Nile Testnet — v3 (deployed)
+| Network | Chain ID | Status | Deploy tx | Explorer |
+| --- | --- | --- | --- | --- |
+| Ethereum | 1 | ✅ Deployed + verified | `0xe64c8d9997ab40bb8def607c2a4540066b5228503b06ab826f823866985d4d60` | [etherscan.io](https://etherscan.io/address/0x265978c3e2E5dB9C3Ea665cC40C5925A5fc13Ee8) |
+| Arbitrum One | 42161 | ✅ Deployed + verified | `0x091572c9d1ffc54a29999fadc917e94592fe8c8ce1965ba4e0a9b0c567c339b3` | [arbiscan.io](https://arbiscan.io/address/0x265978c3e2E5dB9C3Ea665cC40C5925A5fc13Ee8) |
+| Base | 8453 | ✅ Deployed + verified | _(receipt not captured; CREATE2 address confirmed on-chain)_ | [basescan.org](https://basescan.org/address/0x265978c3e2E5dB9C3Ea665cC40C5925A5fc13Ee8) |
+| OP Mainnet | 10 | ✅ Deployed + verified | `0xd295b1316d3f95ed12e3a7b82260c35ddd50fcd9f778e8853713897033dd868c` | [optimistic.etherscan.io](https://optimistic.etherscan.io/address/0x265978c3e2E5dB9C3Ea665cC40C5925A5fc13Ee8) |
+| Polygon PoS | 137 | ✅ Deployed + verified | `0xbe7ac8befa48b622653a4869db4d94bd4acbe42ccc754f257a84de1a2299fd5c` | [polygonscan.com](https://polygonscan.com/address/0x265978c3e2E5dB9C3Ea665cC40C5925A5fc13Ee8) |
+| BNB Smart Chain | 56 | ✅ Deployed + verified | _(receipt not captured; CREATE2 address confirmed on-chain)_ | [bscscan.com](https://bscscan.com/address/0x265978c3e2E5dB9C3Ea665cC40C5925A5fc13Ee8) |
+| Robinhood Chain | 4663 | ✅ Deployed + verified | `0x4e2f6a26ec2a3013f521a3567b3588d293b0099375d79b93ed708428058d1a95` | [robinhoodchain.blockscout.com](https://robinhoodchain.blockscout.com/address/0x265978c3e2E5dB9C3Ea665cC40C5925A5fc13Ee8) |
+| Linea | 59144 | Not deployed | — | [lineascan.build](https://lineascan.build) |
+| Monad | 143 | Not deployed | — | [monadscan.com](https://monadscan.com) |
+| Tron | 728126428 (0x2b6653dc) | Not deployed (addresses will differ) | — | [tronscan.org](https://tronscan.org) |
 
-Addresses differ from EVM by design (no CREATE2/CreateX on Tron, 0x41 address derivation).
-Deployer: `TFkCi38K7h7xicgoP7MNuSsnDQAg1YwbvD`.
+Deployed via `script/deploy-mainnets.sh` — a resumable per-chain orchestrator (skip-if-deployed,
+Cancun TSTORE probe, balance preflight that marks `NEEDS_FUNDS` and continues rather than
+aborting, Etherscan-v2/Blockscout verification, `deployments/mainnets-v3.json` manifest).
+Adding a future EVM chain = one row in its chain table; the same salt reproduces the same
+address wherever CreateX is deployed.
 
-| Contract | Address (base58) | Address (hex) |
-| --- | --- | --- |
-| ConstantPayoutCurve | [`TXnXbz7UKN3KAJV8yNZtkFsHmzBuQ3hSu9`](https://nile.tronscan.org/#/contract/TXnXbz7UKN3KAJV8yNZtkFsHmzBuQ3hSu9) | `41ef4db850bff6d54657b99c033a41ce04d89d752d` |
-| Train | [`TRooTQxWa3pgP6oA5QiyASxGKcRFRKY8k9`](https://nile.tronscan.org/#/contract/TRooTQxWa3pgP6oA5QiyASxGKcRFRKY8k9) | `41adba9d2f44f5c3f8317f4073af40199b1923ae68` |
-| TrainRouter | [`TE8xNnkiWu71q6rs1mSYLV9Q5ZRaxTwHWX`](https://nile.tronscan.org/#/contract/TE8xNnkiWu71q6rs1mSYLV9Q5ZRaxTwHWX) | `412db874427f5a1d0dbe5ae00a6f6cbb65fce647ec` |
-
-## Tron Addresses — Mainnet (not deployed)
-
-Fill in after `npm run deploy:tron:mainnet`.
-
-| Contract | Address (base58) | Address (hex) |
-| --- | --- | --- |
-| ConstantPayoutCurve | - | - |
-| Train | - | - |
-| TrainRouter | - | - |
-
-## Operational Notes
-
-- Reproducibility: same salt + same source + same compiler settings gives the same EVM address on
-  any chain (CreateX `deployCreate2` with `guardedSalt = keccak256(abi.encode(salt))`). Any change to
-  contract source or compiler config changes the addresses — bump the salt string deliberately for a
-  new release and add a new section here.
-- Deployment is permissionless and idempotent: anyone can re-run the deploy; only identical bytecode
-  can occupy these addresses. The deploy scripts skip contracts already present at their predicted
-  address. If `forge script` fails on a chain (see the deploy-tooling note above), the equivalent
-  direct call is `cast send 0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed "deployCreate2(bytes32,bytes)"
-  <salt> <initcode>` with the initcode from `out/<Name>.sol/<Name>.json` (default profile build).
-- Verification: a single Etherscan API v2 key covers all EVM chains above, including Monad
-  (MonadScan). Contracts whose bytecode matches an already-verified deployment (here: the v2
-  ConstantPayoutCurve/TrainRouter) are matched automatically at their new address. TrainRouter
-  runtime bytecode differs slightly per chain on purpose (EIP-712 chain-id immutable); explorers
-  cross-match it automatically. The CreateX address is unaffected (keyed on initcode).
-- Runtime requirement: every target chain must support Cancun / EIP-1153 transient storage
-  (on Tron: TVM GreatVoyage v4.8.0+).
-- Tooling: [`script/DeployDeterministic.s.sol`](script/DeployDeterministic.s.sol) (Foundry, CreateX),
-  [`script/deploy-testnets.ps1`](script/deploy-testnets.ps1) (multi-chain orchestrator),
-  [`script/deploy-tron.js`](script/deploy-tron.js) (TronWeb). See the
-  [deploy section of the README](README.md#deploy--on-chain-testnet-flow) for usage.
-
----
-
-## Historical — v2 (`train.protocol.v2`), DEPRECATED
-
-Deployed 2026-07-16 from branch `main-add-evm` atop `6ab0cc9`, via the **Arachnid** CREATE2 factory
-(`0x4e59b44847b379578588920cA78FbF26c0B4956C`), salt `keccak256('train.protocol.v2')`
-(`0x2cb3c3cf140b71dedade9bbce0490f1ce1423b1c7ed61f35b83f24c982cf63b1`). Superseded by v3: the v2
-`Train` uses the old **indexed** solver-lock API (`solverLock → index`, `redeemSolver/refundSolver/
-getSolverLock(hashlock, index)`, `getSolverLockCount`) and has **no same-solver double-lock guard** —
-a solver retrying `solverLock` there can double-fund a swap. v2 added the TrainRouter single-use
-intent replay guard and the paginated-getter overflow fix over v1.
-
-EVM (all 7 testnets): ConstantPayoutCurve `0xFF9d783c6cB8294a4fa4d1556752c3EAF3E20DEE`,
-Train `0x877a7629BA8EfA6dd79057ab9105FdE3aDe93d75`,
-TrainRouter `0x0d117b12744E1A8b4980c3BdC3542Ad53C27E33a`
-(Sepolia, Arbitrum/Base/OP/Linea Sepolia, BSC, Monad — all source-verified).
-
-Tron Nile (v2): ConstantPayoutCurve `TSHgwbab9XGjcGdQLdDAEQMgXy6QpnKE97`,
-Train `TKPCfMErMoBpr7YWcWJyNM2aG7EcAn6srj`, TrainRouter `TY6hNw9Kvx6AcRJAAk9M9mCxZzuaSbQ3fG`.
-
-## Historical — v1 (`train.protocol.v1`), DEPRECATED
-
-Deployed from commit `c182e0c`, salt `keccak256('train.protocol.v1')`
-(`0x5d7885c1f4cd41bf8dc1e01bc410bd87b5deea2f59186528a1021e520116fad6`). Superseded by v2. The v1
-`TrainRouter` lacks intent replay protection and the v1 `Train` paginated getters can revert on
-`offset + limit` overflow; prefer the v3 addresses above.
-
-EVM (all chains): ConstantPayoutCurve `0xa46966484B1eB2c650333Db72de07f667dF76765`,
-Train `0x9d81344fd19C2e1B29eCe4372D79EAe637df7E64`,
-TrainRouter `0xCa04b09CCA22A4C872247303aa94FF7Ad700b6a9`.
-Deployed on the same 7 testnets (Sepolia, Arbitrum/Base/OP/Linea Sepolia, BSC, Monad).
-
-Tron Nile (v1): ConstantPayoutCurve `TQUDuMYbtjXimHMeFLh9kFnsCYUeqABbSm`,
-Train `THVyZWFSabRbjBZXDUMBQaa2Wbxq11b145`, TrainRouter `TQQ4dYHYGvYdZhXsi9amayBMsQKtDPt8a3`.
+> **Ethereum note.** Deployed 2026-07-31 at block 25,648,174 for **0.000390 ETH**
+> (3,311,670 gas @ 0.1176 gwei effective). Base fee had spiked to 3.6 gwei during the initial
+> run — where the same deploy would have cost ~0.0059 ETH — so the deploy was deferred and
+> broadcast from a polling watcher once the base fee fell to 0.126 gwei, a ~93% saving. The
+> deployer's existing balance covered it with no additional funding.

@@ -38,7 +38,16 @@ remappings = [
 ]
 
 # Public testnet RPCs for the deterministic multi-chain deploy (script/deploy-testnets.ps1).
+# Mainnet RPCs for script/deploy-mainnets.sh (override per chain via <CHAIN>_RPC_URL, which the
+# orchestrator passes as an explicit --rpc-url and which bypasses these aliases).
 [rpc_endpoints]
+ethereum         = "https://ethereum-rpc.publicnode.com"
+arbitrum         = "https://arb1.arbitrum.io/rpc"
+optimism         = "https://mainnet.optimism.io"
+base             = "https://mainnet.base.org"
+polygon          = "https://polygon-bor-rpc.publicnode.com"
+bsc              = "https://bsc-rpc.publicnode.com"
+robinhood        = "https://rpc.mainnet.chain.robinhood.com"
 sepolia          = "https://ethereum-sepolia-rpc.publicnode.com"
 arbitrum_sepolia = "https://arbitrum-sepolia-rpc.publicnode.com"
 base_sepolia     = "https://base-sepolia-rpc.publicnode.com"
@@ -50,6 +59,13 @@ monad_testnet    = "https://testnet-rpc.monad.xyz"
 # Etherscan API v2: one ETHERSCAN_API_KEY verifies on every chain below
 # (Monad testnet included — v2 covers chain 10143 via MonadScan).
 [etherscan]
+# Mainnets (Robinhood Chain is NOT on Etherscan v2 — verified via Blockscout in deploy-mainnets.sh)
+ethereum         = { key = "${ETHERSCAN_API_KEY}", chain = 1 }
+arbitrum         = { key = "${ETHERSCAN_API_KEY}", chain = 42161 }
+optimism         = { key = "${ETHERSCAN_API_KEY}", chain = 10 }
+base             = { key = "${ETHERSCAN_API_KEY}", chain = 8453 }
+polygon          = { key = "${ETHERSCAN_API_KEY}", chain = 137 }
+bsc              = { key = "${ETHERSCAN_API_KEY}", chain = 56 }
 sepolia          = { key = "${ETHERSCAN_API_KEY}", chain = 11155111 }
 arbitrum_sepolia = { key = "${ETHERSCAN_API_KEY}", chain = 421614 }
 base_sepolia     = { key = "${ETHERSCAN_API_KEY}", chain = 84532 }
