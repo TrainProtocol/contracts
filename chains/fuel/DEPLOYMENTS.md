@@ -117,16 +117,39 @@ the same network any number of times.
   from `(bytecodeRoot, salt, stateRoot)` and confirm it matches the deployed
   address.
 
-## Fuel Mainnet
+## Fuel Mainnet (Ignition) — current deployment
 
-Not deployed.
+| Component | Address | Deploy tx |
+|---|---|---|
+| `Train` | `0x445464bf4d8f2ad1cdffefa8345438f6769c44fc4aedf0eb9c2e34f5756f5750` | `0x9f93a209b48a878ab66fcf14651947399e278f697dc03a981dcd0c4a73d62842` |
+
+- **Network:** Fuel Mainnet (Ignition) · **Provider:** `https://mainnet.fuel.network/v1/graphql`
+- **Explorer:** https://app.fuel.network (tx: `https://app.fuel.network/tx/<txId>`)
+- **Deployed:** 2026-07-30, block 60,207,802, from commit `36e0677` (solver double-lock guard)
+  via `scripts/deploy-train-mainnet.ts` (Train-only wrapper around
+  `scripts/deploy/core.ts`'s `deployDeterministic`; same salt convention).
+  Deploy fee: **211 base units** (~2.1e-7 ETH), gas 121,217.
+- **Contract ID is identical to Fuel Sepolia's** — by construction (same `forc` 0.68.7 /
+  `std` v0.68.7 debug-profile bytecode, same salt `sha256('train.protocol.v2.fuel:train')`,
+  empty state root), so mainnet ships the exact bytecode that passed the 2026-07-30 Sepolia
+  e2e run (105 rows, 0 failures). Confirmed post-deploy: sha256 of the on-chain bytecode on
+  **mainnet, testnet, and the local build are all**
+  `9811a5aa468a5fb999d898bd04487b623f074ddc4bc10de46a2ba139978c816d`.
+- **`ConstantPayoutCurve` is deliberately NOT deployed on mainnet.** Curve-less locks are
+  fully supported (`payout_curve: Option::None` ⇒ `compute_payout` returns the full amount).
+  Its deterministic ID stays reserved at
+  `0xfc598e7d022590a0eecc2f58c9ba865ace7c2ca5acae881dced5f2dbb37eb33b`.
+- **Superseded:** the 2026-07-29 mainnet `Train` at `0x869027…78964b68` (pre-solver-guard
+  bytecode) remains live but is superseded by the address above.
+- **Source verification:** not possible on Fuel (see the Sepolia section) — the
+  reproducible-build attestation above is the substitute.
 
 ## Status table
 
 | Network | Train | ConstantPayoutCurve | Status |
 |---|---|---|---|
 | Fuel Sepolia | `0x445464…756f5750` | `0xfc598e…b37eb33b` | Deployed, e2e-verified |
-| Fuel Mainnet | — | — | Not deployed |
+| Fuel Mainnet | `0x445464…756f5750` | — (deliberately not deployed) | Deployed 2026-07-30, bytecode byte-identical to Sepolia |
 
 ## Operational notes
 
