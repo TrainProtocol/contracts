@@ -31,9 +31,9 @@ contract TestNative is SepoliaConfig {
     uint256 s2 = _secret('native-solver');
     bytes32 h2 = _hashlock(s2);
     vm.startBroadcast(userPk);
-    uint256 idx = train.solverLock{ value: NATIVE_AMOUNT + NATIVE_REWARD }(_solverParamsTNative(h2, 3600), _dstTNative(), '');
-    train.redeemSolver(h2, idx, s2);
+    train.solverLock{ value: NATIVE_AMOUNT + NATIVE_REWARD }(_solverParamsTNative(h2, 3600), _dstTNative(), '');
+    train.redeemSolver(h2, user, s2);
     vm.stopBroadcast();
-    console.log('[2] native solverLock -> redeemSolver OK, index:', idx);
+    console.log('[2] native solverLock -> redeemSolver OK, solver:', user);
   }
 }

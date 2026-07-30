@@ -158,11 +158,11 @@ contract TrainEdgeCasesTest is Test {
     Train.SolverLockParams memory p = _solver(1 ether, NATIVE_ETH, 0);
     p.refundTo = payable(address(rejecter));
     vm.prank(solver);
-    uint256 idx = train.solverLock{ value: 1 ether }(p, _dst(), '');
+    train.solverLock{ value: 1 ether }(p, _dst(), '');
     vm.warp(block.timestamp + 3601);
     vm.prank(relayer);
     vm.expectRevert(Train.TransferFailed.selector);
-    train.refundSolver(hashlock, idx);
+    train.refundSolver(hashlock, solver);
   }
 
   function test_redeemSolver_ETH_toRejectingRecipient_revertsTransferFailed() public {
@@ -170,10 +170,10 @@ contract TrainEdgeCasesTest is Test {
     Train.SolverLockParams memory p = _solver(1 ether, NATIVE_ETH, 0);
     p.recipient = payable(address(rejecter));
     vm.prank(solver);
-    uint256 idx = train.solverLock{ value: 1 ether }(p, _dst(), '');
+    train.solverLock{ value: 1 ether }(p, _dst(), '');
     vm.prank(relayer);
     vm.expectRevert(Train.TransferFailed.selector);
-    train.redeemSolver(hashlock, idx, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
   }
 
   function test_redeemSolver_ETH_rewardToRejectingRewardRecipient_revertsTransferFailed() public {
@@ -181,10 +181,10 @@ contract TrainEdgeCasesTest is Test {
     Train.SolverLockParams memory p = _solver(1 ether, NATIVE_ETH, 0.5 ether);
     p.rewardRecipient = payable(address(rejecter));
     vm.prank(solver);
-    uint256 idx = train.solverLock{ value: 1.5 ether }(p, _dst(), '');
+    train.solverLock{ value: 1.5 ether }(p, _dst(), '');
     vm.prank(relayer);
     vm.expectRevert(Train.TransferFailed.selector);
-    train.redeemSolver(hashlock, idx, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
   }
 
   // ── Shared validator reachable via userLockFor ──
@@ -222,23 +222,23 @@ contract TrainEdgeCasesTest is Test {
 
   function test_redeemSolver_twice_revertsLockNotPending() public {
     vm.prank(solver);
-    uint256 idx = train.solverLock{ value: 1 ether }(_solver(1 ether, NATIVE_ETH, 0), _dst(), '');
+    train.solverLock{ value: 1 ether }(_solver(1 ether, NATIVE_ETH, 0), _dst(), '');
     vm.prank(relayer);
-    train.redeemSolver(hashlock, idx, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
     vm.prank(relayer);
     vm.expectRevert(Train.LockNotPending.selector);
-    train.redeemSolver(hashlock, idx, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
   }
 
   function test_refundSolver_twice_revertsLockNotPending() public {
     vm.prank(solver);
-    uint256 idx = train.solverLock{ value: 1 ether }(_solver(1 ether, NATIVE_ETH, 0), _dst(), '');
+    train.solverLock{ value: 1 ether }(_solver(1 ether, NATIVE_ETH, 0), _dst(), '');
     vm.warp(block.timestamp + 3601);
     vm.prank(relayer);
-    train.refundSolver(hashlock, idx);
+    train.refundSolver(hashlock, solver);
     vm.prank(relayer);
     vm.expectRevert(Train.LockNotPending.selector);
-    train.refundSolver(hashlock, idx);
+    train.refundSolver(hashlock, solver);
   }
 
   // ── Dust ──
@@ -255,8 +255,8 @@ contract TrainEdgeCasesTest is Test {
   function test_solverLock_dust_oneWeiEach_sameToken() public {
     token.mint(solver, 10);
     vm.prank(solver);
-    uint256 idx = train.solverLock(_solver(1, address(token), 1), _dst(), '');
-    Train.SolverLock memory lock = train.getSolverLock(hashlock, idx);
+    train.solverLock(_solver(1, address(token), 1), _dst(), '');
+    Train.SolverLock memory lock = train.getSolverLock(hashlock, solver);
     assertEq(lock.amount, 1);
     assertEq(lock.reward, 1);
   }

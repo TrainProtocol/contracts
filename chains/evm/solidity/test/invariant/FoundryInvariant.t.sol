@@ -18,18 +18,19 @@ contract FoundryInvariant is Test, Handlers {
         setup();
 
         // Restrict the fuzzer to the handler entry points (exclude property_/view helpers).
-        bytes4[] memory s = new bytes4[](11);
+        bytes4[] memory s = new bytes4[](12);
         s[0] = this.handler_userLock.selector;
         s[1] = this.handler_userLockFor.selector;
         s[2] = this.handler_solverLock.selector;
         s[3] = this.handler_userLockWithCurve.selector;
         s[4] = this.handler_solverLockWithCurve.selector;
-        s[5] = this.handler_redeemUser.selector;
-        s[6] = this.handler_redeemSolver.selector;
-        s[7] = this.handler_refundUser.selector;
-        s[8] = this.handler_refundUserAsRecipient.selector;
-        s[9] = this.handler_refundSolver.selector;
-        s[10] = this.handler_skipTime.selector;
+        s[5] = this.handler_solverLockDuplicateReverts.selector;
+        s[6] = this.handler_redeemUser.selector;
+        s[7] = this.handler_redeemSolver.selector;
+        s[8] = this.handler_refundUser.selector;
+        s[9] = this.handler_refundUserAsRecipient.selector;
+        s[10] = this.handler_refundSolver.selector;
+        s[11] = this.handler_skipTime.selector;
         targetContract(address(this));
         targetSelector(FuzzSelector({addr: address(this), selectors: s}));
     }
@@ -54,7 +55,7 @@ contract FoundryInvariant is Test, Handlers {
         property_enumerationScaleSafe();
     }
 
-    function invariant_solverIndicesInRange() public {
-        property_solverIndicesInRange();
+    function invariant_solverLockUniquePerSolver() public {
+        property_solverLockUniquePerSolver();
     }
 }

@@ -17,11 +17,14 @@ contract VToken is ERC20, ERC20Permit {
   function mint(address to, uint256 amt) external { _mint(to, amt); }
 }
 
-/// @notice Minimal on-chain verification of the v2 deployment against the LIVE Train + TrainRouter.
-///         Exercises the ERC-2612 gasless forward, the new intent replay guard (consumedIntent), the
+/// @notice Minimal on-chain verification of a live (v2+) deployment against the LIVE Train + TrainRouter.
+///         Exercises the ERC-2612 gasless forward, the intent replay guard (consumedIntent), the
 ///         Train pagination overflow fix (offset=1, limit=max), and redeem — with real broadcast txs.
-///         The deployer plays both `user` (signs) and `relayer` (broadcasts).
-/// @dev  TRAIN=0x877a7629BA8EfA6dd79057ab9105FdE3aDe93d75 ROUTER=0x0d117b12744E1A8b4980c3BdC3542Ad53C27E33a \
+///         The deployer plays both `user` (signs) and `relayer` (broadcasts). User-lock/router paths
+///         only, so it runs unchanged against the v3 deployment (the v3 solver-lock rework doesn't
+///         touch anything exercised here).
+/// @dev  v3 addresses (see DEPLOYMENTS.md):
+///       TRAIN=0x265978c3e2E5dB9C3Ea665cC40C5925A5fc13Ee8 ROUTER=0xF406475230bE1A65d06bd87A2724F78F4b6A2928 \
 ///       forge script script/sepolia/VerifyV2.s.sol --rpc-url $SEPOLIA_RPC_URL --broadcast
 contract VerifyV2 is Script {
   bytes32 constant PERMIT_TYPEHASH =

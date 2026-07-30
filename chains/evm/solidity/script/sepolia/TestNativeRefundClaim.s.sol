@@ -22,7 +22,7 @@ contract TestNativeRefundClaim is SepoliaConfig {
     uint256 balBefore = user.balance;
     vm.startBroadcast(userPk);
     train.refundUser(hu); // requires timelock expired (user != recipient)
-    train.refundSolver(hs, 1); // index 1 = first solver lock for this hashlock
+    train.refundSolver(hs, user); // solver locks are keyed by solver address; the lock was created by user
     vm.stopBroadcast();
 
     console.log('Refunded native user + solver locks to refundTo = user.');
