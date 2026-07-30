@@ -2,24 +2,24 @@ import {
   getProgram, getProvider, loadWallet,
   deriveSolverLockPDA, deriveSolverVaultPDA, deriveSolverRewardVaultPDA, fetchSolverLock,
   confirmTx, requireArg, parseHex, toArray32,
-  BN, PublicKey, anchor,
+  PublicKey, anchor,
 } from "./helpers";
 import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 
-// Usage: npx ts-node scripts/refund-solver-token-diff-reward.ts <hashlock_hex> <index>
+// Usage: npx ts-node scripts/refund-solver-token-diff-reward.ts <hashlock_hex> <solver>
 // token mints, refund_to and rent payer are read from the on-chain lock.
 async function main() {
   const args = process.argv.slice(2);
   const hashlock = parseHex(requireArg(args, 0, "hashlock_hex"));
-  const index = parseInt(requireArg(args, 1, "index"));
+  const solver = new PublicKey(requireArg(args, 1, "solver"));
 
   const program = getProgram();
   const provider = getProvider();
   const wallet = loadWallet();
 
-  const [solverLockPDA] = deriveSolverLockPDA(hashlock, index);
-  const [vaultPDA] = deriveSolverVaultPDA(hashlock, index);
-  const [rewardVaultPDA] = deriveSolverRewardVaultPDA(hashlock, index);
+  const [solverLockPDA] = deriveSolverLockPDA(hashlock, solver);
+  const [vaultPDA] = deriveSolverVaultPDA(hashlock, solver);
+  const [rewardVaultPDA] = deriveSolverRewardVaultPDA(hashlock, solver);
 
   const lockData = await fetchSolverLock(program, solverLockPDA);
   const rentPayer = lockData.rentPayer as any;
@@ -31,11 +31,11 @@ async function main() {
 
   console.log("=== Refund Solver Token (Diff Reward) ===");
   console.log("Hashlock:", hashlock.toString("hex"));
-  console.log("Index:", index);
+  console.log("Solver:", solver.toBase58());
   console.log("Refund To:", refundTo.toBase58());
 
   const sig = await program.methods
-    .refundSolverTokenDiffReward(toArray32(hashlock), new BN(index))
+    .refundSolverTokenDiffReward(toArray32(hashlock), solver)
     .accounts({
       caller: wallet.publicKey,
       solverLock: solverLockPDA,

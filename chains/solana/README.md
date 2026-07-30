@@ -1,6 +1,6 @@
 # Train HTLC — Solana Program
 
-A unified Solana program for Hash Time-Locked Contracts (HTLC) enabling cross-chain atomic swaps, at feature parity with the EVM `Train.sol` v2 contract (`chains/evm/solidity`). Supports native SOL and SPL tokens (including Token-2022), optional different reward tokens for solver locks, pluggable **payout curves**, and three **gasless / sponsored-transaction rails** replacing the EVM `TrainRouter`.
+A unified Solana program for Hash Time-Locked Contracts (HTLC) enabling cross-chain atomic swaps, at feature parity with the EVM `Train.sol` v3 contract (`chains/evm/solidity`). Supports every SOL/SPL principal and reward combination (including Token-2022), pluggable **payout curves**, and three **gasless / sponsored-transaction rails** replacing the EVM `TrainRouter`.
 
 **Program IDs (devnet):**
 
@@ -41,10 +41,10 @@ Both lock accounts store: `secret`, `amount` (measured), `sender`, `timelock`, `
 |---------|-------|---------|
 | UserLock | `["user_lock", hashlock]` | User lock state (doubles as SOL custody) |
 | UserVault | `["user_vault", hashlock]` | Token vault for user locks |
-| SolverLock | `["solver_lock", hashlock, index_le]` | Solver lock state |
-| SolverVault | `["solver_vault", hashlock, index_le]` | Token vault for solver locks |
-| SolverRewardVault | `["solver_reward_vault", hashlock, index_le]` | Reward vault (diff-reward only) |
-| SolverLockCounter | `["solver_count", hashlock]` | 1-based monotone index; **never closed** |
+| SolverLock | `["solver_lock", hashlock, solver]` | Solver lock state |
+| SolverVault | `["solver_vault", hashlock, solver]` | SPL principal/same-token custody |
+| SolverRewardVault | `["solver_reward_vault", hashlock, solver]` | SPL reward custody |
+| SolverLockGuard | `["solver_guard", hashlock, solver]` | Permanent single-use marker; **never closed** |
 | IntentDomain | `["intent_domain"]` | Per-deployment intent domain salt (EIP-712 chainId analog) |
 | Delegate | `["delegate"]` | SPL delegate authority for the intent rail (Permit2-allowance analog) |
 | ConsumedIntent | `["intent", user, nonce_le]` | Single-use intent replay guard |
@@ -134,16 +134,16 @@ Note: classic SPL Token mints (including mainnet USDC) carry no extensions and b
 
 | Topic | EVM | Solana | Why |
 |---|---|---|---|
-| Hashlock uniqueness | Reserved forever (`SwapAlreadyExists`) | Enforced only while the lock account exists; settled user locks **close** (full rent recovery), so a settled hashlock is reusable-by-convention | No on-chain loss path for correct participants (redeem pays the stored recipient only); replay protection never depends on it (rails A/B: tx dedup; rail C: ConsumedIntent). Off-chain matchers must not key on hashlock alone — use (hashlock, lock-creation signature). Solver-side indices stay chain-unique (counter never closes). |
+| Hashlock uniqueness | Reserved forever (`SwapAlreadyExists`) | User locks are unique only while open; solver locks are permanently unique per `(hashlock, solver)` via `SolverLockGuard` | User replay protection never depends on hashlock. The permanent solver guard matches EVM v3 and prevents an unreliable RPC retry from double-funding a swap, even after settlement/lock closure. |
 | Swap history | On-chain `userLockHashes` + paginated getters | Anchor events + `getProgramAccounts` (memcmp on `sender`) for live locks | On-chain per-user arrays are a rent-funded anti-pattern; events are the canonical indexer surface on both chains |
 | Rent / `rent_payer` | n/a | Locks store who paid rent; all closes return rent there | Sponsored flows must not leak relayer rent to users |
 | Amount width | `uint256` | `u64` (SPL native); cross-chain descriptor fields are `u128` | Platform native |
 | Reentrancy guard | `ReentrancyGuardTransient` | none needed | Runtime forbids CPI re-entry; state still flips before any CPI |
-| Solver lock index | computed+returned on-chain | client passes `index == count+1` (PDA derivation), losers of a race retry | PDA addresses must be known pre-transaction |
+| Solver lock key | `(hashlock, solver)` mapping | `["solver_lock", hashlock, solver]` PDA | Same permanent one-lock-per-solver invariant on both runtimes |
 
-## Instructions (22)
+## Instructions (27)
 
-### Locks (6)
+### Locks (8)
 
 | Instruction | Description |
 |-------------|-------------|
@@ -151,16 +151,18 @@ Note: classic SPL Token mints (including mainnet USDC) carry no extensions and b
 | `user_lock_token` | Lock SPL/Token-2022 tokens as user |
 | `user_lock_token_with_intent` | Rail C: lock user tokens from a signed off-chain intent (relayer-submitted) |
 | `solver_lock_sol` | Lock native SOL (+ SOL reward) as solver |
+| `solver_lock_sol_token_reward` | Lock native SOL principal + SPL reward |
 | `solver_lock_token` | Lock tokens, same-token reward (single vault) |
+| `solver_lock_token_sol_reward` | Lock SPL principal + native SOL reward |
 | `solver_lock_token_diff_reward` | Lock tokens with a different reward mint (two vaults) |
 
-### Redeems (5)
+### Redeems (7)
 
-`redeem_user_sol`, `redeem_user_token`, `redeem_solver_sol`, `redeem_solver_token`, `redeem_solver_token_diff_reward` — permissionless with the secret; payout/curve-excess/reward routing as per the invariants above.
+`redeem_user_sol`, `redeem_user_token`, plus all five solver variants (`_sol`, `_sol_token_reward`, `_token`, `_token_sol_reward`, `_token_diff_reward`) — permissionless with the secret; payout/curve-excess/reward routing as per the invariants above.
 
-### Refunds (5)
+### Refunds (7)
 
-`refund_user_sol`, `refund_user_token` (recipient anytime, others after timelock), `refund_solver_sol`, `refund_solver_token`, `refund_solver_token_diff_reward` (anyone, after timelock). Full amount to `refund_to`.
+`refund_user_sol`, `refund_user_token` (recipient anytime, others after timelock), plus all five matching solver refund variants (anyone, after timelock). Full principal and reward go to `refund_to`.
 
 ### Intent & lifecycle (3)
 
@@ -170,9 +172,9 @@ Note: classic SPL Token mints (including mainnet USDC) carry no extensions and b
 | `close_consumed_intent` | After an intent's deadline: reclaim the replay-guard rent to its payer |
 | `close_solver_lock` | Sender/rent-payer reclaims rent from a settled solver lock |
 
-### Views (3)
+### Views (2)
 
-`get_user_lock`, `get_solver_lock`, `get_solver_lock_count`.
+`get_user_lock`, `get_solver_lock(hashlock, solver)`.
 
 ## Actor roles
 
@@ -213,7 +215,7 @@ anchor build          # builds train_htlc + both curve programs
 anchor test           # localnet: core suite + gasless rails + adversarial matrix
 ```
 
-The local suite (`tests/`) — **61 passing** — covers every instruction happy-path plus:
+The local suite (`tests/`) — **64 passing** — covers every instruction happy-path plus:
 payout-curve bounds and account-substitution rejections, the variant-confusion guard
 (token lock via a SOL settlement path), the hashlock-reuse deviation (pinned behavior),
 a cross-chain secret→hashlock byte vector, and an adversarial matrix per gasless rail —

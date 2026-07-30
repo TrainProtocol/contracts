@@ -1,5 +1,5 @@
 import {
-  getProgram, getProvider, loadWallet, deriveSolverLockPDA, deriveSolverCountPDA, deriveSolverVaultPDA, fetchSolverLockCounter,
+  getProgram, getProvider, loadWallet, deriveSolverLockPDA, deriveSolverGuardPDA, deriveSolverVaultPDA,
   confirmTx, requireArg, parseHex, toArray32, solverLockParams,
   PublicKey, anchor,
 } from "./helpers";
@@ -23,28 +23,19 @@ async function main() {
   const wallet = loadWallet();
   const refundTo = args[8] ? new PublicKey(args[8]) : wallet.publicKey;
 
-  const [counterPDA] = deriveSolverCountPDA(hashlock);
-  let nextIndex = 1;
-  try {
-    const counter = await fetchSolverLockCounter(program, counterPDA);
-    nextIndex = (counter.count as any).toNumber() + 1;
-  } catch {
-    // first lock
-  }
-
-  const [solverLockPDA] = deriveSolverLockPDA(hashlock, nextIndex);
-  const [vaultPDA] = deriveSolverVaultPDA(hashlock, nextIndex);
+  const [guardPDA] = deriveSolverGuardPDA(hashlock, wallet.publicKey);
+  const [solverLockPDA] = deriveSolverLockPDA(hashlock, wallet.publicKey);
+  const [vaultPDA] = deriveSolverVaultPDA(hashlock, wallet.publicKey);
   const senderATA = getAssociatedTokenAddressSync(tokenMint, wallet.publicKey);
 
   console.log("=== Solver Lock Token ===");
   console.log("Hashlock:", hashlock.toString("hex"));
-  console.log("Index:", nextIndex);
+  console.log("Solver:", wallet.publicKey.toBase58());
   console.log("Token Mint:", tokenMint.toBase58());
   console.log("Refund to:", refundTo.toBase58());
 
   const params = solverLockParams({
     hashlock: toArray32(hashlock),
-    index: nextIndex,
     amount,
     reward,
     timelockDelta,
@@ -62,7 +53,7 @@ async function main() {
     .accounts({
       payer: wallet.publicKey,
       sender: wallet.publicKey,
-      counter: counterPDA,
+      guard: guardPDA,
       solverLock: solverLockPDA,
       tokenMint: tokenMint,
       senderTokenAccount: senderATA,
@@ -76,7 +67,7 @@ async function main() {
     .rpc();
 
   await confirmTx(provider, sig);
-  console.log("\nDone! Index:", nextIndex);
+  console.log("\nDone!");
 }
 
 main().catch(console.error);

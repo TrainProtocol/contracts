@@ -73,12 +73,28 @@ pub mod train_htlc {
         instructions::solver_lock_sol(ctx, params, data)
     }
 
+    pub fn solver_lock_sol_token_reward(
+        ctx: Context<SolverLockSolTokenReward>,
+        params: SolverLockParams,
+        data: Vec<u8>,
+    ) -> Result<()> {
+        instructions::solver_lock_sol_token_reward(ctx, params, data)
+    }
+
     pub fn solver_lock_token(
         ctx: Context<SolverLockToken>,
         params: SolverLockParams,
         data: Vec<u8>,
     ) -> Result<()> {
         instructions::solver_lock_token(ctx, params, data)
+    }
+
+    pub fn solver_lock_token_sol_reward(
+        ctx: Context<SolverLockTokenSolReward>,
+        params: SolverLockParams,
+        data: Vec<u8>,
+    ) -> Result<()> {
+        instructions::solver_lock_token_sol_reward(ctx, params, data)
     }
 
     pub fn solver_lock_token_diff_reward(
@@ -106,7 +122,14 @@ pub mod train_htlc {
         nonce: u64,
         deadline: u64,
     ) -> Result<()> {
-        instructions::user_lock_token_with_intent(ctx, params, user_data, solver_data, nonce, deadline)
+        instructions::user_lock_token_with_intent(
+            ctx,
+            params,
+            user_data,
+            solver_data,
+            nonce,
+            deadline,
+        )
     }
 
     pub fn close_consumed_intent(ctx: Context<CloseConsumedIntent>) -> Result<()> {
@@ -134,28 +157,46 @@ pub mod train_htlc {
     pub fn redeem_solver_sol(
         ctx: Context<RedeemSolverSol>,
         hashlock: [u8; 32],
-        index: u64,
+        solver: Pubkey,
         secret: [u8; 32],
     ) -> Result<()> {
-        instructions::redeem_solver_sol(ctx, hashlock, index, secret)
+        instructions::redeem_solver_sol(ctx, hashlock, solver, secret)
+    }
+
+    pub fn redeem_solver_sol_token_reward(
+        ctx: Context<RedeemSolverSolTokenReward>,
+        hashlock: [u8; 32],
+        solver: Pubkey,
+        secret: [u8; 32],
+    ) -> Result<()> {
+        instructions::redeem_solver_sol_token_reward(ctx, hashlock, solver, secret)
     }
 
     pub fn redeem_solver_token(
         ctx: Context<RedeemSolverToken>,
         hashlock: [u8; 32],
-        index: u64,
+        solver: Pubkey,
         secret: [u8; 32],
     ) -> Result<()> {
-        instructions::redeem_solver_token(ctx, hashlock, index, secret)
+        instructions::redeem_solver_token(ctx, hashlock, solver, secret)
+    }
+
+    pub fn redeem_solver_token_sol_reward(
+        ctx: Context<RedeemSolverTokenSolReward>,
+        hashlock: [u8; 32],
+        solver: Pubkey,
+        secret: [u8; 32],
+    ) -> Result<()> {
+        instructions::redeem_solver_token_sol_reward(ctx, hashlock, solver, secret)
     }
 
     pub fn redeem_solver_token_diff_reward(
         ctx: Context<RedeemSolverTokenDiffReward>,
         hashlock: [u8; 32],
-        index: u64,
+        solver: Pubkey,
         secret: [u8; 32],
     ) -> Result<()> {
-        instructions::redeem_solver_token_diff_reward(ctx, hashlock, index, secret)
+        instructions::redeem_solver_token_diff_reward(ctx, hashlock, solver, secret)
     }
 
     // ── Refunds ──────────────────────────────────────────────────────────────
@@ -171,25 +212,41 @@ pub mod train_htlc {
     pub fn refund_solver_sol(
         ctx: Context<RefundSolverSol>,
         hashlock: [u8; 32],
-        index: u64,
+        solver: Pubkey,
     ) -> Result<()> {
-        instructions::refund_solver_sol(ctx, hashlock, index)
+        instructions::refund_solver_sol(ctx, hashlock, solver)
+    }
+
+    pub fn refund_solver_sol_token_reward(
+        ctx: Context<RefundSolverSolTokenReward>,
+        hashlock: [u8; 32],
+        solver: Pubkey,
+    ) -> Result<()> {
+        instructions::refund_solver_sol_token_reward(ctx, hashlock, solver)
     }
 
     pub fn refund_solver_token(
         ctx: Context<RefundSolverToken>,
         hashlock: [u8; 32],
-        index: u64,
+        solver: Pubkey,
     ) -> Result<()> {
-        instructions::refund_solver_token(ctx, hashlock, index)
+        instructions::refund_solver_token(ctx, hashlock, solver)
+    }
+
+    pub fn refund_solver_token_sol_reward(
+        ctx: Context<RefundSolverTokenSolReward>,
+        hashlock: [u8; 32],
+        solver: Pubkey,
+    ) -> Result<()> {
+        instructions::refund_solver_token_sol_reward(ctx, hashlock, solver)
     }
 
     pub fn refund_solver_token_diff_reward(
         ctx: Context<RefundSolverTokenDiffReward>,
         hashlock: [u8; 32],
-        index: u64,
+        solver: Pubkey,
     ) -> Result<()> {
-        instructions::refund_solver_token_diff_reward(ctx, hashlock, index)
+        instructions::refund_solver_token_diff_reward(ctx, hashlock, solver)
     }
 
     // ── Rent reclamation ─────────────────────────────────────────────────────
@@ -197,9 +254,9 @@ pub mod train_htlc {
     pub fn close_solver_lock(
         ctx: Context<CloseSolverLock>,
         hashlock: [u8; 32],
-        index: u64,
+        solver: Pubkey,
     ) -> Result<()> {
-        instructions::close_solver_lock(ctx, hashlock, index)
+        instructions::close_solver_lock(ctx, hashlock, solver)
     }
 
     // ── Views ────────────────────────────────────────────────────────────────
@@ -211,15 +268,8 @@ pub mod train_htlc {
     pub fn get_solver_lock(
         ctx: Context<GetSolverLock>,
         hashlock: [u8; 32],
-        index: u64,
+        solver: Pubkey,
     ) -> Result<SolverLockData> {
-        instructions::get_solver_lock(ctx, hashlock, index)
-    }
-
-    pub fn get_solver_lock_count(
-        ctx: Context<GetSolverLockCount>,
-        hashlock: [u8; 32],
-    ) -> Result<u64> {
-        instructions::get_solver_lock_count(ctx, hashlock)
+        instructions::get_solver_lock(ctx, hashlock, solver)
     }
 }

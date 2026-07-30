@@ -18,7 +18,7 @@ import {
   deriveSolverLock,
   deriveSolverVault,
   deriveSolverRewardVault,
-  deriveSolverCount,
+  deriveSolverGuard,
   userLockParams,
   solverLockParams,
   expectError,
@@ -142,23 +142,23 @@ describe("train-htlc core", () => {
     systemProgram: SystemProgram.programId,
   });
 
-  const solverLockSolAccounts = (hashlock: number[], index: number) => ({
+  const solverLockSolAccounts = (hashlock: number[], _index: number) => ({
     payer: signer.publicKey,
     sender: signer.publicKey,
-    counter: deriveSolverCount(programId, hashlock)[0],
-    solverLock: deriveSolverLock(programId, hashlock, index)[0],
+    guard: deriveSolverGuard(programId, hashlock, signer.publicKey)[0],
+    solverLock: deriveSolverLock(programId, hashlock, signer.publicKey)[0],
     payoutCurveProgram: null,
     systemProgram: SystemProgram.programId,
   });
 
-  const solverLockTokenAccounts = (hashlock: number[], index: number) => ({
+  const solverLockTokenAccounts = (hashlock: number[], _index: number) => ({
     payer: signer.publicKey,
     sender: signer.publicKey,
-    counter: deriveSolverCount(programId, hashlock)[0],
-    solverLock: deriveSolverLock(programId, hashlock, index)[0],
+    guard: deriveSolverGuard(programId, hashlock, signer.publicKey)[0],
+    solverLock: deriveSolverLock(programId, hashlock, signer.publicKey)[0],
     tokenMint: mintA,
     senderTokenAccount: signerAtaA,
-    vault: deriveSolverVault(programId, hashlock, index)[0],
+    vault: deriveSolverVault(programId, hashlock, signer.publicKey)[0],
     payoutCurveProgram: null,
     tokenProgram: TOKEN_PROGRAM_ID,
     systemProgram: SystemProgram.programId,
@@ -386,7 +386,7 @@ describe("train-htlc core", () => {
 
       await expectError(
         program.methods
-          .redeemSolverSol(hashlock, new BN(1), secret)
+          .redeemSolverSol(hashlock, signer.publicKey, secret)
           .accounts(redeemSolverSolAccounts(hashlock, 1) as any)
           .rpc(),
         "WrongToken"
@@ -394,7 +394,7 @@ describe("train-htlc core", () => {
       await sleep(3500);
       await expectError(
         program.methods
-          .refundSolverSol(hashlock, new BN(1))
+          .refundSolverSol(hashlock, signer.publicKey)
           .accounts(refundSolverSolAccounts(hashlock, 1) as any)
           .rpc(),
         "WrongToken"
@@ -768,7 +768,7 @@ describe("train-htlc core", () => {
   // ═══════════════════════════════ Solver Lock ═════════════════════════════════
 
   describe("Solver Lock SOL", () => {
-    it("locks amount+reward, increments counter across locks", async () => {
+    it("locks once per solver, rejects retries, and allows another solver", async () => {
       const { hashlock } = generateHashlock();
       const [lockPda] = deriveSolverLock(programId, hashlock, 1);
 
@@ -795,46 +795,52 @@ describe("train-htlc core", () => {
       expect(lock.refundTo.toBase58()).to.equal(refundTo.publicKey.toBase58());
       expect(lock.rentPayer.toBase58()).to.equal(signer.publicKey.toBase58());
 
-      // second lock, same hashlock
-      await program.methods
-        .solverLockSol(
-          solverLockParams({
-            hashlock,
-            index: 2,
-            amount: 1_000_000,
-            recipient: recipient.publicKey,
-            refundTo: refundTo.publicKey,
-          }),
-          Buffer.from([])
-        )
-        .accounts(solverLockSolAccounts(hashlock, 2) as any)
-        .rpc();
-
-      const count = await program.methods
-        .getSolverLockCount(hashlock)
-        .accounts({ counter: deriveSolverCount(programId, hashlock)[0] } as any)
-        .view();
-      expect(count.toNumber()).to.equal(2);
-    });
-
-    it("rejects out-of-order index", async () => {
-      const { hashlock } = generateHashlock();
       await expectError(
         program.methods
           .solverLockSol(
             solverLockParams({
               hashlock,
-              index: 5,
+              index: 2,
               amount: 1_000_000,
               recipient: recipient.publicKey,
               refundTo: refundTo.publicKey,
             }),
             Buffer.from([])
           )
-          .accounts(solverLockSolAccounts(hashlock, 5) as any)
+          .accounts(solverLockSolAccounts(hashlock, 2) as any)
           .rpc(),
-        "InvalidIndex"
+        "SolverLockAlreadyExists"
       );
+
+      await program.methods
+        .solverLockSol(
+          solverLockParams({
+            hashlock,
+            index: 1,
+            amount: 1_000_000,
+            recipient: recipient.publicKey,
+            refundTo: thirdParty.publicKey,
+          }),
+          Buffer.from([])
+        )
+        .accounts({
+          payer: signer.publicKey,
+          sender: thirdParty.publicKey,
+          guard: deriveSolverGuard(
+            programId,
+            hashlock,
+            thirdParty.publicKey
+          )[0],
+          solverLock: deriveSolverLock(
+            programId,
+            hashlock,
+            thirdParty.publicKey
+          )[0],
+          payoutCurveProgram: null,
+          systemProgram: SystemProgram.programId,
+        } as any)
+        .signers([thirdParty])
+        .rpc();
     });
 
     it("rejects reward with reward_timelock_delta >= timelock_delta", async () => {
@@ -894,7 +900,7 @@ describe("train-htlc core", () => {
     const diffAccounts = (hashlock: number[], index: number) => ({
       payer: signer.publicKey,
       sender: signer.publicKey,
-      counter: deriveSolverCount(programId, hashlock)[0],
+      guard: deriveSolverGuard(programId, hashlock, signer.publicKey)[0],
       solverLock: deriveSolverLock(programId, hashlock, index)[0],
       tokenMint: mintA,
       rewardTokenMint: mintB,
@@ -967,6 +973,280 @@ describe("train-htlc core", () => {
     });
   });
 
+  describe("Solver mixed SOL/SPL paths", () => {
+    const solTokenLockAccounts = (hashlock: number[]) => ({
+      payer: signer.publicKey,
+      sender: signer.publicKey,
+      guard: deriveSolverGuard(programId, hashlock, signer.publicKey)[0],
+      solverLock: deriveSolverLock(programId, hashlock, signer.publicKey)[0],
+      rewardTokenMint: mintB,
+      senderRewardTokenAccount: signerAtaB,
+      rewardVault: deriveSolverRewardVault(
+        programId,
+        hashlock,
+        signer.publicKey
+      )[0],
+      payoutCurveProgram: null,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+      rent: SYSVAR_RENT_PUBKEY,
+    });
+
+    const tokenSolLockAccounts = (hashlock: number[]) => ({
+      payer: signer.publicKey,
+      sender: signer.publicKey,
+      guard: deriveSolverGuard(programId, hashlock, signer.publicKey)[0],
+      solverLock: deriveSolverLock(programId, hashlock, signer.publicKey)[0],
+      tokenMint: mintA,
+      senderTokenAccount: signerAtaA,
+      vault: deriveSolverVault(programId, hashlock, signer.publicKey)[0],
+      payoutCurveProgram: null,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+      rent: SYSVAR_RENT_PUBKEY,
+    });
+
+    it("redeems SOL principal and SPL reward", async () => {
+      const { secret, hashlock } = generateHashlock();
+      const amount = 2_000_000;
+      const reward = 40_000;
+      await program.methods
+        .solverLockSolTokenReward(
+          solverLockParams({
+            hashlock,
+            index: 1,
+            amount,
+            reward,
+            rewardTimelockDelta: 1800,
+            recipient: recipient.publicKey,
+            rewardRecipient: rewardRecipient.publicKey,
+            refundTo: refundTo.publicKey,
+          }),
+          Buffer.from([])
+        )
+        .accounts(solTokenLockAccounts(hashlock) as any)
+        .rpc();
+
+      const recipientBefore = await lamports(recipient.publicKey);
+      const rewardAta = ata(mintB, rewardRecipient.publicKey);
+      const rewardBefore = (await provider.connection.getAccountInfo(rewardAta))
+        ? Number((await getAccount(provider.connection, rewardAta)).amount)
+        : 0;
+      await program.methods
+        .redeemSolverSolTokenReward(hashlock, signer.publicKey, secret)
+        .accounts({
+          caller: signer.publicKey,
+          solverLock: deriveSolverLock(
+            programId,
+            hashlock,
+            signer.publicKey
+          )[0],
+          rentPayer: signer.publicKey,
+          recipient: recipient.publicKey,
+          rewardRecipient: rewardRecipient.publicKey,
+          refundTo: refundTo.publicKey,
+          rewardTokenMint: mintB,
+          rewardVault: deriveSolverRewardVault(
+            programId,
+            hashlock,
+            signer.publicKey
+          )[0],
+          rewardRecipientTokenAccount: rewardAta,
+          callerRewardTokenAccount: signerAtaB,
+          payoutCurveProgram: null,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+          rent: SYSVAR_RENT_PUBKEY,
+        } as any)
+        .rpc();
+
+      expect((await lamports(recipient.publicKey)) - recipientBefore).to.equal(
+        amount
+      );
+      expect(
+        Number((await getAccount(provider.connection, rewardAta)).amount) -
+          rewardBefore
+      ).to.equal(reward);
+    });
+
+    it("refunds SOL principal and SPL reward", async () => {
+      const { hashlock } = generateHashlock();
+      const amount = 1_500_000;
+      const reward = 30_000;
+      await program.methods
+        .solverLockSolTokenReward(
+          solverLockParams({
+            hashlock,
+            index: 1,
+            amount,
+            reward,
+            timelockDelta: 2,
+            rewardTimelockDelta: 1,
+            recipient: recipient.publicKey,
+            rewardRecipient: rewardRecipient.publicKey,
+            refundTo: refundTo.publicKey,
+          }),
+          Buffer.from([])
+        )
+        .accounts(solTokenLockAccounts(hashlock) as any)
+        .rpc();
+      await sleep(3500);
+
+      const solBefore = await lamports(refundTo.publicKey);
+      const rewardAta = ata(mintB, refundTo.publicKey);
+      const tokenBefore = (await provider.connection.getAccountInfo(rewardAta))
+        ? Number((await getAccount(provider.connection, rewardAta)).amount)
+        : 0;
+      await program.methods
+        .refundSolverSolTokenReward(hashlock, signer.publicKey)
+        .accounts({
+          caller: signer.publicKey,
+          solverLock: deriveSolverLock(
+            programId,
+            hashlock,
+            signer.publicKey
+          )[0],
+          rentPayer: signer.publicKey,
+          refundTo: refundTo.publicKey,
+          rewardTokenMint: mintB,
+          rewardVault: deriveSolverRewardVault(
+            programId,
+            hashlock,
+            signer.publicKey
+          )[0],
+          refundToRewardTokenAccount: rewardAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+          rent: SYSVAR_RENT_PUBKEY,
+        } as any)
+        .rpc();
+
+      expect((await lamports(refundTo.publicKey)) - solBefore).to.equal(amount);
+      expect(
+        Number((await getAccount(provider.connection, rewardAta)).amount) -
+          tokenBefore
+      ).to.equal(reward);
+    });
+
+    it("redeems SPL principal and SOL reward", async () => {
+      const { secret, hashlock } = generateHashlock();
+      const amount = 60_000;
+      const reward = 800_000;
+      await program.methods
+        .solverLockTokenSolReward(
+          solverLockParams({
+            hashlock,
+            index: 1,
+            amount,
+            reward,
+            rewardTimelockDelta: 1800,
+            recipient: recipient.publicKey,
+            rewardRecipient: rewardRecipient.publicKey,
+            refundTo: refundTo.publicKey,
+          }),
+          Buffer.from([])
+        )
+        .accounts(tokenSolLockAccounts(hashlock) as any)
+        .rpc();
+
+      const recipientAta = ata(mintA, recipient.publicKey);
+      const tokenBefore = (await provider.connection.getAccountInfo(recipientAta))
+        ? Number((await getAccount(provider.connection, recipientAta)).amount)
+        : 0;
+      const rewardBefore = await lamports(rewardRecipient.publicKey);
+      await program.methods
+        .redeemSolverTokenSolReward(hashlock, signer.publicKey, secret)
+        .accounts({
+          caller: signer.publicKey,
+          solverLock: deriveSolverLock(
+            programId,
+            hashlock,
+            signer.publicKey
+          )[0],
+          rentPayer: signer.publicKey,
+          recipient: recipient.publicKey,
+          rewardRecipient: rewardRecipient.publicKey,
+          refundTo: refundTo.publicKey,
+          tokenMint: mintA,
+          vault: deriveSolverVault(programId, hashlock, signer.publicKey)[0],
+          recipientTokenAccount: recipientAta,
+          refundToTokenAccount: null,
+          payoutCurveProgram: null,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+          rent: SYSVAR_RENT_PUBKEY,
+        } as any)
+        .rpc();
+
+      expect(
+        Number((await getAccount(provider.connection, recipientAta)).amount) -
+          tokenBefore
+      ).to.equal(amount);
+      expect(
+        (await lamports(rewardRecipient.publicKey)) - rewardBefore
+      ).to.equal(reward);
+    });
+
+    it("refunds SPL principal and SOL reward", async () => {
+      const { hashlock } = generateHashlock();
+      const amount = 50_000;
+      const reward = 700_000;
+      await program.methods
+        .solverLockTokenSolReward(
+          solverLockParams({
+            hashlock,
+            index: 1,
+            amount,
+            reward,
+            timelockDelta: 2,
+            rewardTimelockDelta: 1,
+            recipient: recipient.publicKey,
+            rewardRecipient: rewardRecipient.publicKey,
+            refundTo: refundTo.publicKey,
+          }),
+          Buffer.from([])
+        )
+        .accounts(tokenSolLockAccounts(hashlock) as any)
+        .rpc();
+      await sleep(3500);
+
+      const refundAta = ata(mintA, refundTo.publicKey);
+      const tokenBefore = (await provider.connection.getAccountInfo(refundAta))
+        ? Number((await getAccount(provider.connection, refundAta)).amount)
+        : 0;
+      const solBefore = await lamports(refundTo.publicKey);
+      await program.methods
+        .refundSolverTokenSolReward(hashlock, signer.publicKey)
+        .accounts({
+          caller: signer.publicKey,
+          solverLock: deriveSolverLock(
+            programId,
+            hashlock,
+            signer.publicKey
+          )[0],
+          rentPayer: signer.publicKey,
+          refundTo: refundTo.publicKey,
+          tokenMint: mintA,
+          vault: deriveSolverVault(programId, hashlock, signer.publicKey)[0],
+          refundToTokenAccount: refundAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+          rent: SYSVAR_RENT_PUBKEY,
+        } as any)
+        .rpc();
+
+      expect(
+        Number((await getAccount(provider.connection, refundAta)).amount) -
+          tokenBefore
+      ).to.equal(amount);
+      expect((await lamports(refundTo.publicKey)) - solBefore).to.equal(reward);
+    });
+  });
+
   // ═══════════════════════════════ Redeem Solver ═══════════════════════════════
 
   describe("Redeem Solver SOL", () => {
@@ -992,7 +1272,7 @@ describe("train-htlc core", () => {
       const recipientBefore = await lamports(recipient.publicKey);
       const rewardBefore = await lamports(rewardRecipient.publicKey);
       await program.methods
-        .redeemSolverSol(hashlock, new BN(1), secret)
+        .redeemSolverSol(hashlock, signer.publicKey, secret)
         .accounts(redeemSolverSolAccounts(hashlock, 1) as any)
         .rpc();
 
@@ -1027,7 +1307,7 @@ describe("train-htlc core", () => {
 
       const thirdBefore = await lamports(thirdParty.publicKey);
       await program.methods
-        .redeemSolverSol(hashlock, new BN(1), secret)
+        .redeemSolverSol(hashlock, signer.publicKey, secret)
         .accounts(
           redeemSolverSolAccounts(hashlock, 1, thirdParty.publicKey) as any
         )
@@ -1055,12 +1335,12 @@ describe("train-htlc core", () => {
         .accounts(solverLockSolAccounts(hashlock, 1) as any)
         .rpc();
       await program.methods
-        .redeemSolverSol(hashlock, new BN(1), secret)
+        .redeemSolverSol(hashlock, signer.publicKey, secret)
         .accounts(redeemSolverSolAccounts(hashlock, 1) as any)
         .rpc();
       await expectError(
         program.methods
-          .redeemSolverSol(hashlock, new BN(1), secret)
+          .redeemSolverSol(hashlock, signer.publicKey, secret)
           .accounts(redeemSolverSolAccounts(hashlock, 1) as any)
           .rpc(),
         "NotPending"
@@ -1089,7 +1369,7 @@ describe("train-htlc core", () => {
         .rpc();
 
       await program.methods
-        .redeemSolverToken(hashlock, new BN(1), secret)
+        .redeemSolverToken(hashlock, signer.publicKey, secret)
         .accounts({
           caller: signer.publicKey,
           solverLock: deriveSolverLock(programId, hashlock, 1)[0],
@@ -1144,7 +1424,7 @@ describe("train-htlc core", () => {
         .accounts({
           payer: signer.publicKey,
           sender: signer.publicKey,
-          counter: deriveSolverCount(programId, hashlock)[0],
+          guard: deriveSolverGuard(programId, hashlock, signer.publicKey)[0],
           solverLock: deriveSolverLock(programId, hashlock, 1)[0],
           tokenMint: mintA,
           rewardTokenMint: mintB,
@@ -1160,7 +1440,7 @@ describe("train-htlc core", () => {
         .rpc();
 
       await program.methods
-        .redeemSolverTokenDiffReward(hashlock, new BN(1), secret)
+        .redeemSolverTokenDiffReward(hashlock, signer.publicKey, secret)
         .accounts({
           caller: signer.publicKey,
           solverLock: deriveSolverLock(programId, hashlock, 1)[0],
@@ -1218,7 +1498,7 @@ describe("train-htlc core", () => {
 
       const before = await lamports(refundTo.publicKey);
       await program.methods
-        .refundSolverSol(hashlock, new BN(1))
+        .refundSolverSol(hashlock, signer.publicKey)
         .accounts(refundSolverSolAccounts(hashlock, 1) as any)
         .rpc();
       expect((await lamports(refundTo.publicKey)) - before).to.equal(2_500_000);
@@ -1241,7 +1521,7 @@ describe("train-htlc core", () => {
         .rpc();
       await expectError(
         program.methods
-          .refundSolverSol(hashlock, new BN(1))
+          .refundSolverSol(hashlock, signer.publicKey)
           .accounts(refundSolverSolAccounts(hashlock, 1) as any)
           .rpc(),
         "TimelockNotExpired"
@@ -1276,7 +1556,7 @@ describe("train-htlc core", () => {
           : 0
       );
       await program.methods
-        .refundSolverToken(hashlock, new BN(1))
+        .refundSolverToken(hashlock, signer.publicKey)
         .accounts({
           caller: signer.publicKey,
           solverLock: deriveSolverLock(programId, hashlock, 1)[0],
@@ -1317,7 +1597,7 @@ describe("train-htlc core", () => {
         .accounts({
           payer: signer.publicKey,
           sender: signer.publicKey,
-          counter: deriveSolverCount(programId, hashlock)[0],
+          guard: deriveSolverGuard(programId, hashlock, signer.publicKey)[0],
           solverLock: deriveSolverLock(programId, hashlock, 1)[0],
           tokenMint: mintA,
           rewardTokenMint: mintB,
@@ -1334,7 +1614,7 @@ describe("train-htlc core", () => {
       await sleep(3500);
 
       await program.methods
-        .refundSolverTokenDiffReward(hashlock, new BN(1))
+        .refundSolverTokenDiffReward(hashlock, signer.publicKey)
         .accounts({
           caller: signer.publicKey,
           solverLock: deriveSolverLock(programId, hashlock, 1)[0],
@@ -1388,21 +1668,21 @@ describe("train-htlc core", () => {
       // still pending
       await expectError(
         program.methods
-          .closeSolverLock(hashlock, new BN(1))
+          .closeSolverLock(hashlock, signer.publicKey)
           .accounts(closeAccounts as any)
           .rpc(),
         "StillPending"
       );
 
       await program.methods
-        .redeemSolverSol(hashlock, new BN(1), secret)
+        .redeemSolverSol(hashlock, signer.publicKey, secret)
         .accounts(redeemSolverSolAccounts(hashlock, 1) as any)
         .rpc();
 
       // wrong caller
       await expectError(
         program.methods
-          .closeSolverLock(hashlock, new BN(1))
+          .closeSolverLock(hashlock, signer.publicKey)
           .accounts({ ...closeAccounts, caller: thirdParty.publicKey } as any)
           .signers([thirdParty])
           .rpc(),
@@ -1410,7 +1690,7 @@ describe("train-htlc core", () => {
       );
 
       await program.methods
-        .closeSolverLock(hashlock, new BN(1))
+        .closeSolverLock(hashlock, signer.publicKey)
         .accounts(closeAccounts as any)
         .rpc();
       expect(
@@ -1419,7 +1699,7 @@ describe("train-htlc core", () => {
         )
       ).to.be.null;
 
-      // closed index can never be re-initialized (counter is permanent)
+      // The compact guard survives closing the full lock, so retries remain blocked.
       await expectError(
         program.methods
           .solverLockSol(
@@ -1434,7 +1714,7 @@ describe("train-htlc core", () => {
           )
           .accounts(solverLockSolAccounts(hashlock, 1) as any)
           .rpc(),
-        "InvalidIndex"
+        "SolverLockAlreadyExists"
       );
     });
   });
@@ -1784,7 +2064,7 @@ describe("train-htlc core", () => {
         .rpc();
 
       const data = await program.methods
-        .getSolverLock(hashlock, new BN(1))
+        .getSolverLock(hashlock, signer.publicKey)
         .accounts({
           solverLock: deriveSolverLock(programId, hashlock, 1)[0],
         } as any)

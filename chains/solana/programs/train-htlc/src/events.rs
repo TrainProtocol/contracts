@@ -33,7 +33,6 @@ pub struct SolverLocked {
     pub sender: Pubkey,
     pub recipient: Pubkey,
     pub refund_to: Pubkey,
-    pub index: u64,
     pub src_chain: String,
     pub token_mint: Pubkey,
     pub amount: u64,
@@ -60,7 +59,7 @@ pub struct UserRefunded {
 #[event]
 pub struct SolverRefunded {
     pub hashlock: [u8; 32],
-    pub index: u64,
+    pub solver: Pubkey,
     pub refund_to: Pubkey,
     pub amount: u64,
     pub reward: u64,
@@ -78,7 +77,7 @@ pub struct UserRedeemed {
 #[event]
 pub struct SolverRedeemed {
     pub hashlock: [u8; 32],
-    pub index: u64,
+    pub solver: Pubkey,
     pub redeemer: Pubkey,
     pub secret: [u8; 32],
     pub payout: u64,

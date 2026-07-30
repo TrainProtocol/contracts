@@ -3,14 +3,14 @@ import {
   requireArg, parseHex, PublicKey,
 } from "./helpers";
 
-// Usage: npx ts-node scripts/get-solver-lock.ts <hashlock_hex> <index>
+// Usage: npx ts-node scripts/get-solver-lock.ts <hashlock_hex> <solver>
 async function main() {
   const args = process.argv.slice(2);
   const hashlock = parseHex(requireArg(args, 0, "hashlock_hex"));
-  const index = parseInt(requireArg(args, 1, "index"));
+  const solver = new PublicKey(requireArg(args, 1, "solver"));
 
   const program = getProgram();
-  const [solverLockPDA] = deriveSolverLockPDA(hashlock, index);
+  const [solverLockPDA] = deriveSolverLockPDA(hashlock, solver);
 
   const lock = await fetchSolverLock(program, solverLockPDA);
 
@@ -22,12 +22,17 @@ async function main() {
 
   console.log("=== Solver Lock ===");
   console.log("PDA:              ", solverLockPDA.toBase58());
-  console.log("Index:            ", index);
+  console.log("Solver:           ", solver.toBase58());
   console.log("Status:           ", STATUS[(lock.status as number)] || lock.status);
   console.log("Amount:           ", (lock.amount as any).toString(), isSOL ? "lamports" : "tokens");
   console.log("Reward:           ", (lock.reward as any).toString());
   console.log("Token Mint:       ", isSOL ? "SOL (native)" : tokenMint.toBase58());
-  console.log("Reward Token Mint:", rewardTokenMint.equals(PublicKey.default) ? "same as token" : rewardTokenMint.toBase58());
+  console.log(
+    "Reward Token Mint:",
+    rewardTokenMint.equals(PublicKey.default)
+      ? "SOL (native)"
+      : rewardTokenMint.toBase58()
+  );
   console.log("Sender:           ", (lock.sender as any).toBase58());
   console.log("Recipient:        ", (lock.recipient as any).toBase58());
   console.log("Reward Recipient: ", (lock.rewardRecipient as any).toBase58());

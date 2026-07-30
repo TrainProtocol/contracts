@@ -30,12 +30,12 @@ programs/train-htlc/src/
   intent.rs        # gasless-intent message format + ed25519 signature verification
   instructions/
     user_lock.rs      # user_lock_sol / user_lock_token
-    solver_lock.rs    # solver_lock_sol / _token / _token_diff_reward
-    redeem.rs         # 5 redeem variants
-    refund.rs         # 5 refund variants
+    solver_lock.rs    # all five SOL/SPL principal + reward variants
+    redeem.rs         # 7 redeem variants
+    refund.rs         # 7 refund variants
     intent_lock.rs    # gasless rail C + intent-domain init + consumed-intent close
     close.rs          # close_solver_lock
-    view.rs           # get_user_lock / get_solver_lock / get_solver_lock_count
+    view.rs           # get_user_lock / get_solver_lock(hashlock, solver)
 
 programs/constant-payout-curve/   # no-op curve (payout == amount), ships to prod
 programs/mock-decay-curve/        # test-only curve
@@ -57,10 +57,10 @@ re-derive every account from the hashlock alone. All PDAs use Anchor's canonical
 |---|---|---|
 | `UserLock` | `["user_lock", hashlock]` | user lock state; for SOL it *is* the custody account |
 | `UserVault` | `["user_vault", hashlock]` | token custody for a user lock; authority = UserLock PDA |
-| `SolverLock` | `["solver_lock", hashlock, index_le]` | solver lock state (indexed; many per hashlock) |
-| `SolverVault` | `["solver_vault", hashlock, index_le]` | token custody for a solver lock |
-| `SolverRewardVault` | `["solver_reward_vault", hashlock, index_le]` | reward custody when reward mint differs |
-| `SolverLockCounter` | `["solver_count", hashlock]` | monotone 1-based index allocator; **never closed** |
+| `SolverLock` | `["solver_lock", hashlock, solver]` | solver lock state |
+| `SolverVault` | `["solver_vault", hashlock, solver]` | SPL principal/same-token custody |
+| `SolverRewardVault` | `["solver_reward_vault", hashlock, solver]` | SPL reward custody |
+| `SolverLockGuard` | `["solver_guard", hashlock, solver]` | permanent single-use marker; **never closed** |
 | `IntentDomain` | `["intent_domain"]` | per-deployment salt for gasless intents |
 | `Delegate` | `["delegate"]` | program's SPL delegate authority for the gasless pull |
 | `ConsumedIntent` | `["intent", user, nonce_le]` | single-use replay guard for a signed intent |
@@ -80,12 +80,15 @@ settlement handlers assert this to prevent driving a token lock through a SOL pa
 fields in the params are destination-side metadata, emitted in the event only.
 
 **Solver lock** (destination): escrows an output amount plus an optional **reward**
-(a bounty that funds gasless redemption). Indexed, so many can share one hashlock.
+(a bounty that funds gasless redemption). It is keyed by `(hashlock, solver)`, so
+many solvers can share one hashlock but each solver can lock only once, ever.
 
-Both come in three fund flavors:
+Solver locks cover all five fund combinations:
 
-- **SOL** — lamports in the state PDA.
+- **SOL principal + SOL reward** — lamports in the state PDA.
+- **SOL principal + SPL reward** — lamports plus a reward vault.
 - **Token, same mint** — one vault holds `amount + reward`.
+- **SPL principal + SOL reward** — a principal vault plus lamports.
 - **Token, different reward mint** — two vaults.
 
 Token amounts are **measured** on the way in (`transfer_in_measured` records the vault
@@ -103,8 +106,9 @@ Empty(0) ──create──▶ Pending(1) ──redeem──▶ Redeemed(3)
 Every settlement path requires `status == Pending` and flips it — and writes the
 revealed `secret` — **before** any funds move or any CPI runs, so a lock settles
 exactly once and reentrancy has nothing to grab. User locks close on settlement
-(rent to `rent_payer`); solver locks stay open until `close_solver_lock`, because
-their counter must never let an index be reused.
+(rent to `rent_payer`); settled solver locks may close via `close_solver_lock`.
+Their compact `SolverLockGuard` remains forever, so closing rent-bearing state never
+re-enables a duplicate lock.
 
 ---
 

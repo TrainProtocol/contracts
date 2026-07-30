@@ -43,12 +43,6 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export function indexToLeBytes(index: number): Buffer {
-  const buf = Buffer.alloc(8);
-  buf.writeBigUInt64LE(BigInt(index));
-  return buf;
-}
-
 export function u64Le(value: number | bigint): Buffer {
   const buf = Buffer.alloc(8);
   buf.writeBigUInt64LE(BigInt(value));
@@ -74,10 +68,14 @@ export function deriveUserVault(programId: PublicKeyT, hashlock: number[]) {
 export function deriveSolverLock(
   programId: PublicKeyT,
   hashlock: number[],
-  index: number
+  solver: PublicKeyT | number
 ) {
+  const solverKey =
+    typeof solver === "number"
+      ? anchor.AnchorProvider.env().wallet.publicKey
+      : solver;
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("solver_lock"), Buffer.from(hashlock), indexToLeBytes(index)],
+    [Buffer.from("solver_lock"), Buffer.from(hashlock), solverKey.toBuffer()],
     programId
   );
 }
@@ -85,10 +83,14 @@ export function deriveSolverLock(
 export function deriveSolverVault(
   programId: PublicKeyT,
   hashlock: number[],
-  index: number
+  solver: PublicKeyT | number
 ) {
+  const solverKey =
+    typeof solver === "number"
+      ? anchor.AnchorProvider.env().wallet.publicKey
+      : solver;
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("solver_vault"), Buffer.from(hashlock), indexToLeBytes(index)],
+    [Buffer.from("solver_vault"), Buffer.from(hashlock), solverKey.toBuffer()],
     programId
   );
 }
@@ -96,21 +98,29 @@ export function deriveSolverVault(
 export function deriveSolverRewardVault(
   programId: PublicKeyT,
   hashlock: number[],
-  index: number
+  solver: PublicKeyT | number
 ) {
+  const solverKey =
+    typeof solver === "number"
+      ? anchor.AnchorProvider.env().wallet.publicKey
+      : solver;
   return PublicKey.findProgramAddressSync(
     [
       Buffer.from("solver_reward_vault"),
       Buffer.from(hashlock),
-      indexToLeBytes(index),
+      solverKey.toBuffer(),
     ],
     programId
   );
 }
 
-export function deriveSolverCount(programId: PublicKeyT, hashlock: number[]) {
+export function deriveSolverGuard(
+  programId: PublicKeyT,
+  hashlock: number[],
+  solver: PublicKeyT
+) {
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("solver_count"), Buffer.from(hashlock)],
+    [Buffer.from("solver_guard"), Buffer.from(hashlock), solver.toBuffer()],
     programId
   );
 }
@@ -181,7 +191,8 @@ export function userLockParams(input: UserLockParamsInput) {
 
 export interface SolverLockParamsInput {
   hashlock: number[];
-  index: number;
+  /** Legacy test-call field; ignored by the v3 solver-keyed params encoder. */
+  index?: number;
   amount: number | InstanceType<typeof BN>;
   reward?: number | InstanceType<typeof BN>;
   timelockDelta?: number;
@@ -196,7 +207,6 @@ export interface SolverLockParamsInput {
 export function solverLockParams(input: SolverLockParamsInput) {
   return {
     hashlock: input.hashlock,
-    index: new BN(input.index),
     amount: new BN(input.amount),
     reward: new BN(input.reward ?? 0),
     timelockDelta: new BN(input.timelockDelta ?? 3600),

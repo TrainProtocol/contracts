@@ -93,10 +93,6 @@ export async function fetchSolverLock(program: Program<Idl>, pda: PublicKey): Pr
   return (program.account as any).solverLock.fetch(pda);
 }
 
-export async function fetchSolverLockCounter(program: Program<Idl>, pda: PublicKey): Promise<any> {
-  return (program.account as any).solverLockCounter.fetch(pda);
-}
-
 export async function fetchIntentDomain(program: Program<Idl>, pda: PublicKey): Promise<any> {
   return (program.account as any).intentDomain.fetch(pda);
 }
@@ -122,43 +118,40 @@ export function deriveUserVaultPDA(hashlock: Buffer): [PublicKey, number] {
 
 export function deriveSolverLockPDA(
   hashlock: Buffer,
-  index: number
+  solver: PublicKey
 ): [PublicKey, number] {
-  const indexBuf = Buffer.alloc(8);
-  indexBuf.writeBigUInt64LE(BigInt(index));
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("solver_lock"), hashlock, indexBuf],
+    [Buffer.from("solver_lock"), hashlock, solver.toBuffer()],
     PROGRAM_ID
   );
 }
 
 export function deriveSolverVaultPDA(
   hashlock: Buffer,
-  index: number
+  solver: PublicKey
 ): [PublicKey, number] {
-  const indexBuf = Buffer.alloc(8);
-  indexBuf.writeBigUInt64LE(BigInt(index));
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("solver_vault"), hashlock, indexBuf],
+    [Buffer.from("solver_vault"), hashlock, solver.toBuffer()],
     PROGRAM_ID
   );
 }
 
 export function deriveSolverRewardVaultPDA(
   hashlock: Buffer,
-  index: number
+  solver: PublicKey
 ): [PublicKey, number] {
-  const indexBuf = Buffer.alloc(8);
-  indexBuf.writeBigUInt64LE(BigInt(index));
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("solver_reward_vault"), hashlock, indexBuf],
+    [Buffer.from("solver_reward_vault"), hashlock, solver.toBuffer()],
     PROGRAM_ID
   );
 }
 
-export function deriveSolverCountPDA(hashlock: Buffer): [PublicKey, number] {
+export function deriveSolverGuardPDA(
+  hashlock: Buffer,
+  solver: PublicKey
+): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("solver_count"), hashlock],
+    [Buffer.from("solver_guard"), hashlock, solver.toBuffer()],
     PROGRAM_ID
   );
 }
@@ -236,7 +229,6 @@ export function userLockParams(
 
 export interface SolverLockParamsInput {
   hashlock: number[];
-  index: number;
   amount: InstanceType<typeof BN> | number | string;
   reward?: InstanceType<typeof BN> | number | string;
   timelockDelta?: InstanceType<typeof BN> | number | string;
@@ -254,7 +246,6 @@ export function solverLockParams(
 ) {
   return {
     hashlock: input.hashlock,
-    index: new BN(input.index),
     amount: new BN(input.amount),
     reward: new BN(input.reward ?? 0),
     timelockDelta: new BN(input.timelockDelta ?? 3600),

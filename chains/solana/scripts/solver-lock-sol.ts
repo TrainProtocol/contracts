@@ -1,5 +1,5 @@
 import {
-  getProgram, getProvider, loadWallet, deriveSolverLockPDA, deriveSolverCountPDA, fetchSolverLockCounter,
+  getProgram, getProvider, loadWallet, deriveSolverLockPDA, deriveSolverGuardPDA,
   confirmTx, requireArg, parseHex, toArray32, solverLockParams,
   PublicKey, anchor,
 } from "./helpers";
@@ -21,21 +21,12 @@ async function main() {
   const wallet = loadWallet();
   const refundTo = args[7] ? new PublicKey(args[7]) : wallet.publicKey;
 
-  // Get current counter to determine next index
-  const [counterPDA] = deriveSolverCountPDA(hashlock);
-  let nextIndex = 1;
-  try {
-    const counter = await fetchSolverLockCounter(program, counterPDA);
-    nextIndex = (counter.count as any).toNumber() + 1;
-  } catch {
-    // Counter doesn't exist yet, first lock = index 1
-  }
-
-  const [solverLockPDA] = deriveSolverLockPDA(hashlock, nextIndex);
+  const [guardPDA] = deriveSolverGuardPDA(hashlock, wallet.publicKey);
+  const [solverLockPDA] = deriveSolverLockPDA(hashlock, wallet.publicKey);
 
   console.log("=== Solver Lock SOL ===");
   console.log("Hashlock:", hashlock.toString("hex"));
-  console.log("Index:", nextIndex);
+  console.log("Solver:", wallet.publicKey.toBase58());
   console.log("SolverLock PDA:", solverLockPDA.toBase58());
   console.log("Amount:", amount, "lamports");
   console.log("Reward:", reward, "lamports");
@@ -43,7 +34,6 @@ async function main() {
 
   const params = solverLockParams({
     hashlock: toArray32(hashlock),
-    index: nextIndex,
     amount,
     reward,
     timelockDelta,
@@ -61,7 +51,7 @@ async function main() {
     .accounts({
       payer: wallet.publicKey,
       sender: wallet.publicKey,
-      counter: counterPDA,
+      guard: guardPDA,
       solverLock: solverLockPDA,
       payoutCurveProgram: null,
       systemProgram: anchor.web3.SystemProgram.programId,
@@ -70,7 +60,7 @@ async function main() {
     .rpc();
 
   await confirmTx(provider, sig);
-  console.log("\nDone! Index:", nextIndex);
+  console.log("\nDone!");
 }
 
 main().catch(console.error);

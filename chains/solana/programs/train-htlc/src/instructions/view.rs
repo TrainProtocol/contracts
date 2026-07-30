@@ -23,7 +23,7 @@ pub fn get_user_lock(ctx: Context<GetUserLock>, _hashlock: [u8; 32]) -> Result<U
 pub fn get_solver_lock(
     ctx: Context<GetSolverLock>,
     _hashlock: [u8; 32],
-    _index: u64,
+    _solver: Pubkey,
 ) -> Result<SolverLockData> {
     let lock = &ctx.accounts.solver_lock;
     Ok(SolverLockData {
@@ -46,10 +46,6 @@ pub fn get_solver_lock(
     })
 }
 
-pub fn get_solver_lock_count(ctx: Context<GetSolverLockCount>, _hashlock: [u8; 32]) -> Result<u64> {
-    Ok(ctx.accounts.counter.count)
-}
-
 #[derive(Accounts)]
 #[instruction(_hashlock: [u8; 32])]
 pub struct GetUserLock<'info> {
@@ -61,21 +57,12 @@ pub struct GetUserLock<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(_hashlock: [u8; 32], _index: u64)]
+#[instruction(_hashlock: [u8; 32], _solver: Pubkey)]
 pub struct GetSolverLock<'info> {
     #[account(
-        seeds = [b"solver_lock", _hashlock.as_ref(), &_index.to_le_bytes()],
+        seeds = [b"solver_lock", _hashlock.as_ref(), _solver.as_ref()],
         bump,
+        constraint = solver_lock.sender == _solver,
     )]
     pub solver_lock: Account<'info, SolverLock>,
-}
-
-#[derive(Accounts)]
-#[instruction(_hashlock: [u8; 32])]
-pub struct GetSolverLockCount<'info> {
-    #[account(
-        seeds = [b"solver_count", _hashlock.as_ref()],
-        bump,
-    )]
-    pub counter: Account<'info, SolverLockCounter>,
 }

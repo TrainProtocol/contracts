@@ -35,11 +35,17 @@ pub fn validate_solver_lock_params(params: &SolverLockParams, now: u64) -> Resul
     Ok((timelock, reward_timelock))
 }
 
-fn check_index(counter: &SolverLockCounter, index: u64) -> Result<()> {
-    require!(
-        index == counter.count.checked_add(1).ok_or(TrainError::Overflow)?,
-        TrainError::InvalidIndex
-    );
+fn claim_solver_slot(
+    guard: &mut Account<SolverLockGuard>,
+    solver: Pubkey,
+    hashlock: [u8; 32],
+) -> Result<()> {
+    // This check runs before any principal or reward transfer. Since the guard is
+    // never closed, it remains effective even after refund/redeem and rent recovery.
+    require!(!guard.used, TrainError::SolverLockAlreadyExists);
+    guard.used = true;
+    guard.solver = solver;
+    guard.hashlock = hashlock;
     Ok(())
 }
 
@@ -92,7 +98,6 @@ fn emit_solver_locked(
         sender,
         recipient: params.recipient,
         refund_to: params.refund_to,
-        index: params.index,
         src_chain: params.src_chain,
         token_mint,
         amount: actual_amount,
@@ -119,7 +124,8 @@ pub fn solver_lock_sol(
 ) -> Result<()> {
     let now = Clock::get()?.unix_timestamp as u64;
     let (timelock, reward_timelock) = validate_solver_lock_params(&params, now)?;
-    check_index(&ctx.accounts.counter, params.index)?;
+    let sender = ctx.accounts.sender.key();
+    claim_solver_slot(&mut ctx.accounts.guard, sender, params.hashlock)?;
 
     let curve_account = ctx
         .accounts
@@ -147,7 +153,6 @@ pub fn solver_lock_sol(
     );
     system_program::transfer(cpi_ctx, total)?;
 
-    let sender = ctx.accounts.sender.key();
     let rent_payer = ctx.accounts.payer.key();
     store_solver_lock(
         &mut ctx.accounts.solver_lock,
@@ -162,8 +167,6 @@ pub fn solver_lock_sol(
         reward_timelock,
         now,
     );
-    ctx.accounts.counter.count = params.index;
-
     emit_solver_locked(
         params,
         sender,
@@ -192,17 +195,17 @@ pub struct SolverLockSol<'info> {
     #[account(
         init_if_needed,
         payer = payer,
-        space = 8 + SolverLockCounter::INIT_SPACE,
-        seeds = [b"solver_count", params.hashlock.as_ref()],
+        space = 8 + SolverLockGuard::INIT_SPACE,
+        seeds = [b"solver_guard", params.hashlock.as_ref(), sender.key().as_ref()],
         bump,
     )]
-    pub counter: Account<'info, SolverLockCounter>,
+    pub guard: Account<'info, SolverLockGuard>,
 
     #[account(
-        init,
+        init_if_needed,
         payer = payer,
         space = 8 + SolverLock::INIT_SPACE,
-        seeds = [b"solver_lock", params.hashlock.as_ref(), &params.index.to_le_bytes()],
+        seeds = [b"solver_lock", params.hashlock.as_ref(), sender.key().as_ref()],
         bump,
     )]
     pub solver_lock: Account<'info, SolverLock>,
@@ -211,6 +214,138 @@ pub struct SolverLockSol<'info> {
     pub payout_curve_program: Option<UncheckedAccount<'info>>,
 
     pub system_program: Program<'info, System>,
+}
+
+// ── SolverLock: native SOL amount + SPL token reward ────────────────────────────
+
+pub fn solver_lock_sol_token_reward(
+    ctx: Context<SolverLockSolTokenReward>,
+    params: SolverLockParams,
+    data: Vec<u8>,
+) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp as u64;
+    let (timelock, reward_timelock) = validate_solver_lock_params(&params, now)?;
+    require!(params.reward > 0, TrainError::ZeroAmount);
+    let sender = ctx.accounts.sender.key();
+    claim_solver_slot(&mut ctx.accounts.guard, sender, params.hashlock)?;
+
+    utils::validate_mint_extensions(&ctx.accounts.reward_token_mint.to_account_info())?;
+    let curve_account = ctx
+        .accounts
+        .payout_curve_program
+        .as_ref()
+        .map(|a| a.to_account_info());
+    utils::validate_payout_curve(
+        params.payout_curve,
+        curve_account.as_ref(),
+        &params.payout_curve_data,
+        params.amount,
+        now,
+    )?;
+
+    let principal_transfer = CpiContext::new(
+        ctx.accounts.system_program.to_account_info(),
+        system_program::Transfer {
+            from: ctx.accounts.sender.to_account_info(),
+            to: ctx.accounts.solver_lock.to_account_info(),
+        },
+    );
+    system_program::transfer(principal_transfer, params.amount)?;
+
+    let actual_reward = utils::transfer_in_measured(
+        ctx.accounts.sender_reward_token_account.to_account_info(),
+        &mut ctx.accounts.reward_vault,
+        ctx.accounts.reward_token_mint.to_account_info(),
+        ctx.accounts.sender.to_account_info(),
+        ctx.accounts.token_program.to_account_info(),
+        &[],
+        params.reward,
+        ctx.accounts.reward_token_mint.decimals,
+    )?;
+
+    let reward_token_mint = ctx.accounts.reward_token_mint.key();
+    store_solver_lock(
+        &mut ctx.accounts.solver_lock,
+        &params,
+        sender,
+        ctx.accounts.payer.key(),
+        Pubkey::default(),
+        reward_token_mint,
+        params.amount,
+        actual_reward,
+        timelock,
+        reward_timelock,
+        now,
+    );
+
+    emit_solver_locked(
+        params,
+        sender,
+        Pubkey::default(),
+        reward_token_mint,
+        ctx.accounts.solver_lock.amount,
+        actual_reward,
+        timelock,
+        reward_timelock,
+        data,
+    );
+    Ok(())
+}
+
+#[derive(Accounts)]
+#[instruction(params: SolverLockParams)]
+pub struct SolverLockSolTokenReward<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
+    /// Funds both the native principal and the SPL reward.
+    #[account(mut)]
+    pub sender: Signer<'info>,
+
+    #[account(
+        init_if_needed,
+        payer = payer,
+        space = 8 + SolverLockGuard::INIT_SPACE,
+        seeds = [b"solver_guard", params.hashlock.as_ref(), sender.key().as_ref()],
+        bump,
+    )]
+    pub guard: Account<'info, SolverLockGuard>,
+
+    #[account(
+        init_if_needed,
+        payer = payer,
+        space = 8 + SolverLock::INIT_SPACE,
+        seeds = [b"solver_lock", params.hashlock.as_ref(), sender.key().as_ref()],
+        bump,
+    )]
+    pub solver_lock: Account<'info, SolverLock>,
+
+    pub reward_token_mint: InterfaceAccount<'info, Mint>,
+
+    #[account(
+        mut,
+        constraint = sender_reward_token_account.owner == sender.key() @ TrainError::WrongToken,
+        constraint = sender_reward_token_account.mint == reward_token_mint.key() @ TrainError::WrongToken,
+    )]
+    pub sender_reward_token_account: InterfaceAccount<'info, TokenAccount>,
+
+    #[account(
+        init_if_needed,
+        payer = payer,
+        seeds = [b"solver_reward_vault", params.hashlock.as_ref(), sender.key().as_ref()],
+        bump,
+        token::mint = reward_token_mint,
+        token::authority = solver_lock,
+        token::token_program = token_program,
+    )]
+    pub reward_vault: InterfaceAccount<'info, TokenAccount>,
+
+    /// CHECK: payout curve program; validated in the handler.
+    pub payout_curve_program: Option<UncheckedAccount<'info>>,
+
+    pub token_program: Interface<'info, TokenInterface>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
 }
 
 // ── SolverLock: SPL token amount + same-token reward (single vault) ─────────────
@@ -222,7 +357,8 @@ pub fn solver_lock_token(
 ) -> Result<()> {
     let now = Clock::get()?.unix_timestamp as u64;
     let (timelock, reward_timelock) = validate_solver_lock_params(&params, now)?;
-    check_index(&ctx.accounts.counter, params.index)?;
+    let sender = ctx.accounts.sender.key();
+    claim_solver_slot(&mut ctx.accounts.guard, sender, params.hashlock)?;
 
     utils::validate_mint_extensions(&ctx.accounts.token_mint.to_account_info())?;
     let curve_account = ctx
@@ -253,9 +389,9 @@ pub fn solver_lock_token(
         ctx.accounts.token_mint.decimals,
     )?;
     // Proportional split of the measured total (fee-on-transfer safe).
-    let (actual_amount, actual_reward) = utils::split_measured(received, params.amount, params.reward)?;
+    let (actual_amount, actual_reward) =
+        utils::split_measured(received, params.amount, params.reward)?;
 
-    let sender = ctx.accounts.sender.key();
     let rent_payer = ctx.accounts.payer.key();
     let token_mint_key = ctx.accounts.token_mint.key();
     store_solver_lock(
@@ -271,8 +407,6 @@ pub fn solver_lock_token(
         reward_timelock,
         now,
     );
-    ctx.accounts.counter.count = params.index;
-
     emit_solver_locked(
         params,
         sender,
@@ -300,17 +434,17 @@ pub struct SolverLockToken<'info> {
     #[account(
         init_if_needed,
         payer = payer,
-        space = 8 + SolverLockCounter::INIT_SPACE,
-        seeds = [b"solver_count", params.hashlock.as_ref()],
+        space = 8 + SolverLockGuard::INIT_SPACE,
+        seeds = [b"solver_guard", params.hashlock.as_ref(), sender.key().as_ref()],
         bump,
     )]
-    pub counter: Account<'info, SolverLockCounter>,
+    pub guard: Account<'info, SolverLockGuard>,
 
     #[account(
-        init,
+        init_if_needed,
         payer = payer,
         space = 8 + SolverLock::INIT_SPACE,
-        seeds = [b"solver_lock", params.hashlock.as_ref(), &params.index.to_le_bytes()],
+        seeds = [b"solver_lock", params.hashlock.as_ref(), sender.key().as_ref()],
         bump,
     )]
     pub solver_lock: Account<'info, SolverLock>,
@@ -325,9 +459,141 @@ pub struct SolverLockToken<'info> {
     pub sender_token_account: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
-        init,
+        init_if_needed,
         payer = payer,
-        seeds = [b"solver_vault", params.hashlock.as_ref(), &params.index.to_le_bytes()],
+        seeds = [b"solver_vault", params.hashlock.as_ref(), sender.key().as_ref()],
+        bump,
+        token::mint = token_mint,
+        token::authority = solver_lock,
+        token::token_program = token_program,
+    )]
+    pub vault: InterfaceAccount<'info, TokenAccount>,
+
+    /// CHECK: payout curve program; validated in the handler.
+    pub payout_curve_program: Option<UncheckedAccount<'info>>,
+
+    pub token_program: Interface<'info, TokenInterface>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
+// ── SolverLock: SPL token amount + native SOL reward ────────────────────────────
+
+pub fn solver_lock_token_sol_reward(
+    ctx: Context<SolverLockTokenSolReward>,
+    params: SolverLockParams,
+    data: Vec<u8>,
+) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp as u64;
+    let (timelock, reward_timelock) = validate_solver_lock_params(&params, now)?;
+    require!(params.reward > 0, TrainError::ZeroAmount);
+    let sender = ctx.accounts.sender.key();
+    claim_solver_slot(&mut ctx.accounts.guard, sender, params.hashlock)?;
+
+    utils::validate_mint_extensions(&ctx.accounts.token_mint.to_account_info())?;
+    let curve_account = ctx
+        .accounts
+        .payout_curve_program
+        .as_ref()
+        .map(|a| a.to_account_info());
+    utils::validate_payout_curve(
+        params.payout_curve,
+        curve_account.as_ref(),
+        &params.payout_curve_data,
+        params.amount,
+        now,
+    )?;
+
+    let actual_amount = utils::transfer_in_measured(
+        ctx.accounts.sender_token_account.to_account_info(),
+        &mut ctx.accounts.vault,
+        ctx.accounts.token_mint.to_account_info(),
+        ctx.accounts.sender.to_account_info(),
+        ctx.accounts.token_program.to_account_info(),
+        &[],
+        params.amount,
+        ctx.accounts.token_mint.decimals,
+    )?;
+
+    let reward_transfer = CpiContext::new(
+        ctx.accounts.system_program.to_account_info(),
+        system_program::Transfer {
+            from: ctx.accounts.sender.to_account_info(),
+            to: ctx.accounts.solver_lock.to_account_info(),
+        },
+    );
+    system_program::transfer(reward_transfer, params.reward)?;
+
+    let token_mint = ctx.accounts.token_mint.key();
+    store_solver_lock(
+        &mut ctx.accounts.solver_lock,
+        &params,
+        sender,
+        ctx.accounts.payer.key(),
+        token_mint,
+        Pubkey::default(),
+        actual_amount,
+        params.reward,
+        timelock,
+        reward_timelock,
+        now,
+    );
+
+    emit_solver_locked(
+        params,
+        sender,
+        token_mint,
+        Pubkey::default(),
+        actual_amount,
+        ctx.accounts.solver_lock.reward,
+        timelock,
+        reward_timelock,
+        data,
+    );
+    Ok(())
+}
+
+#[derive(Accounts)]
+#[instruction(params: SolverLockParams)]
+pub struct SolverLockTokenSolReward<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
+    /// Funds both the SPL principal and native reward.
+    #[account(mut)]
+    pub sender: Signer<'info>,
+
+    #[account(
+        init_if_needed,
+        payer = payer,
+        space = 8 + SolverLockGuard::INIT_SPACE,
+        seeds = [b"solver_guard", params.hashlock.as_ref(), sender.key().as_ref()],
+        bump,
+    )]
+    pub guard: Account<'info, SolverLockGuard>,
+
+    #[account(
+        init_if_needed,
+        payer = payer,
+        space = 8 + SolverLock::INIT_SPACE,
+        seeds = [b"solver_lock", params.hashlock.as_ref(), sender.key().as_ref()],
+        bump,
+    )]
+    pub solver_lock: Account<'info, SolverLock>,
+
+    pub token_mint: InterfaceAccount<'info, Mint>,
+
+    #[account(
+        mut,
+        constraint = sender_token_account.owner == sender.key() @ TrainError::WrongToken,
+        constraint = sender_token_account.mint == token_mint.key() @ TrainError::WrongToken,
+    )]
+    pub sender_token_account: InterfaceAccount<'info, TokenAccount>,
+
+    #[account(
+        init_if_needed,
+        payer = payer,
+        seeds = [b"solver_vault", params.hashlock.as_ref(), sender.key().as_ref()],
         bump,
         token::mint = token_mint,
         token::authority = solver_lock,
@@ -352,7 +618,8 @@ pub fn solver_lock_token_diff_reward(
 ) -> Result<()> {
     let now = Clock::get()?.unix_timestamp as u64;
     let (timelock, reward_timelock) = validate_solver_lock_params(&params, now)?;
-    check_index(&ctx.accounts.counter, params.index)?;
+    let sender = ctx.accounts.sender.key();
+    claim_solver_slot(&mut ctx.accounts.guard, sender, params.hashlock)?;
     require!(
         ctx.accounts.token_mint.key() != ctx.accounts.reward_token_mint.key(),
         TrainError::WrongToken
@@ -398,7 +665,6 @@ pub fn solver_lock_token_diff_reward(
         0
     };
 
-    let sender = ctx.accounts.sender.key();
     let rent_payer = ctx.accounts.payer.key();
     let token_mint_key = ctx.accounts.token_mint.key();
     let reward_token_mint_key = ctx.accounts.reward_token_mint.key();
@@ -415,8 +681,6 @@ pub fn solver_lock_token_diff_reward(
         reward_timelock,
         now,
     );
-    ctx.accounts.counter.count = params.index;
-
     emit_solver_locked(
         params,
         sender,
@@ -444,17 +708,17 @@ pub struct SolverLockTokenDiffReward<'info> {
     #[account(
         init_if_needed,
         payer = payer,
-        space = 8 + SolverLockCounter::INIT_SPACE,
-        seeds = [b"solver_count", params.hashlock.as_ref()],
+        space = 8 + SolverLockGuard::INIT_SPACE,
+        seeds = [b"solver_guard", params.hashlock.as_ref(), sender.key().as_ref()],
         bump,
     )]
-    pub counter: Box<Account<'info, SolverLockCounter>>,
+    pub guard: Box<Account<'info, SolverLockGuard>>,
 
     #[account(
-        init,
+        init_if_needed,
         payer = payer,
         space = 8 + SolverLock::INIT_SPACE,
-        seeds = [b"solver_lock", params.hashlock.as_ref(), &params.index.to_le_bytes()],
+        seeds = [b"solver_lock", params.hashlock.as_ref(), sender.key().as_ref()],
         bump,
     )]
     pub solver_lock: Box<Account<'info, SolverLock>>,
@@ -477,9 +741,9 @@ pub struct SolverLockTokenDiffReward<'info> {
     pub sender_reward_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
-        init,
+        init_if_needed,
         payer = payer,
-        seeds = [b"solver_vault", params.hashlock.as_ref(), &params.index.to_le_bytes()],
+        seeds = [b"solver_vault", params.hashlock.as_ref(), sender.key().as_ref()],
         bump,
         token::mint = token_mint,
         token::authority = solver_lock,
@@ -488,9 +752,9 @@ pub struct SolverLockTokenDiffReward<'info> {
     pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
-        init,
+        init_if_needed,
         payer = payer,
-        seeds = [b"solver_reward_vault", params.hashlock.as_ref(), &params.index.to_le_bytes()],
+        seeds = [b"solver_reward_vault", params.hashlock.as_ref(), sender.key().as_ref()],
         bump,
         token::mint = reward_token_mint,
         token::authority = solver_lock,

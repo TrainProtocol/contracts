@@ -16,8 +16,8 @@ pub enum TrainError {
     HashlockMismatch,
     #[msg("Reward timelock delta must be less than timelock delta.")]
     RewardTimelockNotLessThanTimelock,
-    #[msg("Invalid index: must equal current count + 1.")]
-    InvalidIndex,
+    #[msg("This solver already created a lock for this hashlock.")]
+    SolverLockAlreadyExists,
     #[msg("Wrong token mint provided.")]
     WrongToken,
     #[msg("Wrong sender address.")]

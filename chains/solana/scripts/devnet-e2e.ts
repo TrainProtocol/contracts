@@ -3,7 +3,7 @@
  *
  * Runs EVERY protocol flow against devnet — each deposit rail, each gasless path,
  * settlement and refunds — happy paths AND unhappy paths — using the project's
- * existing funded devnet keypairs with production-faithful actor separation
+ * funded devnet keypairs with production-faithful actor separation
  * (the token depositor is never the gas/fee payer). Every scenario lands as a real
  * devnet transaction where physically possible (happy = success signature; unhappy
  * program/constraint errors = failed signature via skipPreflight); the small subset
@@ -16,22 +16,25 @@
  * Usage:
  *   npx ts-node scripts/devnet-e2e.ts
  *
- * Environment (.env, all optional except the keypairs):
+ * Environment (.env, all optional):
  *   ANCHOR_PROVIDER_URL / RPC_URL   devnet RPC (default https://api.devnet.solana.com)
  *   DEFAULT_KEY                     relayer / fee-payer / redeemer + mint authority (well funded)
+ *   FEE_PAYER_KEYPAIR               path to relayer keypair (defaults to Anchor/Solana CLI wallet)
  *   SOLVER_KEY                      "user"  swap party (source depositor)
  *   THIRDPARTY_KEY                  "solver" swap party (destination depositor)
  *   TRAIN_PROGRAM_ID / CONSTANT_CURVE_ID / MOCK_CURVE_ID   program-id overrides
  *
- * The harness NEVER funds or sweeps the wallets — it only prechecks balances and
- * fails fast if a wallet is underfunded. Fresh mints are created per run (fee payer
- * is mint authority), so runs are idempotent without touching wallet SOL.
+ * If actor keys are omitted, ephemeral in-memory actor wallets are generated and
+ * funded by the fee payer for this run. Their secret keys are never written to disk.
+ * Fresh mints are created per run (fee payer is mint authority), so runs are
+ * idempotent without touching existing token balances.
  */
 import * as anchor from "@coral-xyz/anchor";
 import * as splToken from "@solana/spl-token";
 import { createHash, randomBytes } from "crypto";
 import nacl from "tweetnacl";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import * as dotenv from "dotenv";
 
@@ -88,12 +91,18 @@ const TIMELOCK_SHORT = 25; // seconds; devnet-safe
 // (those persist until their deadline passes). Keeps the harness idempotent.
 const NONCE_BASE = Date.now();
 
-// ─── Keypair loading (existing funded .env keys — never regenerated) ─────────────
+// ─── Keypair loading ──────────────────────────────────────────────────────────────
 
 function loadEnvKey(name: string): KeypairT {
   const raw = process.env[name];
   if (!raw) throw new Error(`${name} missing from .env`);
   return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(raw)));
+}
+
+function loadKeypairFile(file: string): KeypairT {
+  return Keypair.fromSecretKey(
+    Uint8Array.from(JSON.parse(fs.readFileSync(file, "utf-8")))
+  );
 }
 
 // Role mapping (see README "Actor roles"):
@@ -104,9 +113,17 @@ function loadEnvKey(name: string): KeypairT {
 // the debit but never pays fees/rent — production-faithful gasless separation on
 // every flow. recipient / refund_to / reward_recipient are the natural swap
 // counterparty among the three keys.
-const feePayer = loadEnvKey("DEFAULT_KEY");
-const userKp = loadEnvKey("SOLVER_KEY");
-const solverKp = loadEnvKey("THIRDPARTY_KEY");
+const walletPath =
+  process.env.FEE_PAYER_KEYPAIR ||
+  process.env.ANCHOR_WALLET ||
+  path.join(os.homedir(), ".config", "solana", "id.json");
+const feePayer = process.env.DEFAULT_KEY
+  ? loadEnvKey("DEFAULT_KEY")
+  : loadKeypairFile(walletPath);
+const ephemeralUser = !process.env.SOLVER_KEY;
+const ephemeralSolver = !process.env.THIRDPARTY_KEY;
+const userKp = ephemeralUser ? Keypair.generate() : loadEnvKey("SOLVER_KEY");
+const solverKp = ephemeralSolver ? Keypair.generate() : loadEnvKey("THIRDPARTY_KEY");
 
 const connection = new Connection(RPC_URL, "confirmed");
 const provider = new anchor.AnchorProvider(connection, new anchor.Wallet(feePayer), {
@@ -278,11 +295,6 @@ async function expectRejectOffChain(
 
 // ─── PDA + params helpers ─────────────────────────────────────────────────────────
 
-const idxLe = (i: number) => {
-  const b = Buffer.alloc(8);
-  b.writeBigUInt64LE(BigInt(i));
-  return b;
-};
 const u64Le = (v: number | bigint) => {
   const b = Buffer.alloc(8);
   b.writeBigUInt64LE(BigInt(v));
@@ -292,13 +304,14 @@ const pda = (seeds: (Buffer | Uint8Array)[]) =>
   PublicKey.findProgramAddressSync(seeds, TRAIN_PROGRAM_ID)[0];
 const userLockPda = (h: number[]) => pda([Buffer.from("user_lock"), Buffer.from(h)]);
 const userVaultPda = (h: number[]) => pda([Buffer.from("user_vault"), Buffer.from(h)]);
-const solverLockPda = (h: number[], i: number) =>
-  pda([Buffer.from("solver_lock"), Buffer.from(h), idxLe(i)]);
-const solverVaultPda = (h: number[], i: number) =>
-  pda([Buffer.from("solver_vault"), Buffer.from(h), idxLe(i)]);
-const solverRewardVaultPda = (h: number[], i: number) =>
-  pda([Buffer.from("solver_reward_vault"), Buffer.from(h), idxLe(i)]);
-const solverCountPda = (h: number[]) => pda([Buffer.from("solver_count"), Buffer.from(h)]);
+const solverLockPda = (h: number[], solver: PublicKeyT) =>
+  pda([Buffer.from("solver_lock"), Buffer.from(h), solver.toBuffer()]);
+const solverVaultPda = (h: number[], solver: PublicKeyT) =>
+  pda([Buffer.from("solver_vault"), Buffer.from(h), solver.toBuffer()]);
+const solverRewardVaultPda = (h: number[], solver: PublicKeyT) =>
+  pda([Buffer.from("solver_reward_vault"), Buffer.from(h), solver.toBuffer()]);
+const solverGuardPda = (h: number[], solver: PublicKeyT) =>
+  pda([Buffer.from("solver_guard"), Buffer.from(h), solver.toBuffer()]);
 const intentDomainPda = pda([Buffer.from("intent_domain")]);
 const delegatePda = pda([Buffer.from("delegate")]);
 const consumedIntentPda = (u: PublicKeyT, nonce: number) =>
@@ -348,7 +361,7 @@ function userLockParams(i: {
 }
 function solverLockParams(i: {
   hashlock: number[];
-  index: number;
+  index?: number;
   amount: number;
   reward?: number;
   timelockDelta?: number;
@@ -359,7 +372,6 @@ function solverLockParams(i: {
 }) {
   return {
     hashlock: i.hashlock,
-    index: new BN(i.index),
     amount: new BN(i.amount),
     reward: new BN(i.reward ?? 0),
     timelockDelta: new BN(i.timelockDelta ?? 3600),
@@ -418,8 +430,8 @@ function ed25519Ix(signer: KeypairT, message: Buffer) {
 }
 
 const fetchUserLock = (h: number[]) => (program.account as any).userLock.fetch(userLockPda(h));
-const fetchSolverLock = (h: number[], i: number) =>
-  (program.account as any).solverLock.fetch(solverLockPda(h, i));
+const fetchSolverLock = (h: number[], solver: PublicKeyT) =>
+  (program.account as any).solverLock.fetch(solverLockPda(h, solver));
 
 // ─── Flow runner ──────────────────────────────────────────────────────────────────
 
@@ -448,7 +460,7 @@ async function flow(id: string, name: string, fn: () => Promise<void>, skip?: st
 let startedIso = "";
 let finishedIso = "";
 // Latest local suite result (run `anchor test` separately; updated per release).
-let localTest = process.env.LOCAL_TEST_RESULT || "61 passing / 0 failing (anchor test, localnet)";
+let localTest = process.env.LOCAL_TEST_RESULT || "64 passing / 0 failing (anchor test, localnet)";
 
 function writeReport() {
   finishedIso = new Date().toISOString();
@@ -581,7 +593,28 @@ async function main() {
   const constantDeployed = !!(await connection.getAccountInfo(CONSTANT_CURVE_ID))?.executable;
   const mockDeployed = !!(await connection.getAccountInfo(MOCK_CURVE_ID))?.executable;
 
-  // Preflight: balances (NO funding, NO sweep — real wallets).
+  // Fund only generated, in-memory actor wallets. User-supplied actors retain the
+  // prior fail-fast behavior and are never topped up implicitly.
+  const actorTarget = Math.ceil(0.1 * LAMPORTS_PER_SOL);
+  for (const [name, kp, ephemeral] of [
+    ["user", userKp, ephemeralUser],
+    ["solver", solverKp, ephemeralSolver],
+  ] as const) {
+    const current = await bal(kp.publicKey);
+    if (ephemeral && current < actorTarget) {
+      const sig = await send(
+        [],
+        SystemProgram.transfer({
+          fromPubkey: feePayer.publicKey,
+          toPubkey: kp.publicKey,
+          lamports: actorTarget - current,
+        })
+      );
+      txRow(`fund ephemeral ${name}`, sig, await slotOf(sig), solFmt(actorTarget - current));
+    }
+  }
+
+  // Preflight balances.
   const feeBal = await bal(feePayer.publicKey);
   const userBal = await bal(userKp.publicKey);
   const solverBal = await bal(solverKp.publicKey);
@@ -815,25 +848,24 @@ async function main() {
   await flow("S6", "solver lock SOL / redeem (reward pre-timelock)", async () => {
     const { secret, hashlock } = newHashlock();
     const amount = 1_200_000, reward = 300_000;
-    const sAcc = (i: number) => ({ payer: feePayer.publicKey, sender: solverKp.publicKey, counter: solverCountPda(hashlock), solverLock: solverLockPda(hashlock, i), payoutCurveProgram: null, systemProgram: SystemProgram.programId });
-    // negative: out-of-order index
-    await expectFailOnChain("solver_lock_sol index=5 out of order", "InvalidIndex", [solverKp], await program.methods.solverLockSol(solverLockParams({ hashlock, index: 5, amount, recipient: userKp.publicKey, refundTo: solverKp.publicKey }), Buffer.from([])).accounts(sAcc(5) as any).instruction());
+    const sAcc = (h: number[]) => ({ payer: feePayer.publicKey, sender: solverKp.publicKey, guard: solverGuardPda(h, solverKp.publicKey), solverLock: solverLockPda(h, solverKp.publicKey), payoutCurveProgram: null, systemProgram: SystemProgram.programId });
     // negative: reward_timelock_delta >= timelock_delta
     const bad = newHashlock();
-    await expectFailOnChain("solver_lock_sol reward tl >= tl", "RewardTimelockNotLessThanTimelock", [solverKp], await program.methods.solverLockSol(solverLockParams({ hashlock: bad.hashlock, index: 1, amount, reward: 100, timelockDelta: 100, rewardTimelockDelta: 100, recipient: userKp.publicKey, rewardRecipient: solverKp.publicKey, refundTo: solverKp.publicKey }), Buffer.from([])).accounts({ ...sAcc(1), counter: solverCountPda(bad.hashlock), solverLock: solverLockPda(bad.hashlock, 1) } as any).instruction());
+    await expectFailOnChain("solver_lock_sol reward tl >= tl", "RewardTimelockNotLessThanTimelock", [solverKp], await program.methods.solverLockSol(solverLockParams({ hashlock: bad.hashlock, amount, reward: 100, timelockDelta: 100, rewardTimelockDelta: 100, recipient: userKp.publicKey, rewardRecipient: solverKp.publicKey, refundTo: solverKp.publicKey }), Buffer.from([])).accounts(sAcc(bad.hashlock) as any).instruction());
 
     // happy: solver lock (sender=solver), recipient=user, reward_recipient=solver
-    const lockSig = await send([solverKp], await program.methods.solverLockSol(solverLockParams({ hashlock, index: 1, amount, reward, rewardTimelockDelta: 1800, recipient: userKp.publicKey, rewardRecipient: solverKp.publicKey, refundTo: solverKp.publicKey }), Buffer.from([])).accounts(sAcc(1) as any).instruction());
+    const lockSig = await send([solverKp], await program.methods.solverLockSol(solverLockParams({ hashlock, amount, reward, rewardTimelockDelta: 1800, recipient: userKp.publicKey, rewardRecipient: solverKp.publicKey, refundTo: solverKp.publicKey }), Buffer.from([])).accounts(sAcc(hashlock) as any).instruction());
     txRow("solver_lock_sol", lockSig, await slotOf(lockSig), `amount=${amount} reward=${reward}`);
+    await expectFailOnChain("solver_lock_sol duplicate solver", "SolverLockAlreadyExists", [solverKp], await program.methods.solverLockSol(solverLockParams({ hashlock, amount, recipient: userKp.publicKey, refundTo: solverKp.publicKey }), Buffer.from([])).accounts(sAcc(hashlock) as any).instruction());
     const recBefore = await bal(userKp.publicKey), rrBefore = await bal(solverKp.publicKey);
-    const rSig = await send([], await program.methods.redeemSolverSol(hashlock, new BN(1), secret).accounts({ caller: feePayer.publicKey, solverLock: solverLockPda(hashlock, 1), recipient: userKp.publicKey, rewardRecipient: solverKp.publicKey, refundTo: solverKp.publicKey, payoutCurveProgram: null, systemProgram: SystemProgram.programId } as any).instruction());
+    const rSig = await send([], await program.methods.redeemSolverSol(hashlock, solverKp.publicKey, secret).accounts({ caller: feePayer.publicKey, solverLock: solverLockPda(hashlock, solverKp.publicKey), recipient: userKp.publicKey, rewardRecipient: solverKp.publicKey, refundTo: solverKp.publicKey, payoutCurveProgram: null, systemProgram: SystemProgram.programId } as any).instruction());
     txRow("redeem_solver_sol", rSig, await slotOf(rSig), "reward→reward_recipient (pre-timelock)");
     checkRow("recipient (user) +amount", (await bal(userKp.publicKey)) - recBefore === amount, `delta=${amount}`);
     checkRow("reward_recipient (solver) +reward", (await bal(solverKp.publicKey)) - rrBefore === reward, `delta=${reward}`);
     // negative: double redeem
-    await expectFailOnChain("redeem_solver_sol double redeem", "NotPending", [], await program.methods.redeemSolverSol(hashlock, new BN(1), secret).accounts({ caller: feePayer.publicKey, solverLock: solverLockPda(hashlock, 1), recipient: userKp.publicKey, rewardRecipient: solverKp.publicKey, refundTo: solverKp.publicKey, payoutCurveProgram: null, systemProgram: SystemProgram.programId } as any).instruction());
+    await expectFailOnChain("redeem_solver_sol double redeem", "NotPending", [], await program.methods.redeemSolverSol(hashlock, solverKp.publicKey, secret).accounts({ caller: feePayer.publicKey, solverLock: solverLockPda(hashlock, solverKp.publicKey), recipient: userKp.publicKey, rewardRecipient: solverKp.publicKey, refundTo: solverKp.publicKey, payoutCurveProgram: null, systemProgram: SystemProgram.programId } as any).instruction());
     // rent reclamation
-    const cSig = await send([solverKp], await program.methods.closeSolverLock(hashlock, new BN(1)).accounts({ caller: solverKp.publicKey, solverLock: solverLockPda(hashlock, 1), rentPayer: feePayer.publicKey } as any).instruction());
+    const cSig = await send([solverKp], await program.methods.closeSolverLock(hashlock, solverKp.publicKey).accounts({ caller: solverKp.publicKey, solverLock: solverLockPda(hashlock, solverKp.publicKey), rentPayer: feePayer.publicKey } as any).instruction());
     txRow("close_solver_lock", cSig, await slotOf(cSig), "rent→rent_payer");
   });
 
@@ -841,50 +873,282 @@ async function main() {
   await flow("S7", "solver lock SOL / reward bounty to late redeemer", async () => {
     const { secret, hashlock } = newHashlock();
     const amount = 800_000, reward = 200_000;
-    const lockSig = await send([solverKp], await program.methods.solverLockSol(solverLockParams({ hashlock, index: 1, amount, reward, timelockDelta: 3600, rewardTimelockDelta: TIMELOCK_SHORT, recipient: userKp.publicKey, rewardRecipient: solverKp.publicKey, refundTo: solverKp.publicKey }), Buffer.from([])).accounts({ payer: feePayer.publicKey, sender: solverKp.publicKey, counter: solverCountPda(hashlock), solverLock: solverLockPda(hashlock, 1), payoutCurveProgram: null, systemProgram: SystemProgram.programId } as any).instruction());
+    const lockSig = await send([solverKp], await program.methods.solverLockSol(solverLockParams({ hashlock, amount, reward, timelockDelta: 3600, rewardTimelockDelta: TIMELOCK_SHORT, recipient: userKp.publicKey, rewardRecipient: solverKp.publicKey, refundTo: solverKp.publicKey }), Buffer.from([])).accounts({ payer: feePayer.publicKey, sender: solverKp.publicKey, guard: solverGuardPda(hashlock, solverKp.publicKey), solverLock: solverLockPda(hashlock, solverKp.publicKey), payoutCurveProgram: null, systemProgram: SystemProgram.programId } as any).instruction());
     txRow("solver_lock_sol", lockSig, await slotOf(lockSig), `rewardTimelock=${TIMELOCK_SHORT}s`);
     info("waiting out reward timelock", `${TIMELOCK_SHORT + 5}s`);
     await sleep((TIMELOCK_SHORT + 5) * 1000);
     const callerBefore = await bal(feePayer.publicKey);
-    const rSig = await send([], await program.methods.redeemSolverSol(hashlock, new BN(1), secret).accounts({ caller: feePayer.publicKey, solverLock: solverLockPda(hashlock, 1), recipient: userKp.publicKey, rewardRecipient: solverKp.publicKey, refundTo: solverKp.publicKey, payoutCurveProgram: null, systemProgram: SystemProgram.programId } as any).instruction());
+    const rSig = await send([], await program.methods.redeemSolverSol(hashlock, solverKp.publicKey, secret).accounts({ caller: feePayer.publicKey, solverLock: solverLockPda(hashlock, solverKp.publicKey), recipient: userKp.publicKey, rewardRecipient: solverKp.publicKey, refundTo: solverKp.publicKey, payoutCurveProgram: null, systemProgram: SystemProgram.programId } as any).instruction());
     txRow("redeem_solver_sol (late)", rSig, await slotOf(rSig), "reward→caller bounty (post-timelock)");
     checkRow("caller received reward bounty", (await bal(feePayer.publicKey)) - callerBefore > reward - 20000, "caller +reward (minus fee)");
-    await send([solverKp], await program.methods.closeSolverLock(hashlock, new BN(1)).accounts({ caller: solverKp.publicKey, solverLock: solverLockPda(hashlock, 1), rentPayer: feePayer.publicKey } as any).instruction());
+    await send([solverKp], await program.methods.closeSolverLock(hashlock, solverKp.publicKey).accounts({ caller: solverKp.publicKey, solverLock: solverLockPda(hashlock, solverKp.publicKey), rentPayer: feePayer.publicKey } as any).instruction());
   });
 
   // ── S8: solver lock token (single vault) → redeem + refund + negatives ──
   await flow("S8", "solver lock token / redeem + refund", async () => {
     const { secret, hashlock } = newHashlock();
-    const build = (i: number, tl: number) => solverLockParams({ hashlock, index: i, amount: 90_000, reward: 10_000, timelockDelta: tl, rewardTimelockDelta: Math.min(tl - 1, 1800), recipient: userKp.publicKey, rewardRecipient: solverKp.publicKey, refundTo: solverKp.publicKey });
-    const lAcc = (i: number) => ({ payer: feePayer.publicKey, sender: solverKp.publicKey, counter: solverCountPda(hashlock), solverLock: solverLockPda(hashlock, i), tokenMint: mintA, senderTokenAccount: solverAtaA, vault: solverVaultPda(hashlock, i), payoutCurveProgram: null, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId, rent: SYSVAR_RENT_PUBKEY });
-    const l1 = await send([solverKp], await program.methods.solverLockToken(build(1, 3600), Buffer.from([])).accounts(lAcc(1) as any).instruction());
+    const refundHashlock = newHashlock().hashlock;
+    const build = (h: number[], tl: number) => solverLockParams({ hashlock: h, amount: 90_000, reward: 10_000, timelockDelta: tl, rewardTimelockDelta: Math.min(tl - 1, 1800), recipient: userKp.publicKey, rewardRecipient: solverKp.publicKey, refundTo: solverKp.publicKey });
+    const lAcc = (h: number[]) => ({ payer: feePayer.publicKey, sender: solverKp.publicKey, guard: solverGuardPda(h, solverKp.publicKey), solverLock: solverLockPda(h, solverKp.publicKey), tokenMint: mintA, senderTokenAccount: solverAtaA, vault: solverVaultPda(h, solverKp.publicKey), payoutCurveProgram: null, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId, rent: SYSVAR_RENT_PUBKEY });
+    const l1 = await send([solverKp], await program.methods.solverLockToken(build(hashlock, 3600), Buffer.from([])).accounts(lAcc(hashlock) as any).instruction());
     txRow("solver_lock_token #1", l1, await slotOf(l1), "single vault amount+reward");
-    const l2 = await send([solverKp], await program.methods.solverLockToken(build(2, TIMELOCK_SHORT), Buffer.from([])).accounts(lAcc(2) as any).instruction());
+    const l2 = await send([solverKp], await program.methods.solverLockToken(build(refundHashlock, TIMELOCK_SHORT), Buffer.from([])).accounts(lAcc(refundHashlock) as any).instruction());
     txRow("solver_lock_token #2", l2, await slotOf(l2), "for refund");
     // redeem #1
-    const r1 = await send([], await program.methods.redeemSolverToken(hashlock, new BN(1), secret).accounts({ caller: feePayer.publicKey, solverLock: solverLockPda(hashlock, 1), rentPayer: feePayer.publicKey, recipient: userKp.publicKey, rewardRecipient: solverKp.publicKey, refundTo: solverKp.publicKey, tokenMint: mintA, vault: solverVaultPda(hashlock, 1), recipientTokenAccount: ata(mintA, userKp.publicKey), rewardRecipientTokenAccount: ata(mintA, solverKp.publicKey), callerTokenAccount: ata(mintA, feePayer.publicKey), refundToTokenAccount: null, payoutCurveProgram: null, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId, rent: SYSVAR_RENT_PUBKEY } as any).instruction());
+    const r1 = await send([], await program.methods.redeemSolverToken(hashlock, solverKp.publicKey, secret).accounts({ caller: feePayer.publicKey, solverLock: solverLockPda(hashlock, solverKp.publicKey), rentPayer: feePayer.publicKey, recipient: userKp.publicKey, rewardRecipient: solverKp.publicKey, refundTo: solverKp.publicKey, tokenMint: mintA, vault: solverVaultPda(hashlock, solverKp.publicKey), recipientTokenAccount: ata(mintA, userKp.publicKey), rewardRecipientTokenAccount: ata(mintA, solverKp.publicKey), callerTokenAccount: ata(mintA, feePayer.publicKey), refundToTokenAccount: null, payoutCurveProgram: null, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId, rent: SYSVAR_RENT_PUBKEY } as any).instruction());
     txRow("redeem_solver_token #1", r1, await slotOf(r1), "recipient + reward_recipient");
     // negative: premature refund #2
-    const refAcc = { caller: feePayer.publicKey, solverLock: solverLockPda(hashlock, 2), rentPayer: feePayer.publicKey, refundTo: solverKp.publicKey, tokenMint: mintA, vault: solverVaultPda(hashlock, 2), refundToTokenAccount: ata(mintA, solverKp.publicKey), tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId, rent: SYSVAR_RENT_PUBKEY };
-    await expectFailOnChain("refund_solver_token premature", "TimelockNotExpired", [], await program.methods.refundSolverToken(hashlock, new BN(2)).accounts(refAcc as any).instruction());
+    const refAcc = { caller: feePayer.publicKey, solverLock: solverLockPda(refundHashlock, solverKp.publicKey), rentPayer: feePayer.publicKey, refundTo: solverKp.publicKey, tokenMint: mintA, vault: solverVaultPda(refundHashlock, solverKp.publicKey), refundToTokenAccount: ata(mintA, solverKp.publicKey), tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId, rent: SYSVAR_RENT_PUBKEY };
+    await expectFailOnChain("refund_solver_token premature", "TimelockNotExpired", [], await program.methods.refundSolverToken(refundHashlock, solverKp.publicKey).accounts(refAcc as any).instruction());
     info("waiting out timelock", `${TIMELOCK_SHORT + 5}s`);
     await sleep((TIMELOCK_SHORT + 5) * 1000);
-    const r2 = await send([], await program.methods.refundSolverToken(hashlock, new BN(2)).accounts(refAcc as any).instruction());
+    const r2 = await send([], await program.methods.refundSolverToken(refundHashlock, solverKp.publicKey).accounts(refAcc as any).instruction());
     txRow("refund_solver_token #2", r2, await slotOf(r2), "refund_to=solver ATA");
   });
 
   // ── S9: solver lock token diff-reward → redeem + negative ──
   await flow("S9", "solver lock token diff-reward / redeem", async () => {
     const { secret, hashlock } = newHashlock();
-    const dAcc = (rewardMint: PublicKeyT, rewardAta: PublicKeyT) => ({ payer: feePayer.publicKey, sender: solverKp.publicKey, counter: solverCountPda(hashlock), solverLock: solverLockPda(hashlock, 1), tokenMint: mintA, rewardTokenMint: rewardMint, senderTokenAccount: solverAtaA, senderRewardTokenAccount: rewardAta, vault: solverVaultPda(hashlock, 1), rewardVault: solverRewardVaultPda(hashlock, 1), payoutCurveProgram: null, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId, rent: SYSVAR_RENT_PUBKEY });
-    const p = solverLockParams({ hashlock, index: 1, amount: 80_000, reward: 15_000, rewardTimelockDelta: 1800, recipient: userKp.publicKey, rewardRecipient: solverKp.publicKey, refundTo: solverKp.publicKey });
+    const dAcc = (rewardMint: PublicKeyT, rewardAta: PublicKeyT) => ({ payer: feePayer.publicKey, sender: solverKp.publicKey, guard: solverGuardPda(hashlock, solverKp.publicKey), solverLock: solverLockPda(hashlock, solverKp.publicKey), tokenMint: mintA, rewardTokenMint: rewardMint, senderTokenAccount: solverAtaA, senderRewardTokenAccount: rewardAta, vault: solverVaultPda(hashlock, solverKp.publicKey), rewardVault: solverRewardVaultPda(hashlock, solverKp.publicKey), payoutCurveProgram: null, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId, rent: SYSVAR_RENT_PUBKEY });
+    const p = solverLockParams({ hashlock, amount: 80_000, reward: 15_000, rewardTimelockDelta: 1800, recipient: userKp.publicKey, rewardRecipient: solverKp.publicKey, refundTo: solverKp.publicKey });
     // negative: identical mints for diff-reward
     await expectFailOnChain("solver_lock_token_diff_reward identical mints", "WrongToken", [solverKp], await program.methods.solverLockTokenDiffReward(p, Buffer.from([])).accounts(dAcc(mintA, solverAtaA) as any).instruction());
     // happy
     const lSig = await send([solverKp], await program.methods.solverLockTokenDiffReward(p, Buffer.from([])).accounts(dAcc(mintB, solverAtaB) as any).instruction());
     txRow("solver_lock_token_diff_reward", lSig, await slotOf(lSig), "two vaults mintA + mintB");
-    const rSig = await send([], await program.methods.redeemSolverTokenDiffReward(hashlock, new BN(1), secret).accounts({ caller: feePayer.publicKey, solverLock: solverLockPda(hashlock, 1), rentPayer: feePayer.publicKey, recipient: userKp.publicKey, rewardRecipient: solverKp.publicKey, refundTo: solverKp.publicKey, tokenMint: mintA, rewardTokenMint: mintB, vault: solverVaultPda(hashlock, 1), rewardVault: solverRewardVaultPda(hashlock, 1), recipientTokenAccount: ata(mintA, userKp.publicKey), rewardRecipientTokenAccount: ata(mintB, solverKp.publicKey), callerRewardTokenAccount: ata(mintB, feePayer.publicKey), refundToTokenAccount: null, payoutCurveProgram: null, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId, rent: SYSVAR_RENT_PUBKEY } as any).instruction());
+    const rSig = await send([], await program.methods.redeemSolverTokenDiffReward(hashlock, solverKp.publicKey, secret).accounts({ caller: feePayer.publicKey, solverLock: solverLockPda(hashlock, solverKp.publicKey), rentPayer: feePayer.publicKey, recipient: userKp.publicKey, rewardRecipient: solverKp.publicKey, refundTo: solverKp.publicKey, tokenMint: mintA, rewardTokenMint: mintB, vault: solverVaultPda(hashlock, solverKp.publicKey), rewardVault: solverRewardVaultPda(hashlock, solverKp.publicKey), recipientTokenAccount: ata(mintA, userKp.publicKey), rewardRecipientTokenAccount: ata(mintB, solverKp.publicKey), callerRewardTokenAccount: ata(mintB, feePayer.publicKey), refundToTokenAccount: null, payoutCurveProgram: null, tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId, rent: SYSVAR_RENT_PUBKEY } as any).instruction());
     txRow("redeem_solver_token_diff_reward", rSig, await slotOf(rSig), "recipient mintA + reward mintB");
+  });
+
+  // ── S9A: mixed SOL principal + SPL reward → redeem + refund ──
+  await flow("S9A", "solver lock SOL principal / SPL reward", async () => {
+    const redeem = newHashlock();
+    const refund = newHashlock();
+    const amount = 900_000;
+    const reward = 20_000;
+    const lockAccounts = (h: number[]) => ({
+      payer: feePayer.publicKey,
+      sender: solverKp.publicKey,
+      guard: solverGuardPda(h, solverKp.publicKey),
+      solverLock: solverLockPda(h, solverKp.publicKey),
+      rewardTokenMint: mintB,
+      senderRewardTokenAccount: solverAtaB,
+      rewardVault: solverRewardVaultPda(h, solverKp.publicKey),
+      payoutCurveProgram: null,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+      rent: SYSVAR_RENT_PUBKEY,
+    });
+    const params = (h: number[], timelockDelta: number) =>
+      solverLockParams({
+        hashlock: h,
+        amount,
+        reward,
+        timelockDelta,
+        rewardTimelockDelta: Math.min(timelockDelta - 1, 1800),
+        recipient: userKp.publicKey,
+        rewardRecipient: solverKp.publicKey,
+        refundTo: solverKp.publicKey,
+      });
+
+    const l1 = await send(
+      [solverKp],
+      await program.methods
+        .solverLockSolTokenReward(params(redeem.hashlock, 3600), Buffer.from([]))
+        .accounts(lockAccounts(redeem.hashlock) as any)
+        .instruction()
+    );
+    txRow("solver_lock_sol_token_reward #1", l1, await slotOf(l1), "for redeem");
+    const l2 = await send(
+      [solverKp],
+      await program.methods
+        .solverLockSolTokenReward(params(refund.hashlock, TIMELOCK_SHORT), Buffer.from([]))
+        .accounts(lockAccounts(refund.hashlock) as any)
+        .instruction()
+    );
+    txRow("solver_lock_sol_token_reward #2", l2, await slotOf(l2), "for refund");
+
+    const rewardRecipientAta = ata(mintB, solverKp.publicKey);
+    const recipientBefore = await bal(userKp.publicKey);
+    const rewardBefore = Number((await getAccount(connection, rewardRecipientAta)).amount);
+    const r1 = await send(
+      [],
+      await program.methods
+        .redeemSolverSolTokenReward(redeem.hashlock, solverKp.publicKey, redeem.secret)
+        .accounts({
+          caller: feePayer.publicKey,
+          solverLock: solverLockPda(redeem.hashlock, solverKp.publicKey),
+          rentPayer: feePayer.publicKey,
+          recipient: userKp.publicKey,
+          rewardRecipient: solverKp.publicKey,
+          refundTo: solverKp.publicKey,
+          rewardTokenMint: mintB,
+          rewardVault: solverRewardVaultPda(redeem.hashlock, solverKp.publicKey),
+          rewardRecipientTokenAccount: rewardRecipientAta,
+          callerRewardTokenAccount: ata(mintB, feePayer.publicKey),
+          payoutCurveProgram: null,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+          rent: SYSVAR_RENT_PUBKEY,
+        } as any)
+        .instruction()
+    );
+    txRow("redeem_solver_sol_token_reward", r1, await slotOf(r1), "SOL→recipient, SPL reward→reward recipient");
+    checkRow("mixed SOL principal redeemed", (await bal(userKp.publicKey)) - recipientBefore === amount, `delta=${amount}`);
+    checkRow(
+      "mixed SPL reward redeemed",
+      Number((await getAccount(connection, rewardRecipientAta)).amount) - rewardBefore === reward,
+      `delta=${reward}`
+    );
+
+    info("waiting out mixed-path timelock", `${TIMELOCK_SHORT + 5}s`);
+    await sleep((TIMELOCK_SHORT + 5) * 1000);
+    const refundSolBefore = await bal(solverKp.publicKey);
+    const refundTokenBefore = Number((await getAccount(connection, rewardRecipientAta)).amount);
+    const r2 = await send(
+      [],
+      await program.methods
+        .refundSolverSolTokenReward(refund.hashlock, solverKp.publicKey)
+        .accounts({
+          caller: feePayer.publicKey,
+          solverLock: solverLockPda(refund.hashlock, solverKp.publicKey),
+          rentPayer: feePayer.publicKey,
+          refundTo: solverKp.publicKey,
+          rewardTokenMint: mintB,
+          rewardVault: solverRewardVaultPda(refund.hashlock, solverKp.publicKey),
+          refundToRewardTokenAccount: rewardRecipientAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+          rent: SYSVAR_RENT_PUBKEY,
+        } as any)
+        .instruction()
+    );
+    txRow("refund_solver_sol_token_reward", r2, await slotOf(r2), "SOL + SPL reward→refund_to");
+    checkRow("mixed SOL principal refunded", (await bal(solverKp.publicKey)) - refundSolBefore === amount, `delta=${amount}`);
+    checkRow(
+      "mixed SPL reward refunded",
+      Number((await getAccount(connection, rewardRecipientAta)).amount) - refundTokenBefore === reward,
+      `delta=${reward}`
+    );
+  });
+
+  // ── S9B: mixed SPL principal + SOL reward → redeem + refund ──
+  await flow("S9B", "solver lock SPL principal / SOL reward", async () => {
+    const redeem = newHashlock();
+    const refund = newHashlock();
+    const amount = 70_000;
+    const reward = 700_000;
+    const lockAccounts = (h: number[]) => ({
+      payer: feePayer.publicKey,
+      sender: solverKp.publicKey,
+      guard: solverGuardPda(h, solverKp.publicKey),
+      solverLock: solverLockPda(h, solverKp.publicKey),
+      tokenMint: mintA,
+      senderTokenAccount: solverAtaA,
+      vault: solverVaultPda(h, solverKp.publicKey),
+      payoutCurveProgram: null,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+      rent: SYSVAR_RENT_PUBKEY,
+    });
+    const params = (h: number[], timelockDelta: number) =>
+      solverLockParams({
+        hashlock: h,
+        amount,
+        reward,
+        timelockDelta,
+        rewardTimelockDelta: Math.min(timelockDelta - 1, 1800),
+        recipient: userKp.publicKey,
+        rewardRecipient: solverKp.publicKey,
+        refundTo: solverKp.publicKey,
+      });
+
+    const l1 = await send(
+      [solverKp],
+      await program.methods
+        .solverLockTokenSolReward(params(redeem.hashlock, 3600), Buffer.from([]))
+        .accounts(lockAccounts(redeem.hashlock) as any)
+        .instruction()
+    );
+    txRow("solver_lock_token_sol_reward #1", l1, await slotOf(l1), "for redeem");
+    const l2 = await send(
+      [solverKp],
+      await program.methods
+        .solverLockTokenSolReward(params(refund.hashlock, TIMELOCK_SHORT), Buffer.from([]))
+        .accounts(lockAccounts(refund.hashlock) as any)
+        .instruction()
+    );
+    txRow("solver_lock_token_sol_reward #2", l2, await slotOf(l2), "for refund");
+
+    const recipientAta = ata(mintA, userKp.publicKey);
+    const recipientBefore = (await connection.getAccountInfo(recipientAta))
+      ? Number((await getAccount(connection, recipientAta)).amount)
+      : 0;
+    const rewardBefore = await bal(solverKp.publicKey);
+    const r1 = await send(
+      [],
+      await program.methods
+        .redeemSolverTokenSolReward(redeem.hashlock, solverKp.publicKey, redeem.secret)
+        .accounts({
+          caller: feePayer.publicKey,
+          solverLock: solverLockPda(redeem.hashlock, solverKp.publicKey),
+          rentPayer: feePayer.publicKey,
+          recipient: userKp.publicKey,
+          rewardRecipient: solverKp.publicKey,
+          refundTo: solverKp.publicKey,
+          tokenMint: mintA,
+          vault: solverVaultPda(redeem.hashlock, solverKp.publicKey),
+          recipientTokenAccount: recipientAta,
+          refundToTokenAccount: null,
+          payoutCurveProgram: null,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+          rent: SYSVAR_RENT_PUBKEY,
+        } as any)
+        .instruction()
+    );
+    txRow("redeem_solver_token_sol_reward", r1, await slotOf(r1), "SPL→recipient, SOL reward→reward recipient");
+    checkRow(
+      "mixed SPL principal redeemed",
+      Number((await getAccount(connection, recipientAta)).amount) - recipientBefore === amount,
+      `delta=${amount}`
+    );
+    checkRow("mixed SOL reward redeemed", (await bal(solverKp.publicKey)) - rewardBefore === reward, `delta=${reward}`);
+
+    info("waiting out mixed-path timelock", `${TIMELOCK_SHORT + 5}s`);
+    await sleep((TIMELOCK_SHORT + 5) * 1000);
+    const refundAta = ata(mintA, solverKp.publicKey);
+    const refundTokenBefore = Number((await getAccount(connection, refundAta)).amount);
+    const refundSolBefore = await bal(solverKp.publicKey);
+    const r2 = await send(
+      [],
+      await program.methods
+        .refundSolverTokenSolReward(refund.hashlock, solverKp.publicKey)
+        .accounts({
+          caller: feePayer.publicKey,
+          solverLock: solverLockPda(refund.hashlock, solverKp.publicKey),
+          rentPayer: feePayer.publicKey,
+          refundTo: solverKp.publicKey,
+          tokenMint: mintA,
+          vault: solverVaultPda(refund.hashlock, solverKp.publicKey),
+          refundToTokenAccount: refundAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+          rent: SYSVAR_RENT_PUBKEY,
+        } as any)
+        .instruction()
+    );
+    txRow("refund_solver_token_sol_reward", r2, await slotOf(r2), "SPL + SOL reward→refund_to");
+    checkRow(
+      "mixed SPL principal refunded",
+      Number((await getAccount(connection, refundAta)).amount) - refundTokenBefore === amount,
+      `delta=${amount}`
+    );
+    checkRow("mixed SOL reward refunded", (await bal(solverKp.publicKey)) - refundSolBefore === reward, `delta=${reward}`);
   });
 
   // ── S10: payout curve constant (full payout, no excess) + negatives ──
@@ -1071,9 +1335,9 @@ async function main() {
     checkRow("get_user_lock returns fields", data.amount.toNumber() === 500_000 && data.refundTo.toBase58() === userKp.publicKey.toBase58(), `amount=${data.amount} refundTo=user`);
     // negative: close a pending solver lock (StillPending) — need a solver lock first
     const s = newHashlock();
-    const slSig = await send([solverKp], await program.methods.solverLockSol(solverLockParams({ hashlock: s.hashlock, index: 1, amount: 300_000, recipient: userKp.publicKey, refundTo: solverKp.publicKey }), Buffer.from([])).accounts({ payer: feePayer.publicKey, sender: solverKp.publicKey, counter: solverCountPda(s.hashlock), solverLock: solverLockPda(s.hashlock, 1), payoutCurveProgram: null, systemProgram: SystemProgram.programId } as any).instruction());
+    const slSig = await send([solverKp], await program.methods.solverLockSol(solverLockParams({ hashlock: s.hashlock, amount: 300_000, recipient: userKp.publicKey, refundTo: solverKp.publicKey }), Buffer.from([])).accounts({ payer: feePayer.publicKey, sender: solverKp.publicKey, guard: solverGuardPda(s.hashlock, solverKp.publicKey), solverLock: solverLockPda(s.hashlock, solverKp.publicKey), payoutCurveProgram: null, systemProgram: SystemProgram.programId } as any).instruction());
     txRow("solver_lock_sol", slSig, await slotOf(slSig), "pending, for close negatives");
-    await expectFailOnChain("close_solver_lock while pending", "StillPending", [solverKp], await program.methods.closeSolverLock(s.hashlock, new BN(1)).accounts({ caller: solverKp.publicKey, solverLock: solverLockPda(s.hashlock, 1), rentPayer: feePayer.publicKey } as any).instruction());
+    await expectFailOnChain("close_solver_lock while pending", "StillPending", [solverKp], await program.methods.closeSolverLock(s.hashlock, solverKp.publicKey).accounts({ caller: solverKp.publicKey, solverLock: solverLockPda(s.hashlock, solverKp.publicKey), rentPayer: feePayer.publicKey } as any).instruction());
     // clean up: refund after timelock is long; leave it pending (documented). Refund the user_lock via recipient early-cancel not possible (caller=feePayer). Leave.
     info("S16 note", "the pending solver lock is left on-chain (refundable after its timelock); not an error");
   });

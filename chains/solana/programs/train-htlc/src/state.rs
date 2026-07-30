@@ -70,13 +70,15 @@ pub struct SolverLock {
     pub payout_curve_data: Vec<u8>,
 }
 
-/// INVARIANT: solver-lock indices are 1-based and monotone. The counter PDA is never
-/// closed, so a closed solver lock at index i <= count can never be re-initialized
-/// (creation requires index == count + 1).
+/// Permanent single-use marker for a `(hashlock, solver)` pair. The full solver lock
+/// may be closed after settlement to recover rent, but this compact guard is never
+/// closed, so a blind retry can never escrow funds twice.
 #[account]
 #[derive(Default, InitSpace)]
-pub struct SolverLockCounter {
-    pub count: u64,
+pub struct SolverLockGuard {
+    pub used: bool,
+    pub solver: Pubkey,
+    pub hashlock: [u8; 32],
 }
 
 /// Single-use replay guard for the gasless intent path. Keyed by PDA seeds
@@ -132,7 +134,6 @@ pub struct UserLockParams {
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct SolverLockParams {
     pub hashlock: [u8; 32],
-    pub index: u64,
     pub amount: u64,
     pub reward: u64,
     pub timelock_delta: u64,
