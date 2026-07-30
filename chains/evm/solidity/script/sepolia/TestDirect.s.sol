@@ -27,10 +27,10 @@ contract TestDirect is SepoliaConfig {
     uint256 s2 = _secret('direct-solver');
     bytes32 h2 = _hashlock(s2);
     vm.startBroadcast(userPk);
-    uint256 idx = train.solverLock(_solverParamsT(h2, 3600), _dstT(), '');
-    train.redeemSolver(h2, idx, s2);
+    train.solverLock(_solverParamsT(h2, 3600), _dstT(), '');
+    train.redeemSolver(h2, user, s2);
     vm.stopBroadcast();
-    console.log('[2] solverLock -> redeemSolver OK, index:', idx);
+    console.log('[2] solverLock -> redeemSolver OK, solver:', user);
 
     // 3) userLockFor (attributed to a beneficiary != caller) -> redeemUser
     uint256 s3 = _secret('direct-userfor');

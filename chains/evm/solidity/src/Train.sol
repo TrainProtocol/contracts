@@ -59,6 +59,9 @@ contract Train is ReentrancyGuardTransient {
   /// @notice Thrown when user lock already exists for hashlock
   error SwapAlreadyExists();
 
+  /// @notice Thrown when the calling solver already created a solver lock for this hashlock
+  error SolverLockAlreadyExists();
+
   /// @notice Thrown when ETH transfer fails
   error TransferFailed();
 
@@ -179,9 +182,8 @@ contract Train is ReentrancyGuardTransient {
 
   /// @notice Emitted when a solver creates a lock.
   /// @param hashlock The lock identifier (sha256 of the secret).
-  /// @param sender The solver that created and funded the lock.
+  /// @param sender The solver that created and funded the lock (at most one lock per solver per hashlock).
   /// @param recipient The address that receives the payout on redeem.
-  /// @param index The solver-lock index under this hashlock (1-based, monotonic).
   /// @param srcChain The source chain identifier.
   /// @param token The locked token (address(0) for native ETH).
   /// @param amount The measured amount actually escrowed (fee-on-transfer safe).
@@ -200,7 +202,6 @@ contract Train is ReentrancyGuardTransient {
     bytes32 indexed hashlock,
     address indexed sender,
     address indexed recipient,
-    uint256 index,
     string srcChain,
     address token,
     uint256 amount,
@@ -225,13 +226,13 @@ contract Train is ReentrancyGuardTransient {
 
   /// @notice Emitted when a solver lock is refunded (amount + reward returned to refundTo).
   /// @param hashlock The lock identifier (sha256 of the secret).
-  /// @param index The solver-lock index under this hashlock.
+  /// @param solver The solver whose lock was refunded.
   /// @param refundTo The address the amount and reward were returned to.
   /// @param amount The principal amount returned.
   /// @param reward The reward returned.
   event SolverRefunded(
     bytes32 indexed hashlock,
-    uint256 indexed index,
+    address indexed solver,
     address refundTo,
     uint256 amount,
     uint256 reward
@@ -247,7 +248,7 @@ contract Train is ReentrancyGuardTransient {
 
   /// @notice Emitted when a solver lock is redeemed with the secret preimage.
   /// @param hashlock The lock identifier (sha256 of the secret).
-  /// @param index The solver-lock index under this hashlock.
+  /// @param solver The solver whose lock was redeemed.
   /// @param redeemer The caller that triggered the redemption.
   /// @param secret The revealed preimage (sha256(secret) == hashlock).
   /// @param payout Amount paid to the recipient (== amount when no payout curve).
@@ -256,7 +257,7 @@ contract Train is ReentrancyGuardTransient {
   /// @param reward Reward amount paid to rewardTo.
   event SolverRedeemed(
     bytes32 indexed hashlock,
-    uint256 indexed index,
+    address indexed solver,
     address redeemer,
     uint256 secret,
     uint256 payout,
@@ -311,11 +312,10 @@ contract Train is ReentrancyGuardTransient {
   /// @dev hashlock => UserLock
   mapping(bytes32 => UserLock) private userLocks;
 
-  /// @dev hashlock => index => SolverLock
-  mapping(bytes32 => mapping(uint256 => SolverLock)) private solverLocks;
-
-  /// @dev hashlock => count of solver locks
-  mapping(bytes32 => uint256) private solverLockCount;
+  /// @dev hashlock => solver => SolverLock. At most ONE lock per (hashlock, solver), ever — the
+  ///      per-solver uniqueness guard in `_validateSolverLockParams` makes a blind `solverLock`
+  ///      retry revert instead of double-funding the same swap.
+  mapping(bytes32 => mapping(address => SolverLock)) private solverLocks;
 
   /// @dev Historical hashlocks per user address
   mapping(address => bytes32[]) private userLockHashes;
@@ -375,16 +375,21 @@ contract Train is ReentrancyGuardTransient {
 
   /// @notice Create a solver lock to fulfill a swap (solver funds the lock).
   /// @dev Payable: send native ETH equal to the native legs of (amount, reward) as msg.value.
+  ///      At most ONE solver lock per (hashlock, msg.sender), EVER: a repeat call reverts with
+  ///      SolverLockAlreadyExists before any funds are pulled, so a blind retry (e.g. after an
+  ///      unreliable or malicious RPC reported the first tx as missing) cannot double-fund the
+  ///      same swap. Probe idempotently via `getSolverLock(hashlock, solver).sender != 0` — on
+  ///      several independent RPCs if needed. The guard never lifts, not even after a refund; a
+  ///      deliberate re-fill of the same hashlock requires a different solver address.
   /// @param params Solver lock parameters: amount, optional reward (+ reward token/recipient/timelock),
   ///        recipient, refundTo, token, and optional payout curve.
   /// @param dst Destination-chain details (logged only).
   /// @param data Opaque solver-supplied data (logged only).
-  /// @return index The 1-based solver-lock index assigned under params.hashlock.
   function solverLock(
     SolverLockParams calldata params,
     DestinationInfo calldata dst,
     bytes calldata data
-  ) external payable nonReentrant returns (uint256 index) {
+  ) external payable nonReentrant {
     _validateSolverLockParams(params);
 
     uint48 timelock = uint48(block.timestamp) + params.timelockDelta;
@@ -400,8 +405,7 @@ contract Train is ReentrancyGuardTransient {
     // than persist a zero-amount Pending lock.
     if (actualAmount == 0) revert ZeroAmount();
 
-    index = ++solverLockCount[params.hashlock];
-    SolverLock storage lock = solverLocks[params.hashlock][index];
+    SolverLock storage lock = solverLocks[params.hashlock][msg.sender];
     lock.sender = msg.sender;
     lock.amount = actualAmount;
     lock.recipient = params.recipient;
@@ -417,7 +421,7 @@ contract Train is ReentrancyGuardTransient {
     lock.payoutCurve = params.payoutCurve;
     if (params.payoutCurveData.length > 0) lock.payoutCurveData = params.payoutCurveData;
 
-    _emitSolverLocked(params, actualAmount, actualReward, dst, index, timelock, rewardTimelock, data);
+    _emitSolverLocked(params, actualAmount, actualReward, dst, timelock, rewardTimelock, data);
   }
 
   /// @notice Refund a user lock (returns the full amount to refundTo).
@@ -442,9 +446,9 @@ contract Train is ReentrancyGuardTransient {
   /// @notice Refund a solver lock (full amount + reward returned to refundTo, no decay).
   /// @dev Callable by anyone, but only after the timelock expires.
   /// @param hashlock The lock identifier (sha256 of the secret).
-  /// @param index The solver-lock index under this hashlock.
-  function refundSolver(bytes32 hashlock, uint256 index) external nonReentrant {
-    SolverLock storage lock = solverLocks[hashlock][index];
+  /// @param solver The solver whose lock to refund.
+  function refundSolver(bytes32 hashlock, address solver) external nonReentrant {
+    SolverLock storage lock = solverLocks[hashlock][solver];
     address sender = lock.sender;
     if (sender == address(0)) revert LockNotFound();
     if (lock.status != LockStatus.Pending) revert LockNotPending();
@@ -455,7 +459,7 @@ contract Train is ReentrancyGuardTransient {
     uint256 amount = lock.amount; // cache: read for the transfer and the event
     uint256 reward = lock.reward; // cache: read for the transfer and the event
     _transferOutMixed(lock.token, amount, refundTo, lock.rewardToken, reward, refundTo);
-    emit SolverRefunded(hashlock, index, refundTo, amount, reward);
+    emit SolverRefunded(hashlock, solver, refundTo, amount, reward);
   }
 
   /// @notice Redeem a user lock with the secret preimage (pays the lock's recipient).
@@ -498,10 +502,10 @@ contract Train is ReentrancyGuardTransient {
   ///      `refundTo`. The reward routes to `rewardRecipient` before `rewardTimelock`, otherwise to the
   ///      caller (the redeemer).
   /// @param hashlock The lock identifier (sha256 of the secret).
-  /// @param index The solver-lock index under this hashlock.
+  /// @param solver The solver whose lock to redeem.
   /// @param secret The preimage; must satisfy sha256(secret) == hashlock.
-  function redeemSolver(bytes32 hashlock, uint256 index, uint256 secret) external nonReentrant {
-    SolverLock storage lock = solverLocks[hashlock][index];
+  function redeemSolver(bytes32 hashlock, address solver, uint256 secret) external nonReentrant {
+    SolverLock storage lock = solverLocks[hashlock][solver];
     if (lock.sender == address(0)) revert LockNotFound();
     if (hashlock != sha256(abi.encodePacked(secret))) revert HashlockMismatch();
     if (lock.status != LockStatus.Pending) revert LockNotPending();
@@ -530,7 +534,7 @@ contract Train is ReentrancyGuardTransient {
     if (excess > 0) _transferOut(token, payable(lock.refundTo), excess);
     if (reward > 0) _transferOut(lock.rewardToken, payable(rewardTo), reward);
 
-    emit SolverRedeemed(hashlock, index, msg.sender, secret, payout, excess, rewardTo, reward);
+    emit SolverRedeemed(hashlock, solver, msg.sender, secret, payout, excess, rewardTo, reward);
   }
 
   /// @notice Get user lock details.
@@ -541,18 +545,14 @@ contract Train is ReentrancyGuardTransient {
   }
 
   /// @notice Get solver lock details.
+  /// @dev Doubles as the solver's idempotency probe: `sender == address(0)` means `solver` has
+  ///      never locked under `hashlock`. Discovery of other solvers' locks stays event-driven
+  ///      (`SolverLocked`).
   /// @param hashlock The lock identifier (sha256 of the secret).
-  /// @param index The solver-lock index under this hashlock.
+  /// @param solver The solver whose lock to read.
   /// @return The stored SolverLock (zero-valued if none exists).
-  function getSolverLock(bytes32 hashlock, uint256 index) external view returns (SolverLock memory) {
-    return solverLocks[hashlock][index];
-  }
-
-  /// @notice Get the number of solver locks for a hashlock.
-  /// @param hashlock The lock identifier (sha256 of the secret).
-  /// @return The count of solver locks (also the highest valid 1-based index).
-  function getSolverLockCount(bytes32 hashlock) external view returns (uint256) {
-    return solverLockCount[hashlock];
+  function getSolverLock(bytes32 hashlock, address solver) external view returns (SolverLock memory) {
+    return solverLocks[hashlock][solver];
   }
 
   /// @notice Paginated hashlocks of the user locks created by / attributed to `user`.
@@ -635,9 +635,11 @@ contract Train is ReentrancyGuardTransient {
   }
 
   /// @dev Validation for `solverLock`, mirroring `_validateUserLockParams`. Runs before any funds are
-  ///      pulled. Solver locks have no quote expiry and no uniqueness check (a hashlock may hold many
-  ///      indexed solver locks), but add reward-leg checks: a non-native reward token must have code,
-  ///      `rewardTimelockDelta < timelockDelta`, and a non-zero reward needs a non-zero rewardRecipient.
+  ///      pulled. Solver locks have no quote expiry; uniqueness is per (hashlock, msg.sender) — a
+  ///      hashlock may hold locks from many DIFFERENT solvers, but a repeat by the same solver reverts
+  ///      (permanent retry/replay guard, see `solverLock`). Adds reward-leg checks: a non-native reward
+  ///      token must have code, `rewardTimelockDelta < timelockDelta`, and a non-zero reward needs a
+  ///      non-zero rewardRecipient.
   function _validateSolverLockParams(SolverLockParams calldata params) internal view {
     if (params.amount == 0) revert ZeroAmount();
     if (params.timelockDelta == 0) revert InvalidTimelock();
@@ -647,6 +649,7 @@ contract Train is ReentrancyGuardTransient {
       revert InvalidToken();
     if (params.recipient == address(0) || params.refundTo == address(0)) revert ZeroAddress();
     if (params.reward > 0 && params.rewardRecipient == address(0)) revert ZeroAddress();
+    if (solverLocks[params.hashlock][msg.sender].sender != address(0)) revert SolverLockAlreadyExists();
     if (params.payoutCurve != address(0)) _validatePayoutCurve(params.payoutCurve);
   }
 
@@ -838,7 +841,6 @@ contract Train is ReentrancyGuardTransient {
     uint256 lockedAmount,
     uint256 lockedReward,
     DestinationInfo calldata dst,
-    uint256 index,
     uint48 timelock,
     uint48 rewardTimelock,
     bytes calldata data
@@ -847,7 +849,6 @@ contract Train is ReentrancyGuardTransient {
       params.hashlock,
       msg.sender,
       params.recipient,
-      index,
       params.srcChain,
       params.token,
       lockedAmount,

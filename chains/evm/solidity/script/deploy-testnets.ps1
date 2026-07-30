@@ -1,4 +1,5 @@
-# Deterministic multi-testnet deploy: same contract addresses on every chain (CREATE2).
+# Deterministic multi-testnet deploy: same contract addresses on every chain (CreateX CREATE2,
+# factory 0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed — see DeployDeterministic.s.sol).
 #
 # Usage (from anywhere; the script cd's to the foundry root itself):
 #   .\script\deploy-testnets.ps1                          # deploy + verify on all 7 testnets
@@ -108,42 +109,47 @@ try {
     Write-Host ('=== ' + $alias + ' (chain id ' + $chain.ChainId + ') ===') -ForegroundColor Cyan
 
     $forgeArgs = @('script', 'script/DeployDeterministic.s.sol', '--rpc-url', $alias)
-    if (-not $DryRun) {
-      $forgeArgs += '--broadcast'
-      if (-not $NoVerify) {
-        $forgeArgs += @('--verify', '--verifier', $chain.Verifier)
-        if ($chain.VerifierUrl) { $forgeArgs += @('--verifier-url', $chain.VerifierUrl) }
-      }
-    }
+    if (-not $DryRun) { $forgeArgs += '--broadcast' }
     if ($chain.ExtraArgs) { $forgeArgs += $chain.ExtraArgs }
 
     & forge @forgeArgs
     $ok = ($LASTEXITCODE -eq 0)
 
     $status = 'FAILED'
-    $mismatch = $false
     if ($ok) {
       if ($DryRun) {
         $status = 'SIMULATED'
       } else {
+        # CreateX deploys are factory CALLs (no CREATE2 tx type in the receipts), so the
+        # authoritative cross-check is on-chain code at each predicted address.
         $status = 'DEPLOYED'
-        # Cross-check the broadcast receipts against the predicted addresses.
-        $runJson = Join-Path $FoundryRoot ('broadcast\DeployDeterministic.s.sol\' + $chain.ChainId + '\run-latest.json')
-        if (Test-Path $runJson) {
-          $run = Get-Content $runJson -Raw | ConvertFrom-Json
-          $creates = @($run.transactions | Where-Object { $_.transactionType -eq 'CREATE2' })
-          if ($creates.Count -eq 0) { $status = 'ALREADY DEPLOYED' }
-          foreach ($tx in $creates) {
-            $exp = $expected[$tx.contractName]
-            if ($exp -and ($tx.contractAddress.ToLower() -ne $exp.ToLower())) {
-              $mismatch = $true
-              Write-Host ("ADDRESS MISMATCH on " + $alias + ": " + $tx.contractName + " at " + $tx.contractAddress + ", expected " + $exp) -ForegroundColor Red
+        foreach ($name in @('ConstantPayoutCurve', 'Train', 'TrainRouter')) {
+          $code = (& cast code $expected[$name] --rpc-url $alias | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $code -eq '' -or $code -eq '0x') {
+            $status = 'ADDRESS MISSING'
+            Write-Host ("MISSING CODE on " + $alias + ": " + $name + " expected at " + $expected[$name]) -ForegroundColor Red
+          }
+        }
+        # forge script --verify does not cover factory-created contracts reliably; verify each
+        # contract explicitly at its deterministic address.
+        if ($status -eq 'DEPLOYED' -and -not $NoVerify) {
+          $sources = @{
+            ConstantPayoutCurve = 'src/ConstantPayoutCurve.sol:ConstantPayoutCurve'
+            Train               = 'src/Train.sol:Train'
+            TrainRouter         = 'src/TrainRouter.sol:TrainRouter'
+          }
+          foreach ($name in @('ConstantPayoutCurve', 'Train', 'TrainRouter')) {
+            $verifyArgs = @('verify-contract', $expected[$name], $sources[$name],
+                            '--chain', $chain.ChainId, '--verifier', $chain.Verifier, '--watch')
+            if ($chain.VerifierUrl) { $verifyArgs += @('--verifier-url', $chain.VerifierUrl) }
+            & forge @verifyArgs
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host ("VERIFY FAILED on " + $alias + ": " + $name + " (deploy unaffected)") -ForegroundColor Yellow
             }
           }
         }
       }
     }
-    if ($mismatch) { $status = 'ADDRESS MISMATCH' }
 
     $results += [pscustomobject]@{
       Chain   = $alias
@@ -175,7 +181,7 @@ try {
     Write-Host ('Summary written to ' + $recordPath)
   }
 
-  $failed = @($results | Where-Object { $_.Status -eq 'FAILED' -or $_.Status -eq 'ADDRESS MISMATCH' })
+  $failed = @($results | Where-Object { $_.Status -eq 'FAILED' -or $_.Status -eq 'ADDRESS MISSING' })
   if ($failed.Count -gt 0) { exit 1 }
 } finally {
   Pop-Location

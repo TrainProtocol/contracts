@@ -140,7 +140,7 @@ contract PayoutCurveTest is Test {
 
   function test_redeemSolver_constantCurve_fullPayout_rewardIntact() public {
     vm.prank(solver);
-    uint256 idx = train.solverLock{ value: 1.1 ether }(
+    train.solverLock{ value: 1.1 ether }(
       _solver(1 ether, NATIVE_ETH, 0.1 ether, NATIVE_ETH, address(constCurve)), _dst(), ''
     );
     vm.warp(block.timestamp + 600);
@@ -148,7 +148,7 @@ contract PayoutCurveTest is Test {
     uint256 f = refundTo.balance;
     uint256 rr = rewardRecipient.balance;
     vm.prank(relayer);
-    train.redeemSolver(hashlock, idx, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
     assertEq(recipient.balance - r, 1 ether);
     assertEq(refundTo.balance - f, 0);
     assertEq(rewardRecipient.balance - rr, 0.1 ether);
@@ -231,14 +231,14 @@ contract PayoutCurveTest is Test {
 
   function test_redeemSolver_curveExcess_amountSplit_rewardIntact() public {
     vm.prank(solver);
-    uint256 idx = train.solverLock(_solver(100 ether, address(token), 10 ether, address(token), address(half)), _dst(), '');
+    train.solverLock(_solver(100 ether, address(token), 10 ether, address(token), address(half)), _dst(), '');
     uint256 r = token.balanceOf(recipient);
     uint256 f = token.balanceOf(refundTo);
     uint256 rr = token.balanceOf(rewardRecipient);
     vm.expectEmit(true, true, false, true);
-    emit Train.SolverRedeemed(hashlock, idx, relayer, SECRET, 50 ether, 50 ether, rewardRecipient, 10 ether);
+    emit Train.SolverRedeemed(hashlock, solver, relayer, SECRET, 50 ether, 50 ether, rewardRecipient, 10 ether);
     vm.prank(relayer);
-    train.redeemSolver(hashlock, idx, SECRET);
+    train.redeemSolver(hashlock, solver, SECRET);
     assertEq(token.balanceOf(recipient) - r, 50 ether);
     assertEq(token.balanceOf(refundTo) - f, 50 ether);
     assertEq(token.balanceOf(rewardRecipient) - rr, 10 ether);
@@ -273,9 +273,9 @@ contract PayoutCurveTest is Test {
     fot.approve(address(train), type(uint256).max);
     uint256 before = fot.balanceOf(address(train));
     vm.prank(solver);
-    uint256 idx = train.solverLock(_solver(amount, address(fot), reward, address(fot), address(0)), _dst(), '');
+    train.solverLock(_solver(amount, address(fot), reward, address(fot), address(0)), _dst(), '');
     uint256 received = fot.balanceOf(address(train)) - before;
-    Train.SolverLock memory lock = train.getSolverLock(hashlock, idx);
+    Train.SolverLock memory lock = train.getSolverLock(hashlock, solver);
     assertEq(lock.amount + lock.reward, received);
     assertLe(lock.amount, amount);
   }
@@ -285,8 +285,8 @@ contract PayoutCurveTest is Test {
     uint256 reward = 5e29;
     token.mint(solver, amount + reward);
     vm.prank(solver);
-    uint256 idx = train.solverLock(_solver(amount, address(token), reward, address(token), address(0)), _dst(), '');
-    Train.SolverLock memory lock = train.getSolverLock(hashlock, idx);
+    train.solverLock(_solver(amount, address(token), reward, address(token), address(0)), _dst(), '');
+    Train.SolverLock memory lock = train.getSolverLock(hashlock, solver);
     assertEq(lock.amount, amount);
     assertEq(lock.reward, reward);
   }

@@ -93,7 +93,12 @@ These are **documented, accepted** behaviors — read before integrating.
    in the `UserLocked` event before they commit). Only `ConstantPayoutCurve` is intended/shipped.
 2. **Hashlock front-run squat.** The `userLocks` keyspace is global per `hashlock`. Anyone can occupy
    a hashlock with a ~1-wei lock, permanently blocking that specific swap (the `sender` slot is never
-   cleared). No funds are at risk — the victim **re-quotes with a fresh secret**.
+   cleared). No funds are at risk — the victim **re-quotes with a fresh secret**. Solver locks are keyed
+   by `(hashlock, solver)`, so nobody can squat another solver's slot — but each solver gets exactly
+   **one, permanent** slot per hashlock: after a refund (e.g. a botched fill), re-filling the same
+   hashlock requires a **different solver address**. This is deliberate — it's the retry/double-funding
+   guard (`SolverLockAlreadyExists`), sized so an RPC that lies about a lock tx can never cost a solver
+   a second escrow.
 3. **`userLockFor` attribution.** Anyone may attribute a lock to any `user` at gas-only cost (the
    1-wei minimum is instantly reclaimable, and the lock owner of record is purely attributive — custody
    keys off `refundTo`/`recipient`, not `sender`). The only effect is appending to a `user`'s history
@@ -125,15 +130,20 @@ These are **documented, accepted** behaviors — read before integrating.
 - `refundUser(hashlock)` — `recipient` anytime, others after timelock; returns full amount to `refundTo`.
 
 ### Train — solver
-- `solverLock(params, dst, data) → index` `payable` — supports all (token, rewardToken) ETH/ERC20
-  combinations; returns the per-hashlock lock index.
-- `redeemSolver(hashlock, index, secret)` — reward → `rewardRecipient` before `rewardTimelock`, else →
+- `solverLock(params, dst, data)` `payable` — supports all (token, rewardToken) ETH/ERC20
+  combinations. Locks are keyed by `(hashlock, msg.sender)`: at most **one** solver lock per solver
+  per hashlock, **ever** — a repeat call reverts `SolverLockAlreadyExists` before pulling funds, so a
+  blind retry (unreliable/malicious RPC) can't double-fund the same swap. Many *different* solvers
+  may still lock under one hashlock. The guard never lifts (not even after refund); a deliberate
+  re-fill needs a different solver address.
+- `redeemSolver(hashlock, solver, secret)` — reward → `rewardRecipient` before `rewardTimelock`, else →
   the redeemer (relayer bounty).
-- `refundSolver(hashlock, index)` — after timelock; returns amount + reward to `refundTo`.
+- `refundSolver(hashlock, solver)` — after timelock; returns amount + reward to `refundTo`.
 
 ### Train — views (off-chain enumeration)
-- `getUserLock(hashlock) → UserLock` · `getSolverLock(hashlock, index) → SolverLock` ·
-  `getSolverLockCount(hashlock) → uint256`
+- `getUserLock(hashlock) → UserLock` · `getSolverLock(hashlock, solver) → SolverLock` — the latter
+  doubles as a solver's idempotency probe (`sender == 0` ⇒ that solver never locked here; cross-check
+  on several RPCs before retrying). Discovery of *other* solvers' locks is event-driven (`SolverLocked`).
 - `getUserLockHashes(user, offset, limit) → (bytes32[], total)` and
   `getUserLocks(user, offset, limit) → (UserLock[], total)` — **windowed** reads (no whole-array copy);
   `total` is the user's lock count. Filter by `UserLock.status` **off-chain** (the on-chain status
@@ -190,8 +200,8 @@ Both lock structs are packing-aware (see the per-field slot annotations in `Trai
 
 **Train:** `ZeroAmount`, `ZeroAddress`, `InvalidUser`, `NativeNotSupported`, `LockNotFound`,
 `HashlockMismatch`, `LockNotPending`, `InvalidTimelock`, `InvalidRewardTimelock`, `SwapAlreadyExists`,
-`TransferFailed`, `MsgValueMismatch`, `RefundNotAllowed`, `InvalidToken`, `QuoteExpired`,
-`InvalidPayoutCurve`, `InvalidPayout`.
+`SolverLockAlreadyExists`, `TransferFailed`, `MsgValueMismatch`, `RefundNotAllowed`, `InvalidToken`,
+`QuoteExpired`, `InvalidPayoutCurve`, `InvalidPayout`.
 
 **TrainRouter:** `InvalidUser`, `NativeNotSupported`, `InvalidIntentSignature`, `Permit2Mismatch`,
 `InsufficientPulled`, `ResidualBalance`.
