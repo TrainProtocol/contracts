@@ -1,7 +1,16 @@
-out/*
-!out/release/
-
-out/release/*
-!out/release/fuel-abi.json
+# NOTE: patterns below use `**/out/...` (not `out/...`) because a pattern containing a slash
+# anywhere but the end is anchored to THIS .gitignore's own directory (`chains/fuel/`) per git's
+# matching rules -- the old unprefixed `out/*` only ever matched a top-level `chains/fuel/out/`,
+# which stopped existing once this workspace split into per-package dirs (`train/`,
+# `payout_curve/`, `interfaces/`, `test_asset/`, each with their own nested `out/`). Left as
+# `out/*` it silently ignored NOTHING for any of them -- discovered while building this port's
+# deployment tooling (`scripts/deploy/artifacts.ts` reads straight out of these directories) and
+# fixed here since compiled bytecode/ABI JSON should never be git-add-able regardless of which
+# package produced it.
+**/out/*
 
 target/
+
+# Per-run deployment records (machine-generated; addresses get curated into DEPLOYMENTS.md by
+# hand instead) -- mirrors the EVM port's own gitignored `deployments/`.
+deployments/
