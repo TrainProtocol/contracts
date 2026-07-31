@@ -1,0 +1,21 @@
+{
+  "name": "train-starknet-scripts",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "deploy": "tsx src/deploy.ts",
+    "deploy-all": "tsx src/deploy-all.ts",
+    "interact": "tsx src/interact.ts",
+    "verify": "tsx src/verify.ts",
+    "e2e": "tsx src/sepolia-e2e.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.0",
+    "starknet": "^9.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.0"
+  }
+}

@@ -33,3 +33,7 @@ build/
 .infura
 .secret
 .vscode
+# Solana build artifacts
+chains/solana/.anchor/
+chains/solana/target/
+chains/solana/node_modules/
