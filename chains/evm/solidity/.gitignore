@@ -1,14 +1,28 @@
-node_modules
+# Foundry
+out/
+cache/
+broadcast/
+.gas-snapshot
+
+# Dependencies
+lib/
+
+# IDE
+.idea/
+.vscode/
+
+# Environment
 .env
-coverage
-coverage.json
-typechain
-typechain-types
-ignition/deployments
-artifacts-zk
-cache-zk
+.env.local
+deployments/
 
-# Hardhat files
-cache
-artifacts
+# Fuzzing runtime artifacts (regenerable)
+crytic-export/
+**/crytic-export/
+corpus/
 
+# Node (deploy-tron.js)
+node_modules/
+
+# Generated docs (forge doc)
+docs/

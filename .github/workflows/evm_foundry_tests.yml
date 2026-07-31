@@ -1,0 +1,56 @@
+name: EVM Foundry Tests
+
+on:
+  push:
+    branches: [main, main-add-evm]
+    paths:
+      - 'chains/evm/solidity/**'
+      - '.github/workflows/evm_foundry_tests.yml'
+
+  pull_request:
+    branches: [main, main-add-evm]
+    paths:
+      - 'chains/evm/solidity/**'
+      - '.github/workflows/evm_foundry_tests.yml'
+
+  workflow_dispatch:
+
+jobs:
+  foundry-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: chains/evm/solidity
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Show Forge version
+        run: forge --version
+
+      - name: Install dependencies
+        run: forge install
+
+      - name: Check formatting (optional)
+        run: forge fmt --check || true
+        continue-on-error: true
+
+      - name: Build contracts
+        run: forge build
+
+      - name: Run tests
+        run: forge test -vvv
+
+      - name: Run tests with gas report
+        run: forge test --gas-report
+
+      - name: Run fuzz tests (extended)
+        run: forge test --match-path "test/*.fuzz.t.sol" --fuzz-runs 1000

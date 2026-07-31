@@ -1,0 +1,83 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+solc = "0.8.34"
+evm_version = "cancun"
+via_ir = true
+optimizer = true
+optimizer_runs = 1000000
+script = "script"
+
+remappings = [
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/"
+]
+
+[profile.default.fuzz]
+runs = 256
+
+[profile.default.invariant]
+runs = 64
+depth = 128
+fail_on_revert = false
+
+# Tron build profile.
+# Use:  $env:FOUNDRY_PROFILE="tron"; forge build
+[profile.tron]
+src = "src"
+out = "out"
+libs = ["lib"]
+solc = "0.8.34"
+evm_version = "cancun"
+via_ir = true
+optimizer = true
+optimizer_runs = 1000000
+script = "script"
+remappings = [
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/"
+]
+
+# Tempo build profile (Osaka hard fork; no native gas token — deploys src/tempo/Train.sol, a
+# Tempo-specific contract, not the shared src/Train.sol used by the other 6 EVM chains).
+# Use:  $env:FOUNDRY_PROFILE="tempo"; forge build
+[profile.tempo]
+src = "src"
+out = "out"
+libs = ["lib"]
+solc = "0.8.34"
+evm_version = "osaka"
+via_ir = true
+optimizer = true
+optimizer_runs = 1000000
+script = "script"
+remappings = [
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/"
+]
+
+# Public testnet RPCs for the deterministic multi-chain deploy (script/deploy-testnets.ps1).
+[rpc_endpoints]
+sepolia          = "https://ethereum-sepolia-rpc.publicnode.com"
+arbitrum_sepolia = "https://arbitrum-sepolia-rpc.publicnode.com"
+base_sepolia     = "https://base-sepolia-rpc.publicnode.com"
+optimism_sepolia = "https://optimism-sepolia-rpc.publicnode.com"
+bsc_testnet      = "https://bsc-testnet-rpc.publicnode.com"
+linea_sepolia    = "https://rpc.sepolia.linea.build"
+monad_testnet    = "https://testnet-rpc.monad.xyz"
+
+# Etherscan API v2: one ETHERSCAN_API_KEY verifies on every chain below
+# (Monad testnet included — v2 covers chain 10143 via MonadScan).
+[etherscan]
+sepolia          = { key = "${ETHERSCAN_API_KEY}", chain = 11155111 }
+arbitrum_sepolia = { key = "${ETHERSCAN_API_KEY}", chain = 421614 }
+base_sepolia     = { key = "${ETHERSCAN_API_KEY}", chain = 84532 }
+optimism_sepolia = { key = "${ETHERSCAN_API_KEY}", chain = 11155420 }
+bsc_testnet      = { key = "${ETHERSCAN_API_KEY}", chain = 97 }
+linea_sepolia    = { key = "${ETHERSCAN_API_KEY}", chain = 59141 }
+monad_testnet    = { key = "${ETHERSCAN_API_KEY}", chain = 10143, url = "https://api.etherscan.io/v2/api?chainid=10143" }
+
+[fmt]
+line_length = 120
+tab_width = 2
+bracket_spacing = true
+
+

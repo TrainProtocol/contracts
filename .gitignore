@@ -37,3 +37,6 @@ build/
 chains/solana/.anchor/
 chains/solana/target/
 chains/solana/node_modules/
+
+.claude
+CLAUDE.md
