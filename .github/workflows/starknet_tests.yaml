@@ -2,11 +2,11 @@ name: Starknet Tests
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, main-add-starknet ]
     paths:
       - 'chains/starknet/**'
   pull_request:
-    branches: [ main ]
+    branches: [ main, main-add-starknet ]
     paths:
       - 'chains/starknet/**'
 

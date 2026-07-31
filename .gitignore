@@ -39,6 +39,4 @@ chains/solana/target/
 chains/solana/node_modules/
 
 # local agent settings
-.claude
 .claude/
-CLAUDE.md

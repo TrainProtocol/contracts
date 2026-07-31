@@ -2,11 +2,11 @@ name: Solana Tests
 
 on:
   push:
-    branches: [main-add-solana]
+    branches: [main, main-add-solana]
     paths:
       - 'chains/solana/**'
   pull_request:
-    branches: [main-add-solana]
+    branches: [main, main-add-solana]
     paths:
       - 'chains/solana/**'
 

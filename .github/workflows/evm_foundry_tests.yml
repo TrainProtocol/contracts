@@ -2,13 +2,13 @@ name: EVM Foundry Tests
 
 on:
   push:
-    branches: [main, main-add-evm]
+    branches: [main, main-add-evm, main-add-evm-tempo]
     paths:
       - 'chains/evm/solidity/**'
       - '.github/workflows/evm_foundry_tests.yml'
 
   pull_request:
-    branches: [main, main-add-evm]
+    branches: [main, main-add-evm, main-add-evm-tempo]
     paths:
       - 'chains/evm/solidity/**'
       - '.github/workflows/evm_foundry_tests.yml'

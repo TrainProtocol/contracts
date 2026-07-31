@@ -29,14 +29,6 @@
     "chains/*",
     "discovery"
   ],
-  "scripts": {
-    "build": "run-s build:*",
-    "build:evm": "npm run build -w chains/evm",
-    "build:bitcoin": "npm run build -w chains/bitcoin",
-    "test": "run-s test:*",
-    "test:evm": "npm run pre-build -w chains/evm",
-    "test:bitcoin": "npm run pre-build -w chains/bitcoin"
-  },
   "dependencies": {
     "dotenv": "^16.4.7"
   }

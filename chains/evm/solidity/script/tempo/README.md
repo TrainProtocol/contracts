@@ -8,7 +8,7 @@ batched-and-sponsored** flow that replaces `TrainRouter` on this chain entirely 
 | Thing | Value |
 |---|---|
 | Testnet | Moderato, chain id `42431` (`0xA5F7`) |
-| Mainnet | chain id `4217` (`0x1079`) — not deployed yet |
+| Mainnet | chain id `4217` (`0x1079`) — Train deployed at `0xCb74407724c463EAA9bC661818364b532F8B5Cb5` (see [DEPLOYMENTS.md](../../DEPLOYMENTS.md)) |
 | RPC (testnet) | `https://rpc.moderato.tempo.xyz` |
 | Explorer (testnet) | `https://explore.testnet.tempo.xyz` |
 | Verifier | `https://contracts.tempo.xyz` (Sourcify-compatible; **no Etherscan, no API key**) |
