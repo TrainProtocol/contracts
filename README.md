@@ -21,12 +21,12 @@ are kept after merging and remain the place where chain work continues.
 
 | Network | Path | Status |
 | --- | --- | --- |
-| **EVM (Solidity)** | [`chains/evm/solidity`](./chains/evm/solidity/) | Audited · v3 live on 7 mainnets + 7 testnets |
+| **EVM (Solidity)** | [`chains/evm/solidity`](./chains/evm/solidity/) | v3 live on 7 mainnets + 7 testnets |
 | **Tempo** | [`chains/evm/solidity/src/tempo`](./chains/evm/solidity/src/tempo/) | v3 live on Tempo mainnet + Moderato testnet |
 | **Tron** | [`chains/evm/solidity`](./chains/evm/solidity/) (TVM deploy of the EVM contracts) | v3 on Nile testnet |
-| **Fuel** | [`chains/fuel`](./chains/fuel/) | Audited · live on Ignition mainnet + Sepolia testnet |
-| **Starknet** | [`chains/starknet`](./chains/starknet/) | Audited · live on mainnet + Sepolia testnet |
-| **Solana** | [`chains/solana`](./chains/solana/) | Audited · devnet |
+| **Fuel** | [`chains/fuel`](./chains/fuel/) | Live on Ignition mainnet + Sepolia testnet |
+| **Starknet** | [`chains/starknet`](./chains/starknet/) | Live on mainnet + Sepolia testnet |
+| **Solana** | [`chains/solana`](./chains/solana/) | Devnet |
 | **Aztec** | [`chains/aztec`](./chains/aztec/) | In development · testnet |
 
 ### In-progress networks (per-branch)
@@ -147,7 +147,8 @@ This design ensures that funds are either redeemed with the correct secret or sa
 
 ## Disclaimer: Development in Progress
 
-Please note that this project is actively under development. It is not ready for deployment on any mainnet environments, unless mentioned as audited.
+Please note that this project is actively under development and **the contracts have not been
+audited**. Mainnet deployments of the current release exist, but use them at your own risk.
 As we continue to experiment and test new ideas, expect significant changes to the interface. Please be prepared for ongoing modifications.
 
 ## Acknowledgements
