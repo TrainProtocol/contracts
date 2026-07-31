@@ -1,0 +1,1003 @@
+{
+  "started": "2026-07-30T14:22:38.838Z",
+  "finished": "2026-07-30T14:27:54.619Z",
+  "cluster": "devnet",
+  "rpc": "https://api.devnet.solana.com",
+  "programs": {
+    "train_htlc": "2cQYFAiud2LBg3r6MxKPJ1oS83yyrRwDsgxQSwhL97LJ",
+    "constant_payout_curve": "Dp4ReoYGG8VRXpnst4vT8g6UDVwUicJwAuiikQWk8HMF",
+    "mock_decay_curve": "wmgDCMVreZ5xKv8NTg8rmkGPpb7bs5FHiToxqjc5yMr"
+  },
+  "actors": {
+    "feePayer": "AR7DUwfrf17iir72oauSPJMqgYzboALej8a7f9yqnA4F",
+    "user": "2wrZCWSsY1WSSEbR8D1LAW6KECiEVUDiQ95FDDLUi1Wc",
+    "solver": "tzuJKcbVgqA3xqND59q1R4otF87or1kWWDGfjHP6A8p"
+  },
+  "summary": {
+    "rows": 106,
+    "landed": 46,
+    "reverted": 19,
+    "simRejects": 3,
+    "failures": 0
+  },
+  "rows": [
+    {
+      "n": 1,
+      "stage": "S0",
+      "name": "fund ephemeral user",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "42Y4Kf3UW8hpBwcVrRMhy5L8Rz8T1Y5oafg2MgVojQtLS2jLJ8QpyNXLfykToNn5NreoPnN5j3d9qJ6jmMqE1XcF",
+      "slot": 479990796,
+      "note": "0.100000 SOL"
+    },
+    {
+      "n": 2,
+      "stage": "S0",
+      "name": "fund ephemeral solver",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "3e4fihVrcagRKHmUP3fQKaxcN4hxiCCZeJQ1KbK8K848aAWoDSiLoo7pc7Pf3BMgumEJhJWXEcAXeLNVqBfFLH8M",
+      "slot": 479990799,
+      "note": "0.100000 SOL"
+    },
+    {
+      "n": 3,
+      "stage": "S0",
+      "name": "balances",
+      "kind": "info",
+      "status": "INFO",
+      "note": "feePayer=13.094242 SOL user=0.100000 SOL solver=0.100000 SOL"
+    },
+    {
+      "n": 4,
+      "stage": "S1",
+      "name": "mints created",
+      "kind": "info",
+      "status": "INFO",
+      "note": "mintA=Fs1fY4XbwYyWSVNx3oxKcotBoE6rfAb5JdtmaeRMXmtJ mintB=9uAaGQ1qZC7ETrgkNhwbSyZuA3RT7npBdbbwjdPFMvBA"
+    },
+    {
+      "n": 5,
+      "stage": "S2",
+      "name": "user_lock_sol amount=0",
+      "kind": "tx",
+      "status": "REVERTED",
+      "sig": "2RPbk71kKDR44sF9xkdwDWcSx3cUxXrUWuhmFiNW4YfhjsmMcMzLQ3X797b1jZVDbR5NUT68UE5YqQGxYrivES4Y",
+      "slot": 479990840,
+      "note": "rejected on-chain with \"ZeroAmount\""
+    },
+    {
+      "n": 6,
+      "stage": "S2",
+      "name": "user_lock_sol quote expired",
+      "kind": "tx",
+      "status": "REVERTED",
+      "sig": "2oPKBHRW8DbLM5rxPnXtjqoHLCeBzto1UCAgXMzsEPCMfi16LvUwDz2zmxYGrB7UvefbE6dz3LPJXNHgXRceRgtE",
+      "slot": 479990843,
+      "note": "rejected on-chain with \"QuoteExpired\""
+    },
+    {
+      "n": 7,
+      "stage": "S2",
+      "name": "user_lock_sol refund_to=default (ZeroAddress)",
+      "kind": "tx",
+      "status": "REVERTED",
+      "sig": "3MtA6mz5ENHE1FAqUcSEbrRdTspxVUbbPGQjLFv6tBGwptDyLnErbZ34Cid7uCV8psFgfn5W3HpgLnt6PeNsXhFE",
+      "slot": 479990845,
+      "note": "rejected on-chain with \"ZeroAddress\""
+    },
+    {
+      "n": 8,
+      "stage": "S2",
+      "name": "user_lock_sol",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "y1ezAHo5y6iKtqesdESwXxrzXLnuAjUnVXHWHKAJniJyRWZbtbTYxRNynXDEXCb3VFbexXeRiza2AsZMruTt5AM",
+      "slot": 479990847,
+      "note": "sender=user amount=2000000"
+    },
+    {
+      "n": 9,
+      "stage": "S2",
+      "name": "lock attributed to user",
+      "kind": "check",
+      "status": "OK",
+      "note": "sender=2wrZCWSsY1WSSEbR8D1LAW6KECiEVUDiQ95FDDLUi1Wc"
+    },
+    {
+      "n": 10,
+      "stage": "S2",
+      "name": "rent_payer = feePayer",
+      "kind": "check",
+      "status": "OK",
+      "note": "sponsor pays rent"
+    },
+    {
+      "n": 11,
+      "stage": "S2",
+      "name": "redeem_user_sol wrong secret",
+      "kind": "tx",
+      "status": "REVERTED",
+      "sig": "3fEb3Gzf8d3a7qvt1ZrP4okYuScAcSguQVejriQLwEiETdgAwFnEh9UfrPdG6KrrwUy7Fnm12LHHKWee7aPX8zTk",
+      "slot": 479990849,
+      "note": "rejected on-chain with \"HashlockMismatch\""
+    },
+    {
+      "n": 12,
+      "stage": "S2",
+      "name": "redeem_user_sol",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "2oQtMdUdK17RjoeowbiAtRgbMTgVnpkFru9Stvmw4ZAz9yipoDPJEWNJZPk8hfcsWSvYKCUFJf4aYiR6yavf86Vk",
+      "slot": 479990852,
+      "note": "caller=relayer, pays recipient"
+    },
+    {
+      "n": 13,
+      "stage": "S2",
+      "name": "recipient +amount",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=2000000"
+    },
+    {
+      "n": 14,
+      "stage": "S3",
+      "name": "user_lock_sol",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "oRFjf8TnGHDdRUd8DjqrtHieZ4z9noxGTdviBPS1BjvYqf1RXTFZeaXeLAkwE5pcBRrvwKGjVMJ8uedP2JJe1rx",
+      "slot": 479990854,
+      "note": "timelock=25s"
+    },
+    {
+      "n": 15,
+      "stage": "S3",
+      "name": "refund_user_sol premature (non-recipient)",
+      "kind": "tx",
+      "status": "REVERTED",
+      "sig": "3YVewAp8afo38qdfST28pSunzBPmTBdFjeKEBDLnSdXYba94mQc9TXMpFYHMztR7QxJcJC6HYAiTgmmAB4eisn7L",
+      "slot": 479990856,
+      "note": "rejected on-chain with \"TimelockNotExpired\""
+    },
+    {
+      "n": 16,
+      "stage": "S3",
+      "name": "waiting out timelock",
+      "kind": "info",
+      "status": "INFO",
+      "note": "30s"
+    },
+    {
+      "n": 17,
+      "stage": "S3",
+      "name": "refund_user_sol",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "5GA3QhT5JtTe4mLbRBEU4SJKuXhS5Zo2NJJ3Exgr3NrpojxJerzzgd4urCfjSbKPRRqaD66RZkwevx4Kwxs9pjrs",
+      "slot": 479990938,
+      "note": "caller=relayer after timelock"
+    },
+    {
+      "n": 18,
+      "stage": "S3",
+      "name": "refund_to (user) +amount",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=1500000"
+    },
+    {
+      "n": 19,
+      "stage": "S4",
+      "name": "user_lock_token",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "pt8vdJDbqdYY3pvQP6EKq23qe4NuBnVJWgs3jqKDg1iSBhCy8BLyh4RoCF1bP1GEEVDbTK7w8aHRmAGjYEYw7qJ",
+      "slot": 479990941,
+      "note": "amount=250000 mintA"
+    },
+    {
+      "n": 20,
+      "stage": "S4",
+      "name": "vault holds amount",
+      "kind": "check",
+      "status": "OK",
+      "note": "vault=250000"
+    },
+    {
+      "n": 21,
+      "stage": "S4",
+      "name": "redeem_user_sol on token lock (variant confusion)",
+      "kind": "tx",
+      "status": "REVERTED",
+      "sig": "4Zi1ZskLb897sDferoLhVHMjAFimgEim9QTMF4uG1opp247rbasriWZxcEp7Vfv2fyozwjar7KrXAK1i8QcFSrKa",
+      "slot": 479990944,
+      "note": "rejected on-chain with \"WrongToken\""
+    },
+    {
+      "n": 22,
+      "stage": "S4",
+      "name": "redeem_user_token",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "5DbMbvUSd6mH4nFzR754n4R9PQdgoofNDYtj4qHMvvmq1Yz6RvXBH3YKARMBykCYBmZ2Jd5H4r6pgF3hvEdR5HBY",
+      "slot": 479990946,
+      "note": "recipient=solver ATA"
+    },
+    {
+      "n": 23,
+      "stage": "S4",
+      "name": "recipient ATA credited",
+      "kind": "check",
+      "status": "OK",
+      "note": "ok"
+    },
+    {
+      "n": 24,
+      "stage": "S5",
+      "name": "user_lock_token",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "4so3oK4owKmVqcPCw28MW1tuo1CBnkbdQGxbskySgGUAwJNa1DwxMAVrzdKxkT6wPzzjJVcrjkhAaZ7DRtop3Y4z",
+      "slot": 479990948,
+      "note": "timelock=25s"
+    },
+    {
+      "n": 25,
+      "stage": "S5",
+      "name": "user_lock_token duplicate hashlock",
+      "kind": "tx",
+      "status": "REVERTED",
+      "sig": "444WEtKq3CK3wuE3hbiodiSB249f47j8dnvAazBhnfCvDr7VhdrNLi3Qdno44HAAJozMKWU2h2D4CKwGmLCkpWUs",
+      "slot": 479990950,
+      "note": "rejected on-chain with \"already in use\""
+    },
+    {
+      "n": 26,
+      "stage": "S5",
+      "name": "waiting out timelock",
+      "kind": "info",
+      "status": "INFO",
+      "note": "30s"
+    },
+    {
+      "n": 27,
+      "stage": "S5",
+      "name": "refund_user_token",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "42JtRUTnVZ2CvS8SNsW2ANp8Pwr47JvK6oKMb93LtUSvHUJaUBUiEspVnbwvSGtwPvTRwiE9UxM64zDB7kHT7dCg",
+      "slot": 479991031,
+      "note": "refund_to=user ATA"
+    },
+    {
+      "n": 28,
+      "stage": "S5",
+      "name": "status refunded",
+      "kind": "check",
+      "status": "OK",
+      "note": "lock closed"
+    },
+    {
+      "n": 29,
+      "stage": "S6",
+      "name": "solver_lock_sol reward tl >= tl",
+      "kind": "tx",
+      "status": "REVERTED",
+      "sig": "31oDYq8HSziNcmvRUaGLcrkudsi73EJFSDgtFWMomdV7zXVRhLfsKAVyDj7Jd4jxL2vvEnjwo3gsiDrb2poHavVN",
+      "slot": 479991034,
+      "note": "rejected on-chain with \"RewardTimelockNotLessThanTimelock\""
+    },
+    {
+      "n": 30,
+      "stage": "S6",
+      "name": "solver_lock_sol",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "3D8pCkNnnBrffHxXvt9QN5HZTjCiXXq8HgrKxie4prbgi9SG1YuDHYGodbw9iJeuwZ68YwynqaQM7Wf4XfqzSeNZ",
+      "slot": 479991036,
+      "note": "amount=1200000 reward=300000"
+    },
+    {
+      "n": 31,
+      "stage": "S6",
+      "name": "solver_lock_sol duplicate solver",
+      "kind": "tx",
+      "status": "REVERTED",
+      "sig": "32e9XucP7RhjNNRVfDkpuopWEiK5T9G1ShriP57pgW5nWdLGPoykmTJ7g82fCe946TaiRyUUnJBk7YcR8K39DJzU",
+      "slot": 479991039,
+      "note": "rejected on-chain with \"SolverLockAlreadyExists\""
+    },
+    {
+      "n": 32,
+      "stage": "S6",
+      "name": "redeem_solver_sol",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "2AsNNJmXLGkssJhdkzBANUxya1HrdBHhpKqRKrXSCfrcRzLhvSMDS6EcWVsA9x2irWAjXPdW8DrRhBFnVN9LCBiv",
+      "slot": 479991041,
+      "note": "reward→reward_recipient (pre-timelock)"
+    },
+    {
+      "n": 33,
+      "stage": "S6",
+      "name": "recipient (user) +amount",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=1200000"
+    },
+    {
+      "n": 34,
+      "stage": "S6",
+      "name": "reward_recipient (solver) +reward",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=300000"
+    },
+    {
+      "n": 35,
+      "stage": "S6",
+      "name": "redeem_solver_sol double redeem",
+      "kind": "tx",
+      "status": "REVERTED",
+      "sig": "4qaVXt74jjgFWpcwJhLj1gBVKfYbKAGxvj3ybZpRbTzKL34kPSo3QKPp7NvJ2BuFWpvHvAH3RBHawoV9yDwqi8uY",
+      "slot": 479991044,
+      "note": "rejected on-chain with \"NotPending\""
+    },
+    {
+      "n": 36,
+      "stage": "S6",
+      "name": "close_solver_lock",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "62jUs5CwJ41hb9JMLMfDbsDpod3hHB3p5n25BuwQyvM7KVoa5KpESWRDsWc4iyTptajzRHkV19erkVDUCHJhwwwd",
+      "slot": 479991050,
+      "note": "rent→rent_payer"
+    },
+    {
+      "n": 37,
+      "stage": "S7",
+      "name": "solver_lock_sol",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "5SJbwjMTUeYSAVri31ozXrin9YeXibBUfEKC99xZnyaoD1nUdk2Tr9CB4mWRPEBNm7TbLAh2zHFAhivF7pijNTqv",
+      "slot": 479991052,
+      "note": "rewardTimelock=25s"
+    },
+    {
+      "n": 38,
+      "stage": "S7",
+      "name": "waiting out reward timelock",
+      "kind": "info",
+      "status": "INFO",
+      "note": "30s"
+    },
+    {
+      "n": 39,
+      "stage": "S7",
+      "name": "redeem_solver_sol (late)",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "2cocQx7f6TdujUuccLCxEcPQ4zkMdNmVhxSdcSic1hHtDEZ9o9DxzEM4yDTFPJS9qwetWBkDrirU13jazYW874ys",
+      "slot": 479991145,
+      "note": "reward→caller bounty (post-timelock)"
+    },
+    {
+      "n": 40,
+      "stage": "S7",
+      "name": "caller received reward bounty",
+      "kind": "check",
+      "status": "OK",
+      "note": "caller +reward (minus fee)"
+    },
+    {
+      "n": 41,
+      "stage": "S8",
+      "name": "solver_lock_token #1",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "4ij4WHM1muFEftMJLSjvuwrn6fBrxCmp6dKzLhPiGzxDhYzmAVpgBjVpEWkiVUoiVbCKcJ9R3QPckWmF16KunNi7",
+      "slot": 479991150,
+      "note": "single vault amount+reward"
+    },
+    {
+      "n": 42,
+      "stage": "S8",
+      "name": "solver_lock_token #2",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "2or29mN2TcsBDmHj9sM8r2FGYbXpZJBxfTa28DP1x5KwohwLgFBc8FuZAbnNA6qdhWB45ksHi6T9y3e8z1svJgHv",
+      "slot": 479991152,
+      "note": "for refund"
+    },
+    {
+      "n": 43,
+      "stage": "S8",
+      "name": "redeem_solver_token #1",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "m3oSDuriBWJjQhCRs248FkLJEw1BQSqaFSyYJgeVAPtNrTfyMgtpMPA4yD5h6Nc9QZ7jSrnnQKCG8CsWxMx662X",
+      "slot": 479991154,
+      "note": "recipient + reward_recipient"
+    },
+    {
+      "n": 44,
+      "stage": "S8",
+      "name": "refund_solver_token premature",
+      "kind": "tx",
+      "status": "REVERTED",
+      "sig": "625LyLovX7F2P7F8HVrd8NTuU57LEJaVCs39N7pczxA2sR4b219jhsGkPi9qj99ekoyUmKhvgorJRXksietYo3TP",
+      "slot": 479991156,
+      "note": "rejected on-chain with \"TimelockNotExpired\""
+    },
+    {
+      "n": 45,
+      "stage": "S8",
+      "name": "waiting out timelock",
+      "kind": "info",
+      "status": "INFO",
+      "note": "30s"
+    },
+    {
+      "n": 46,
+      "stage": "S8",
+      "name": "refund_solver_token #2",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "2iyac4i9JEJzZSGBD5GsxqefP7p3afJufP6TCqh67uxFRaDbmSZFVxFGHdq7Be5V7wNL7LxH5gggG5CFbraf4MxH",
+      "slot": 479991238,
+      "note": "refund_to=solver ATA"
+    },
+    {
+      "n": 47,
+      "stage": "S9",
+      "name": "solver_lock_token_diff_reward identical mints",
+      "kind": "tx",
+      "status": "REVERTED",
+      "sig": "Sz9d4TZ2PThsoEmwSgT5FLcQvSuJTYUYyFqteZ59Tyk4WH2wG2dvPKQqjTT2kvwdxNecC8LCh2PToLFEz2ttqfi",
+      "slot": 479991240,
+      "note": "rejected on-chain with \"WrongToken\""
+    },
+    {
+      "n": 48,
+      "stage": "S9",
+      "name": "solver_lock_token_diff_reward",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "Wz2Fjqwy8KhtFS8xCtTTKRqubJudMyZsNj6FJ31rXv1KbYUuVZy5WR5ppxrniVgyUACThb2W1iRUsYbKLVzgNrM",
+      "slot": 479991242,
+      "note": "two vaults mintA + mintB"
+    },
+    {
+      "n": 49,
+      "stage": "S9",
+      "name": "redeem_solver_token_diff_reward",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "4RSJzMKi6UF8KUykcBg5684dWPYmuroBSAZYkdfMmWbGhuaVBUz8uY6kyjmQKU48LgiaTN2oMUNhtgotS9arZKUo",
+      "slot": 479991244,
+      "note": "recipient mintA + reward mintB"
+    },
+    {
+      "n": 50,
+      "stage": "S9A",
+      "name": "solver_lock_sol_token_reward #1",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "W1f6KNMrv9SwYoQNHVpBQ8bUgtqePPSDY9TLFG21bm6obLzi2s1XLXnTyZgXt8yUVQm9LiExuqJfdzuep71LXJ3",
+      "slot": 479991246,
+      "note": "for redeem"
+    },
+    {
+      "n": 51,
+      "stage": "S9A",
+      "name": "solver_lock_sol_token_reward #2",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "4Dd3rPQspar74uLKU1D5zCx9wpuVcAv2hmcgWTPEPysoiMTnSoDeQrBsVitFD68AtxSfEqYh8BNQXi14yyzC8gvg",
+      "slot": 479991248,
+      "note": "for refund"
+    },
+    {
+      "n": 52,
+      "stage": "S9A",
+      "name": "redeem_solver_sol_token_reward",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "2MyPJ3PbETpsYpj4m14MmfDrr5G9oBhYrCqmVn7mwqBZ7Sz1oZTeRap8A7tUgSMzoZwnmZ8JUjCZg4KwadBW3s61",
+      "slot": 479991251,
+      "note": "SOL→recipient, SPL reward→reward recipient"
+    },
+    {
+      "n": 53,
+      "stage": "S9A",
+      "name": "mixed SOL principal redeemed",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=900000"
+    },
+    {
+      "n": 54,
+      "stage": "S9A",
+      "name": "mixed SPL reward redeemed",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=20000"
+    },
+    {
+      "n": 55,
+      "stage": "S9A",
+      "name": "waiting out mixed-path timelock",
+      "kind": "info",
+      "status": "INFO",
+      "note": "30s"
+    },
+    {
+      "n": 56,
+      "stage": "S9A",
+      "name": "refund_solver_sol_token_reward",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "QGumksYbuzukJcy3mefiaK63cgbMHdCrgXVpjdsFkpLsVok1GwB63Uiogg4KweYNuPUEgZ9d66tFhhv4q2hAJow",
+      "slot": 479991333,
+      "note": "SOL + SPL reward→refund_to"
+    },
+    {
+      "n": 57,
+      "stage": "S9A",
+      "name": "mixed SOL principal refunded",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=900000"
+    },
+    {
+      "n": 58,
+      "stage": "S9A",
+      "name": "mixed SPL reward refunded",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=20000"
+    },
+    {
+      "n": 59,
+      "stage": "S9B",
+      "name": "solver_lock_token_sol_reward #1",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "4n36t9LmHWi4mu8LKx1fjts1i1xfWetDidE2VfqQhhjQcKZrhRJ4ZFCciBAsZz3yFCj3RXkcZBz1zzheFcunzt4p",
+      "slot": 479991388,
+      "note": "for redeem"
+    },
+    {
+      "n": 60,
+      "stage": "S9B",
+      "name": "solver_lock_token_sol_reward #2",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "4Yx7zb7nge9LM8J4YRQsrRQzqUsSPgUpPceRdcwBhna3wowG3JsXkuDgzozohAbC6n1HR8KjjwJsJ86BCsnyudAs",
+      "slot": 479991390,
+      "note": "for refund"
+    },
+    {
+      "n": 61,
+      "stage": "S9B",
+      "name": "redeem_solver_token_sol_reward",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "2Lka2wsCRE8BKfncxtyrbaL8XZ9p5NT8Botsemq4SYMyQWuQTLXKuzJD3CnRJBXNjEYUArEyx2aVKcrGuaTtVLrw",
+      "slot": 479991393,
+      "note": "SPL→recipient, SOL reward→reward recipient"
+    },
+    {
+      "n": 62,
+      "stage": "S9B",
+      "name": "mixed SPL principal redeemed",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=70000"
+    },
+    {
+      "n": 63,
+      "stage": "S9B",
+      "name": "mixed SOL reward redeemed",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=700000"
+    },
+    {
+      "n": 64,
+      "stage": "S9B",
+      "name": "waiting out mixed-path timelock",
+      "kind": "info",
+      "status": "INFO",
+      "note": "30s"
+    },
+    {
+      "n": 65,
+      "stage": "S9B",
+      "name": "refund_solver_token_sol_reward",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "41KRzUMkqyxHho6A8RrWHytM9KCXxGTPimgMMhN3hn16MMCiaimVGDmYHF9RBVhuLvfBH4DYjPAgWuFhgGwqFu7o",
+      "slot": 479991475,
+      "note": "SPL + SOL reward→refund_to"
+    },
+    {
+      "n": 66,
+      "stage": "S9B",
+      "name": "mixed SPL principal refunded",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=70000"
+    },
+    {
+      "n": 67,
+      "stage": "S9B",
+      "name": "mixed SOL reward refunded",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=700000"
+    },
+    {
+      "n": 68,
+      "stage": "S10",
+      "name": "user_lock_sol mismatched curve",
+      "kind": "tx",
+      "status": "REVERTED",
+      "sig": "3ZPjvzVd7REBpBYTvrdkCRN1ohWpu2L9kq9e5eDEtfLZApifYPksZTCn2V4isoHPTA3ZJANA8RAozSgTvGy1aAwg",
+      "slot": 479991478,
+      "note": "rejected on-chain with \"InvalidPayoutCurve\""
+    },
+    {
+      "n": 69,
+      "stage": "S10",
+      "name": "user_lock_sol (constant curve)",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "4aFpik6E1cDg75BbHjqsbpXG8miAfzaNjhTg6anKiiMVyz1Go8qkP3nZne5ozyJEZhpFhigegrxJprPL5YCshsP6",
+      "slot": 479991480,
+      "note": "curve=constant"
+    },
+    {
+      "n": 70,
+      "stage": "S10",
+      "name": "redeem_user_sol (constant curve)",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "2DZeAy5TX22odBZ4v56AXPB9zqJpKTPN9NZmLNzgmbz7priMkt1FcZAwt9j2Dp5enZ4MDdVbcmkoX43APyGrg87k",
+      "slot": 479991483,
+      "note": "payout=amount, excess=0"
+    },
+    {
+      "n": 71,
+      "stage": "S10",
+      "name": "recipient +full amount",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=1000000"
+    },
+    {
+      "n": 72,
+      "stage": "S11",
+      "name": "user_lock_sol (decay curve)",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "qyA8owtYfkFZ7uBXUiJLEpfHuMurA1EQYZD43ACAohNPPPfF2N4inWZsxXv7R6HsQecpXvxGg6LQpdq3sUYxnkJ",
+      "slot": 479991485,
+      "note": "curve=decay (payout=amount/2)"
+    },
+    {
+      "n": 73,
+      "stage": "S11",
+      "name": "redeem_user_sol (decay curve)",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "5he3LrApa2i758kt5d3uERspkHyWZuuQxtAg9ZtsQq4hDuSCCKjUdeN48VVJGphgpSAJqHqLLddoUWN6EAswfL15",
+      "slot": 479991488,
+      "note": "payout+excess split"
+    },
+    {
+      "n": 74,
+      "stage": "S11",
+      "name": "recipient +payout(amount/2)",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=1000000"
+    },
+    {
+      "n": 75,
+      "stage": "S11",
+      "name": "refund_to +excess(amount/2)",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=1000000"
+    },
+    {
+      "n": 76,
+      "stage": "S11",
+      "name": "user_lock_sol (0-bps curve)",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "62nF4AuQcf7P6A36zXsatoS14jKyhq2imEYETMKT49D1EST2DWqkkzXmkBiywhDktNugMCa5TvX6bptc6LrMJm5o",
+      "slot": 479991491,
+      "note": "will fail redeem"
+    },
+    {
+      "n": 77,
+      "stage": "S11",
+      "name": "redeem_user_sol zero payout",
+      "kind": "tx",
+      "status": "REVERTED",
+      "sig": "4GCzF79kUvpVbSdFBMEZaPLpGdSuE4utppS3MLuKA1HjepMcMVEu7H57Dy5KnpxdCXAfHy2qWk1iQ794mzD8cGZ7",
+      "slot": 479991516,
+      "note": "rejected on-chain with \"InvalidPayout\""
+    },
+    {
+      "n": 78,
+      "stage": "S12",
+      "name": "rail A tampered tx",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected pre-landing (ature) — no on-chain tx by construction"
+    },
+    {
+      "n": 79,
+      "stage": "S12",
+      "name": "sponsored user_lock_sol",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "kxdfwa21VUtKB5SNibZnzWkrqquyUWf8pS2hCy7PFJR767YGwf4HomcYiCZAWgVek2BC8PvGyM4qxu1Vx4Kt4NU",
+      "slot": 479991519,
+      "note": "user co-signs, relayer pays"
+    },
+    {
+      "n": 80,
+      "stage": "S12",
+      "name": "depositor paid only amount (no fees)",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=1000000"
+    },
+    {
+      "n": 81,
+      "stage": "S12",
+      "name": "rent_payer = relayer",
+      "kind": "check",
+      "status": "OK",
+      "note": "relayer paid rent"
+    },
+    {
+      "n": 82,
+      "stage": "S12",
+      "name": "rail A replay",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected pre-landing (already) — no on-chain tx by construction"
+    },
+    {
+      "n": 83,
+      "stage": "S12",
+      "name": "redeem_user_sol",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "2NWh4Jeuikn8GgZ4Rneff9u4YkbL8DcqkCzWZ31QgUvxBAR53g596eZvfRwjNpADo4KaXnmPDdKFC3Yj9qMo5MrR",
+      "slot": 479991522,
+      "note": "settle"
+    },
+    {
+      "n": 84,
+      "stage": "S13",
+      "name": "create durable nonce account",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "65xiUcPYs3XNYb7cXxkucbCNUiS4zDSDPXmoTZv2J7x7s5Ga6kifnGKMmpxiKh9siZtwkpcwSnCuAHPk8Jp6sBLH",
+      "slot": 479991524,
+      "note": "authority=relayer"
+    },
+    {
+      "n": 85,
+      "stage": "S13",
+      "name": "simulating offline delay",
+      "kind": "info",
+      "status": "INFO",
+      "note": "2s"
+    },
+    {
+      "n": 86,
+      "stage": "S13",
+      "name": "durable-nonce user_lock_sol",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "54iep985B3hTT4khLgDZxKpYSThT6ud18BH99jjVBRZZHn1tfr6umZHKa8eZeGJ53LNBCpMDJtnkknTxCF19aZbe",
+      "slot": 479991532,
+      "note": "offline-signed, deferred submit"
+    },
+    {
+      "n": 87,
+      "stage": "S13",
+      "name": "rail B nonce replay",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected pre-landing () — no on-chain tx by construction"
+    },
+    {
+      "n": 88,
+      "stage": "S13",
+      "name": "redeem_user_sol",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "4dCMRXxnABAmDcwHvp5Q9eXjTaXKpUxSoADNSvT72pjth7QVtz77RbujAcSicHHrvdCPLHNx2bBVjNUGAc9jRhts",
+      "slot": 479991535,
+      "note": "settle"
+    },
+    {
+      "n": 89,
+      "stage": "S14",
+      "name": "approve delegate (one-time)",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "5FZtqLT8gVtxF4EbZL5rWMVNmtTTaoQYDo9gpcKt8qgupA2ga9RrPcf2B4MPmGnYMUvaY5xCj3EShVTWhVAaYHw4",
+      "slot": 479991537,
+      "note": "user delegates to program PDA"
+    },
+    {
+      "n": 90,
+      "stage": "S14",
+      "name": "rail C expired intent",
+      "kind": "tx",
+      "status": "REVERTED",
+      "sig": "5ys61WdGaR5rR2Er7DtGegKht4pTHvuxHoauAQEVhLogC6aDrNVMUq9uso1cZYAH9pQgozHRuo8BFMvu5umPeDti",
+      "slot": 479991541,
+      "note": "rejected on-chain with \"IntentExpired\""
+    },
+    {
+      "n": 91,
+      "stage": "S14",
+      "name": "intent user_lock_token",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "4DHu2DoCubTxyLWzf1X63wBogQCaEFe2hq344R4ejaeHkrTEsUupKwt8RLCvn2KR3h9AiCNJ4CfH33h78G6dY4d3",
+      "slot": 479991608,
+      "note": "user signed only a message"
+    },
+    {
+      "n": 92,
+      "stage": "S14",
+      "name": "lock attributed to user",
+      "kind": "check",
+      "status": "OK",
+      "note": "sender=user"
+    },
+    {
+      "n": 93,
+      "stage": "S14",
+      "name": "rent_payer = relayer",
+      "kind": "check",
+      "status": "OK",
+      "note": "relayer paid rent"
+    },
+    {
+      "n": 94,
+      "stage": "S14",
+      "name": "pulled exactly amount",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=60000"
+    },
+    {
+      "n": 95,
+      "stage": "S14",
+      "name": "rail C tampered params",
+      "kind": "tx",
+      "status": "REVERTED",
+      "sig": "DRDFnrNvd6pD2ZJjLTjE1NbyqVAghwpwfuqn4HLnD9UrQ2wVkYAFiWktog4p8hyKPTrAScs3FsmJwMBLhwwhkzx",
+      "slot": 479991611,
+      "note": "rejected on-chain with \"InvalidIntentSignature\""
+    },
+    {
+      "n": 96,
+      "stage": "S14",
+      "name": "redeem_user_token",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "2pdddsKKM66Es88a4TAZWFkdXfhHP29KjT61NJ28JD3sRP9rbch1uHp29zbG2PTmBhSs5T2gUhDSU2svQPaWdCiZ",
+      "slot": 479991613,
+      "note": "settle the intent lock"
+    },
+    {
+      "n": 97,
+      "stage": "S14",
+      "name": "rail C intent replay (post-settle)",
+      "kind": "tx",
+      "status": "REVERTED",
+      "sig": "2iXQxFDhPCvFMdwyZKwLuckePDe6sxWWrAxLWPpGi65Boq2RrsAkr2oaavjTpAQYsfWkw6Athje9UUKKVFii1rz",
+      "slot": 479991615,
+      "note": "rejected on-chain with \"already in use\""
+    },
+    {
+      "n": 98,
+      "stage": "S15",
+      "name": "intent user_lock_token",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "5WM3dxxRH8EczBz9FjXeZgVhqwYyVgJFh6HE7PmLvXg7xco1FnMYZir1SZbg5DJWCTemgSTGZHzwbsZ5zfvLsNug",
+      "slot": 479991617,
+      "note": "deadline in 8s, nonce=1785421358796"
+    },
+    {
+      "n": 99,
+      "stage": "S15",
+      "name": "close_consumed_intent before deadline",
+      "kind": "tx",
+      "status": "REVERTED",
+      "sig": "5oEeYep8Xopg6B1Y5NXQtDtE1RcsJa542HFbLqSKhiceYCDE6gE2eptEpN8Z8zw3BpqrfyJP95rSnTByE1bg1Gk3",
+      "slot": 479991619,
+      "note": "rejected on-chain with \"IntentNotExpired\""
+    },
+    {
+      "n": 100,
+      "stage": "S15",
+      "name": "waiting out intent deadline",
+      "kind": "info",
+      "status": "INFO",
+      "note": "10s"
+    },
+    {
+      "n": 101,
+      "stage": "S15",
+      "name": "close_consumed_intent",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "5y3uYXtWGFS2ZVaZmrwHnQH9vAeKea7Crciu7pGaJzHAAoeLPJarFd8zLKv4Qq8toRTzXHTV9uE7TYLAqUXGd3Cz",
+      "slot": 479991648,
+      "note": "rent→relayer after deadline"
+    },
+    {
+      "n": 102,
+      "stage": "S16",
+      "name": "user_lock_sol",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "2kp5KnzPeWQUrsJgqC9svim33UJmxhaVaX5uXdMp14uZwMzrpxzVyjFMQuM23HeL4kShPaqtVxwkkjdAqTjR9gEa",
+      "slot": 479991650,
+      "note": "for view"
+    },
+    {
+      "n": 103,
+      "stage": "S16",
+      "name": "get_user_lock returns fields",
+      "kind": "check",
+      "status": "OK",
+      "note": "amount=500000 refundTo=user"
+    },
+    {
+      "n": 104,
+      "stage": "S16",
+      "name": "solver_lock_sol",
+      "kind": "tx",
+      "status": "OK",
+      "sig": "4Raa3cLV9wVtHaRn2SfMF9PiUKkLF8ADamith3NbHd2zTLNfDKzwWdXmRgNxxiPv5BSt1cmBQvMw35nFm5eFBVVi",
+      "slot": 479991652,
+      "note": "pending, for close negatives"
+    },
+    {
+      "n": 105,
+      "stage": "S16",
+      "name": "close_solver_lock while pending",
+      "kind": "tx",
+      "status": "REVERTED",
+      "sig": "5TUei2ftb3xYnQ2x6KCNHg1uP9vr4Yz1TqZWMRsSf3QhcCHNgwqk7jdma3mEyDeesQ38521WduqLQ69qzBpN5RsB",
+      "slot": 479991654,
+      "note": "rejected on-chain with \"StillPending\""
+    },
+    {
+      "n": 106,
+      "stage": "S16",
+      "name": "S16 note",
+      "kind": "info",
+      "status": "INFO",
+      "note": "the pending solver lock is left on-chain (refundable after its timelock); not an error"
+    }
+  ]
+}

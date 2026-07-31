@@ -1,0 +1,54 @@
+name: Solana Tests
+
+on:
+  push:
+    branches: [main-add-solana]
+    paths:
+      - 'chains/solana/**'
+  pull_request:
+    branches: [main-add-solana]
+    paths:
+      - 'chains/solana/**'
+
+jobs:
+  anchor-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install Solana CLI
+      run: |
+        sh -c "$(curl -sSfL https://release.anza.xyz/v2.2.14/install)"
+        echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+        export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+
+    - name: Install dependencies (libudev)
+      run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+
+    - name: Install Anchor CLI
+      run: |
+        cargo install --git https://github.com/coral-xyz/anchor avm --locked --force
+        avm install 0.32.1
+        avm use 0.32.1
+        echo "$HOME/.avm/bin" >> $GITHUB_PATH
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22.x'
+
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install npm dependencies
+      working-directory: chains/solana
+      run: npm install
+
+    - name: Generate Solana keypair
+      run: solana-keygen new --no-bip39-passphrase
+
+    - name: Run Anchor tests
+      working-directory: chains/solana
+      run: anchor test

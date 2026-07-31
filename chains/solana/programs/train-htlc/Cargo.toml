@@ -1,0 +1,22 @@
+[package]
+name = "train-htlc"
+version = "0.1.0"
+description = "Train HTLC program for cross-chain atomic swaps"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "train_htlc"
+
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+
+[dependencies]
+anchor-lang = { version = "0.32.1", features = ["init-if-needed"] }
+anchor-spl = "0.32.1"
+solana-sha256-hasher = "2"
+solana-sdk-ids = "2"
