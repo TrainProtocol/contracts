@@ -19,7 +19,8 @@ anchor test                            # localnet; ts-mocha suite (core + gasles
 - One-time per cluster, by the upgrade authority, **before finalizing**:
   `npx ts-node scripts/gasless/init-intent-domain.ts <per-cluster-salt>`.
 - Production hardening is `solana program set-upgrade-authority <ID> --final` (irreversible) —
-  devnet `train_htlc` is already finalized/immutable.
+  run it only after `init-intent-domain`. Note: as of 2026-07-31 the devnet programs still have a
+  live upgrade authority (NOT finalized), despite older README wording suggesting otherwise.
 - Scripts (`scripts/*.ts`, one per instruction) run via `ts-node`; select signer with
   `WALLET=default|solver|thirdparty|user`. Devnet e2e: `npx ts-node scripts/devnet-e2e.ts`
   → writes `docs/e2e-devnet-report.md/.json`.
