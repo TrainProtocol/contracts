@@ -1,0 +1,72 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
+import { AztecAddress } from '@aztec/aztec.js/addresses';
+import { Fr, GrumpkinScalar } from '@aztec/aztec.js/fields';
+import { TrainContract } from './Train.ts';
+import { setupWallet, toWallet } from './utils/setupWallet.ts';
+import { decodeLockStatus, parseHashlock, requireEnv } from './utils/utils.ts';
+
+async function main(): Promise<void> {
+  const trainAddress = AztecAddress.fromStringUnsafe(
+    requireEnv('TRAIN_ADDRESS'),
+  );
+  const expectedUserAddress = requireEnv('USER_ADDRESS');
+  const solverAddress = AztecAddress.fromStringUnsafe(
+    requireEnv('SOLVER_ADDRESS'),
+  );
+  const hashlock = parseHashlock(requireEnv('USER_LOCK_HASHLOCK'));
+
+  const wallet = await setupWallet();
+  const userAccount = await wallet.createSchnorrAccount(
+    Fr.fromString(requireEnv('USER_SECRET')),
+    Fr.fromString(requireEnv('USER_SALT')),
+    (GrumpkinScalar as any).fromString(requireEnv('USER_SIGNING_KEY')),
+  );
+
+  if (userAccount.address.toString() !== expectedUserAddress) {
+    throw new Error(
+      `USER keys do not match USER_ADDRESS. Expected ${expectedUserAddress}, got ${userAccount.address.toString()}. Re-run setup.ts.`,
+    );
+  }
+
+  const train = TrainContract.at(trainAddress, toWallet(wallet));
+  const from = userAccount.address;
+
+  const { result: userLock } = await train.methods
+    .get_user_lock(hashlock)
+    .simulate({ from });
+  const { result: solverLock } = await train.methods
+    .get_solver_lock(hashlock, solverAddress)
+    .simulate({ from });
+
+  console.log(`Train: ${trainAddress.toString()}`);
+  console.log(`Hashlock: 0x${Buffer.from(hashlock).toString('hex')}`);
+  console.log('\n=== User Lock ===');
+  console.log(`UserLock status: ${decodeLockStatus(userLock.status)}`);
+  console.log(`UserLock amount: ${userLock.amount}`);
+  console.log(`UserLock refund_to: ${userLock.refund_to.toString()}`);
+  console.log(`UserLock recipient: ${userLock.recipient.toString()}`);
+  console.log(`UserLock token: ${userLock.token.toString()}`);
+  console.log(`UserLock timelock: ${userLock.timelock}`);
+
+  console.log('\n=== Solver Lock ===');
+  console.log(`Solver: ${solverAddress.toString()}`);
+  console.log(`SolverLock status: ${decodeLockStatus(solverLock.status)}`);
+  console.log(`SolverLock amount: ${solverLock.amount}`);
+  console.log(`SolverLock reward: ${solverLock.reward}`);
+  console.log(`SolverLock refund_to: ${solverLock.refund_to.toString()}`);
+  console.log(`SolverLock recipient: ${solverLock.recipient.toString()}`);
+  console.log(`SolverLock token: ${solverLock.token.toString()}`);
+  console.log(`SolverLock reward token: ${solverLock.reward_token.toString()}`);
+  console.log(`SolverLock timelock: ${solverLock.timelock}`);
+  console.log(`SolverLock reward timelock: ${solverLock.reward_timelock}`);
+}
+
+main()
+  .then(() => process.exit(0))
+  .catch((err) => {
+    console.error(`Error: ${err}`);
+    if (err instanceof Error && err.stack) console.error(err.stack);
+    process.exit(1);
+  });

@@ -1,0 +1,18 @@
+{
+  "name": "testnet",
+  "environment": "testnet",
+  "network": {
+    "nodeUrl": "https://v5.testnet.rpc.aztec-labs.com",
+    "l1RpcUrl": "https://0xrpc.io/sep",
+    "l1ChainId": 11155111
+  },
+  "settings": {
+    "skipLocalNetwork": true,
+    "version": "5.0.1"
+  },
+  "timeouts": {
+    "deployTimeout": 1200000,
+    "txTimeout": 180000,
+    "waitTimeout": 60000
+  }
+}

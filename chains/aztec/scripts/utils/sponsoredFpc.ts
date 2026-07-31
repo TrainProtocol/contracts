@@ -1,0 +1,41 @@
+import { Fr } from '@aztec/aztec.js/fields';
+import {
+  getContractInstanceFromInstantiationParams,
+  type ContractInstanceWithAddress,
+} from '@aztec/aztec.js/contracts';
+import type { Wallet } from '@aztec/aztec.js/wallet';
+import type { LogFn } from '@aztec/foundation/log';
+import {
+  SponsoredFPCContract,
+  SponsoredFPCContractArtifact,
+} from '@aztec/noir-contracts.js/SponsoredFPC';
+import { SPONSORED_FPC_SALT } from '@aztec/constants';
+
+export async function getSponsoredFPCInstance(): Promise<ContractInstanceWithAddress> {
+  return await getContractInstanceFromInstantiationParams(
+    SponsoredFPCContractArtifact,
+    {
+      salt: new Fr(SPONSORED_FPC_SALT),
+    },
+  );
+}
+
+export async function getSponsoredFPCAddress() {
+  return (await getSponsoredFPCInstance()).address;
+}
+
+export async function setupSponsoredFPC(deployer: Wallet, log: LogFn) {
+  const [{ item: from }] = await deployer.getAccounts();
+  // v5: salt/universalDeploy are instantiation options (fixed at construction), not send options
+  const deployed = await SponsoredFPCContract.deployWithOpts(
+    {
+      wallet: deployer,
+      instantiation: {
+        salt: new Fr(SPONSORED_FPC_SALT),
+        universalDeploy: true,
+      },
+    },
+  ).send({ from });
+
+  log(`SponsoredFPC: ${deployed.receipt.txHash}`);
+}

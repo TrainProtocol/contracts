@@ -1,0 +1,24 @@
+contracts/train/target/*
+contracts/token/target/*
+contracts/payout_curve/target/*
+
+!contracts/train/target/train-Train.json
+!contracts/token/target/token-Token.json
+!contracts/payout_curve/target/payout_curve-ConstantPayoutCurve.json
+
+scripts/node_modules/
+scripts/data.json
+scripts/package-lock.json
+contracts/train/codegenCache.json
+scripts/codegenCache.json
+codegenCache.json
+
+# env files and any backups of them - never commit (account secrets, L1 keys, claim secrets)
+scripts/.env
+scripts/.env.*
+scripts/.env.backup*
+
+# local run outputs (committed evidence lives in docs/)
+scripts/e2e-report-*
+scripts/store/
+scripts/*-run.log

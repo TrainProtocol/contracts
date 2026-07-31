@@ -1,0 +1,991 @@
+{
+  "header": {
+    "node": "https://v5.testnet.rpc.aztec-labs.com",
+    "train": "0x0483a6a15a6275c9482dbf8aa78aa96fe9291d60b08841a35739ebba4c33d9e6",
+    "token1": "0x217878d61e5d31ed78a8ad6f0a6a9b8ee8a1eec5944a7d122f6d910abee0b098",
+    "token2": "0x2f63f2687b2fa5d38b51bc9970674e801e89074bd90b07994b8c288f980ba41a",
+    "payoutCurve": "0x0f39abe60a09d7750b0f3fc1dada72f151d815f10f63a4413db9a9e2cb5d2fc7",
+    "user": "0x060d33326ccbda2c0db344d77ea869aefcfdba58751b9c334e33447352e368ba",
+    "solver": "0x23fdaff557dd1816d098b4aadf4b11db4f5055f1884fe80c09835ce6c9734fc8",
+    "deployer": "0x061e6e43a2198b3cce6a23da8f8d812b62aa961463ee7e4d0202ea0871bdfc38",
+    "explorer": "https://aztecscan.xyz"
+  },
+  "rows": [
+    {
+      "n": 1,
+      "stage": "S0",
+      "name": "node https://v5.testnet.rpc.aztec-labs.com version 5.0.0",
+      "kind": "info",
+      "status": "INFO"
+    },
+    {
+      "n": 2,
+      "stage": "S1",
+      "name": "accounts user=0x060d33326ccbda2c0db344d77ea869aefcfdba58751b9c334e33447352e368ba solver=0x23fdaff557dd1816d098b4aadf4b11db4f5055f1884fe80c09835ce6c9734fc8 deployer=0x061e6e43a2198b3cce6a23da8f8d812b62aa961463ee7e4d0202ea0871bdfc38",
+      "kind": "info",
+      "status": "INFO"
+    },
+    {
+      "n": 3,
+      "stage": "S2",
+      "name": "contracts train=0x0483a6a15a6275c9482dbf8aa78aa96fe9291d60b08841a35739ebba4c33d9e6 token=0x217878d61e5d31ed78a8ad6f0a6a9b8ee8a1eec5944a7d122f6d910abee0b098 token2=0x2f63f2687b2fa5d38b51bc9970674e801e89074bd90b07994b8c288f980ba41a curve=0x0f39abe60a09d7750b0f3fc1dada72f151d815f10f63a4413db9a9e2cb5d2fc7",
+      "kind": "info",
+      "status": "INFO"
+    },
+    {
+      "n": 4,
+      "stage": "S2",
+      "name": "token1->user balance ok (50000002100)",
+      "kind": "info",
+      "status": "INFO"
+    },
+    {
+      "n": 5,
+      "stage": "S2",
+      "name": "token1->solver balance ok (49999995800)",
+      "kind": "info",
+      "status": "INFO"
+    },
+    {
+      "n": 6,
+      "stage": "S2",
+      "name": "token2->solver balance ok (299900)",
+      "kind": "info",
+      "status": "INFO"
+    },
+    {
+      "n": 7,
+      "stage": "S3",
+      "name": "AztecScan verification stage skipped by legacy cache flag; actual status documented in the Markdown report",
+      "kind": "info",
+      "status": "INFO"
+    },
+    {
+      "n": 8,
+      "stage": "S4",
+      "name": "H1 [authwit 1000 from user]",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x0fb67048615f323fa96845278ae4481826a44baaeeae793bd2966170f3de0d79",
+      "block": 9880,
+      "proveSubmitMs": 10412,
+      "inclusionMs": 4795,
+      "feeJuice": "1237324079455544256"
+    },
+    {
+      "n": 9,
+      "stage": "S4",
+      "name": "H1 user_lock (hashlock 0x17091ed9…)",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x055406715d9745fa741f8e823d8062a67cfe6be15cdb4910bfdffd0fb5f5f140",
+      "block": 9881,
+      "proveSubmitMs": 15028,
+      "inclusionMs": 4666,
+      "feeJuice": "6433303219807717848"
+    },
+    {
+      "n": 10,
+      "stage": "S4",
+      "name": "H1 redeem_user (by solver)",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x29bea4ca4ce9a901fb23380ac9af117df95fd3f67a18bd302e777eb2d39446f9",
+      "block": 9882,
+      "proveSubmitMs": 11630,
+      "inclusionMs": 4822,
+      "feeJuice": "3201170468010835496"
+    },
+    {
+      "n": 11,
+      "stage": "S4",
+      "name": "H1 recipient received amount",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=1000 (authwit fees ignored; token != fee asset)"
+    },
+    {
+      "n": 12,
+      "stage": "S4",
+      "name": "H1 lock status REDEEMED",
+      "kind": "check",
+      "status": "OK",
+      "note": "status=3"
+    },
+    {
+      "n": 13,
+      "stage": "S4",
+      "name": "H1 secret stored on-chain",
+      "kind": "check",
+      "status": "OK",
+      "note": "get_user_lock().secret matches revealed secret"
+    },
+    {
+      "n": 14,
+      "stage": "S4",
+      "name": "H2(curve) [authwit 1000 from user]",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x25a47461cbf542ecdc1d48d8aedb93f2c3b21a30b74972992b9868e6db8b39a6",
+      "block": 9883,
+      "proveSubmitMs": 11238,
+      "inclusionMs": 7399,
+      "feeJuice": "1237324079455544256"
+    },
+    {
+      "n": 15,
+      "stage": "S4",
+      "name": "H2(curve) user_lock (hashlock 0xce07bed5…)",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x159240efc775f3656f314b88afcb338f560fc8434e7a09245df251cd1bcafec0",
+      "block": 9884,
+      "proveSubmitMs": 12437,
+      "inclusionMs": 4574,
+      "feeJuice": "7129614479288295888"
+    },
+    {
+      "n": 16,
+      "stage": "S4",
+      "name": "H2 payout_curve stored",
+      "kind": "check",
+      "status": "OK",
+      "note": "stored=0x0f39abe60a09d7750b0f3fc1dada72f151d815f10f63a4413db9a9e2cb5d2fc7"
+    },
+    {
+      "n": 17,
+      "stage": "S4",
+      "name": "H2 redeem_user (curve)",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x01bafff4d310a96c423b3eac92a661754be99af7a93f1eae25dfecdc86fb5b5e",
+      "block": 9885,
+      "proveSubmitMs": 9771,
+      "inclusionMs": 6668,
+      "feeJuice": "3897150474630428000"
+    },
+    {
+      "n": 18,
+      "stage": "S4",
+      "name": "H2 full payout via constant curve",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=1000"
+    },
+    {
+      "n": 19,
+      "stage": "S4",
+      "name": "H3 [authwit 1000 from user]",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x0faa7e0a9fe79f8c8e23b4ac481b87498052a16c2d482c057cd6af8bfa049c31",
+      "block": 9886,
+      "proveSubmitMs": 12117,
+      "inclusionMs": 4601,
+      "feeJuice": "1237324079455544256"
+    },
+    {
+      "n": 20,
+      "stage": "S4",
+      "name": "H3 user_lock (hashlock 0xd305a588…)",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x2ec94e08cbd1014677162dab69002fdcb63486e40e096958bac290273bb713b7",
+      "block": 9887,
+      "proveSubmitMs": 10427,
+      "inclusionMs": 6927,
+      "feeJuice": "6433303219807717848"
+    },
+    {
+      "n": 21,
+      "stage": "S4",
+      "name": "H3 refund_user by recipient (before timelock)",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x12ce40ff89957db674c3af86d9a81455fa17f91be117ae8cefa057085b31dea3",
+      "block": 9888,
+      "proveSubmitMs": 10624,
+      "inclusionMs": 4582,
+      "feeJuice": "2969979631961573192"
+    },
+    {
+      "n": 22,
+      "stage": "S4",
+      "name": "H3 user refunded in full",
+      "kind": "check",
+      "status": "OK",
+      "note": "net user delta=0 (lock+refund)"
+    },
+    {
+      "n": 23,
+      "stage": "S4",
+      "name": "H3 lock status REFUNDED",
+      "kind": "check",
+      "status": "OK",
+      "note": "status=2"
+    },
+    {
+      "n": 24,
+      "stage": "S4",
+      "name": "H4 [authwit 1000 from user]",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x2be27e17d1ec6dc119cc75bdf05f98ef52ff6fa76faada3e422dcbace81d1b65",
+      "block": 9890,
+      "proveSubmitMs": 16108,
+      "inclusionMs": 5015,
+      "feeJuice": "1237324079455544256"
+    },
+    {
+      "n": 25,
+      "stage": "S4",
+      "name": "H4 user_lock (hashlock 0x93d9e641…)",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x05a9419d440a7700fda87d561052e705d845078d14fb2a5cbd678fe03d9826ef",
+      "block": 9891,
+      "proveSubmitMs": 12001,
+      "inclusionMs": 4632,
+      "feeJuice": "6433303219807717848"
+    },
+    {
+      "n": 26,
+      "stage": "S4",
+      "name": "H4 refund_user by non-recipient (after timelock)",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x163ecf29464270768afac225f7e86c79edd5f7f767e0c4cfe324a6cef59bfbb1",
+      "block": 9893,
+      "proveSubmitMs": 11117,
+      "inclusionMs": 4607,
+      "feeJuice": "2981953244133636107"
+    },
+    {
+      "n": 27,
+      "stage": "S4",
+      "name": "H4 refunded after timelock",
+      "kind": "check",
+      "status": "OK",
+      "note": "locked at 1784553660, timelock 1784553720"
+    },
+    {
+      "n": 28,
+      "stage": "S4",
+      "name": "H5 [authwit 1000 from solver]",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x0bc74f61e7cc85f7b9d775e0d82f5bc2bf38161fc5caf37ab876205b57ff19fc",
+      "block": 9894,
+      "proveSubmitMs": 12986,
+      "inclusionMs": 4558,
+      "feeJuice": "1242208498413560568"
+    },
+    {
+      "n": 29,
+      "stage": "S4",
+      "name": "H5 solver_lock",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x0fbec4e4a238bdc3c2b0816fae89b35a25fc3a632ba968ee810c25692596c431",
+      "block": 9895,
+      "proveSubmitMs": 11027,
+      "inclusionMs": 4689,
+      "feeJuice": "4943222875819699994"
+    },
+    {
+      "n": 30,
+      "stage": "S4",
+      "name": "H5 first index is 1",
+      "kind": "check",
+      "status": "OK",
+      "note": "index=1"
+    },
+    {
+      "n": 31,
+      "stage": "S4",
+      "name": "H5 redeem_solver",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x07263032a2d3d704d6087bd0b04b5bb76a0292910cc80a1737195b44d2754c0c",
+      "block": 9896,
+      "proveSubmitMs": 13315,
+      "inclusionMs": 13322,
+      "feeJuice": "3501600805879155348"
+    },
+    {
+      "n": 32,
+      "stage": "S4",
+      "name": "H5 recipient received amount",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=1000"
+    },
+    {
+      "n": 33,
+      "stage": "S4",
+      "name": "H6 [authwit 1100 from solver]",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x14a8574004989131a92a27156489c01b4c56ba658bb0ce92342b1f59d04ec5db",
+      "block": 9897,
+      "proveSubmitMs": 12675,
+      "inclusionMs": 4623,
+      "feeJuice": "1242208498413560568"
+    },
+    {
+      "n": 34,
+      "stage": "S4",
+      "name": "H6 solver_lock",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x257defe8a562765f8df9d36d49c6fab2adf83dccebf0fc62c722150af25deec9",
+      "block": 9898,
+      "proveSubmitMs": 11539,
+      "inclusionMs": 4674,
+      "feeJuice": "4943965198372486619"
+    },
+    {
+      "n": 35,
+      "stage": "S4",
+      "name": "H6 redeem_solver before reward timelock",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x08a018724354a75e94413889c893c29cf9d7012799cb76d527f2008e6b85a276",
+      "block": 9899,
+      "proveSubmitMs": 12513,
+      "inclusionMs": 4592,
+      "feeJuice": "3687872298931605017"
+    },
+    {
+      "n": 36,
+      "stage": "S4",
+      "name": "H6 reward went to reward_recipient",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=100"
+    },
+    {
+      "n": 37,
+      "stage": "S4",
+      "name": "H7 [authwit 1100 from solver]",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x054d5feda40049c03a8c42ae9aa35121fa7bff34f7481b4b1ab0a977bb9f4974",
+      "block": 9900,
+      "proveSubmitMs": 11818,
+      "inclusionMs": 4899,
+      "feeJuice": "1242208498413560568"
+    },
+    {
+      "n": 38,
+      "stage": "S4",
+      "name": "H7 solver_lock",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x0ebe0865c751dc4a38c62138c8ffad00c355a1d20846cc33b92b371bdbd16665",
+      "block": 9901,
+      "proveSubmitMs": 13127,
+      "inclusionMs": 4661,
+      "feeJuice": "4943965198372486619"
+    },
+    {
+      "n": 39,
+      "stage": "S4",
+      "name": "H7 redeem_solver after reward timelock",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x0b1adf0ea545ed314f54c1c1931e50289d340d2873827ff6b3ed590f2b085bc3",
+      "block": 9903,
+      "proveSubmitMs": 9358,
+      "inclusionMs": 6724,
+      "feeJuice": "3395112025895140416"
+    },
+    {
+      "n": 40,
+      "stage": "S4",
+      "name": "H7 amount+reward went to redeemer",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=1100 (recipient==redeemer==user)"
+    },
+    {
+      "n": 41,
+      "stage": "S4",
+      "name": "H8 [authwit 1000 from solver]",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x2ca226008978e796206fc0a8f1af9554444b56c2c74b8d9236572bb6b8967900",
+      "block": 9904,
+      "proveSubmitMs": 11497,
+      "inclusionMs": 4617,
+      "feeJuice": "1204435214266209024"
+    },
+    {
+      "n": 42,
+      "stage": "S4",
+      "name": "H8 (reward) [authwit 100 from solver]",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x035a985854f35a6c2c1640810a578290c2e1918e4e9877f8869ab0b1f4561b5f",
+      "block": 9905,
+      "proveSubmitMs": 12287,
+      "inclusionMs": 4575,
+      "feeJuice": "1204435214266209024"
+    },
+    {
+      "n": 43,
+      "stage": "S4",
+      "name": "H8 solver_lock",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x19dc71d7fc8df2362490baba05ab96b74f813ee284e260bcdd2add2760505d9a",
+      "block": 9906,
+      "proveSubmitMs": 9897,
+      "inclusionMs": 4558,
+      "feeJuice": "5086601027151924736"
+    },
+    {
+      "n": 44,
+      "stage": "S4",
+      "name": "H8 redeem_solver (different reward token)",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x136dfee745230797335f0dceb9a1afcba0e6760d1ee7761def92012978cc0488",
+      "block": 9907,
+      "proveSubmitMs": 13621,
+      "inclusionMs": 4586,
+      "feeJuice": "3575730860175876256"
+    },
+    {
+      "n": 45,
+      "stage": "S4",
+      "name": "H8 principal paid in token1",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=1000"
+    },
+    {
+      "n": 46,
+      "stage": "S4",
+      "name": "H8 reward paid in token2",
+      "kind": "check",
+      "status": "OK",
+      "note": "delta=100"
+    },
+    {
+      "n": 47,
+      "stage": "S4",
+      "name": "H9 [authwit 1100 from solver]",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x04e8cfca3f047855b1ffa0771f101c5a5880be0b8c999173f4c54f7201f644e4",
+      "block": 9908,
+      "proveSubmitMs": 10269,
+      "inclusionMs": 4634,
+      "feeJuice": "1204435214266209024"
+    },
+    {
+      "n": 48,
+      "stage": "S4",
+      "name": "H9 solver_lock",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x2b6c06857ec128281523d3172ffb6e0898ad3d1b8c80a70e4a86c4eea57632e0",
+      "block": 9909,
+      "proveSubmitMs": 14345,
+      "inclusionMs": 4572,
+      "feeJuice": "4793628276276685792"
+    },
+    {
+      "n": 49,
+      "stage": "S4",
+      "name": "H9 refund_solver after timelock",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x2378fca5add9cde744fd09299f1ae2899d87f3b766a99983fdbb25288ebeddd9",
+      "block": 9911,
+      "proveSubmitMs": 14150,
+      "inclusionMs": 4567,
+      "feeJuice": "3168177766397588928"
+    },
+    {
+      "n": 50,
+      "stage": "S4",
+      "name": "H9 amount+reward returned to solver",
+      "kind": "check",
+      "status": "OK",
+      "note": "net solver delta=0"
+    },
+    {
+      "n": 51,
+      "stage": "S4-views",
+      "name": "probe lock #1 [authwit 1000 from solver]",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x2871b3fa8b788749f4862258e2dfc97d10aff0121e3bd97476ad3137a26b57ef",
+      "block": 9913,
+      "proveSubmitMs": 11192,
+      "inclusionMs": 4557,
+      "feeJuice": "1204435214266209024"
+    },
+    {
+      "n": 52,
+      "stage": "S4-views",
+      "name": "probe lock #1 solver_lock",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x227188501d435ff85ad4ff6e07d83cc62a61fe87f45f460efa0306746500c488",
+      "block": 9914,
+      "proveSubmitMs": 13266,
+      "inclusionMs": 4587,
+      "feeJuice": "4792908526392457792"
+    },
+    {
+      "n": 53,
+      "stage": "S4-views",
+      "name": "probe lock #2 [authwit 1000 from solver]",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x3036a6c01fddd6aa4e72e3b27e86d901573756ded21976f66beb90426e7566fd",
+      "block": 9915,
+      "proveSubmitMs": 12078,
+      "inclusionMs": 6780,
+      "feeJuice": "1204435214266209024"
+    },
+    {
+      "n": 54,
+      "stage": "S4-views",
+      "name": "probe lock #2 solver_lock",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x1bef09f0c8bf422030f686d65d43b92ba737e52124b30855f1399ad61f9696ac",
+      "block": 9916,
+      "proveSubmitMs": 11367,
+      "inclusionMs": 4569,
+      "feeJuice": "4792908526392457792"
+    },
+    {
+      "n": 55,
+      "stage": "S4-views",
+      "name": "probe indices are 1 and 2",
+      "kind": "check",
+      "status": "OK",
+      "note": "got 1, 2"
+    },
+    {
+      "n": 56,
+      "stage": "S4-views",
+      "name": "get_solver_lock(h, 2) resolves index 2 (PENDING)",
+      "kind": "check",
+      "status": "OK",
+      "note": "status=1"
+    },
+    {
+      "n": 57,
+      "stage": "S4-views",
+      "name": "get_solver_lock(h, 99) is EMPTY",
+      "kind": "check",
+      "status": "OK",
+      "note": "status=0"
+    },
+    {
+      "n": 58,
+      "stage": "S4-views",
+      "name": "get_user_lock_count(user) = 10",
+      "kind": "view",
+      "status": "INFO"
+    },
+    {
+      "n": 59,
+      "stage": "S4-views",
+      "name": "get_user_lock_hash_at(0) -> 0x4d459fdd32ed… status=3",
+      "kind": "view",
+      "status": "INFO"
+    },
+    {
+      "n": 60,
+      "stage": "S4-views",
+      "name": "get_user_lock_hash_at(1) -> 0x0a8d843875e8… status=3",
+      "kind": "view",
+      "status": "INFO"
+    },
+    {
+      "n": 61,
+      "stage": "S4-views",
+      "name": "get_user_lock_hash_at(2) -> 0x2d8d0ad84f07… status=2",
+      "kind": "view",
+      "status": "INFO"
+    },
+    {
+      "n": 62,
+      "stage": "S4-views",
+      "name": "get_user_lock_hash_at(3) -> 0x0014dd67c7d2… status=2",
+      "kind": "view",
+      "status": "INFO"
+    },
+    {
+      "n": 63,
+      "stage": "S4-views",
+      "name": "get_user_lock_hash_at(4) -> 0xfc2317a6e4ac… status=2",
+      "kind": "view",
+      "status": "INFO"
+    },
+    {
+      "n": 64,
+      "stage": "S4-views",
+      "name": "get_user_lock_hash_at(5) -> 0x6fa66466169c… status=3",
+      "kind": "view",
+      "status": "INFO"
+    },
+    {
+      "n": 65,
+      "stage": "S4-views",
+      "name": "get_user_lock_hash_at(6) -> 0x17091ed9a512… status=3",
+      "kind": "view",
+      "status": "INFO"
+    },
+    {
+      "n": 66,
+      "stage": "S4-views",
+      "name": "get_user_lock_hash_at(7) -> 0xce07bed55513… status=3",
+      "kind": "view",
+      "status": "INFO"
+    },
+    {
+      "n": 67,
+      "stage": "S4-views",
+      "name": "get_user_lock_hash_at(8) -> 0xd305a588443f… status=2",
+      "kind": "view",
+      "status": "INFO"
+    },
+    {
+      "n": 68,
+      "stage": "S4-views",
+      "name": "get_user_lock_hash_at(9) -> 0x93d9e641a2c7… status=2",
+      "kind": "view",
+      "status": "INFO"
+    },
+    {
+      "n": 69,
+      "stage": "S4-views",
+      "name": "enumeration entries all resolve to existing locks",
+      "kind": "check",
+      "status": "OK",
+      "note": "10/10 resolve"
+    },
+    {
+      "n": 70,
+      "stage": "S5",
+      "name": "user_lock amount=0",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected with \"ZeroAmount\""
+    },
+    {
+      "n": 71,
+      "stage": "S5",
+      "name": "user_lock timelock_delta=0",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected with \"InvalidTimelock\""
+    },
+    {
+      "n": 72,
+      "stage": "S5",
+      "name": "user_lock expired quote",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected with \"QuoteExpired\""
+    },
+    {
+      "n": 73,
+      "stage": "S5",
+      "name": "user_lock duplicate hashlock (H1)",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected with \"SwapAlreadyExists\""
+    },
+    {
+      "n": 74,
+      "stage": "S5",
+      "name": "user_lock zero recipient",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected with \"ZeroAddress\""
+    },
+    {
+      "n": 75,
+      "stage": "S5",
+      "name": "user_lock bogus payout curve",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected with \"\""
+    },
+    {
+      "n": 76,
+      "stage": "S5",
+      "name": "solver_lock reward_timelock >= timelock",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected with \"InvalidRewardTimelock\""
+    },
+    {
+      "n": 77,
+      "stage": "S5",
+      "name": "solver_lock zero reward_recipient",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected with \"ZeroAddress\""
+    },
+    {
+      "n": 78,
+      "stage": "S5",
+      "name": "redeem_user unknown hashlock",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected with \"LockNotFound\""
+    },
+    {
+      "n": 79,
+      "stage": "S5",
+      "name": "refund_user unknown hashlock",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected with \"LockNotFound\""
+    },
+    {
+      "n": 80,
+      "stage": "S5",
+      "name": "redeem_solver unknown index",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected with \"LockNotFound\""
+    },
+    {
+      "n": 81,
+      "stage": "S5",
+      "name": "refund_solver unknown",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected with \"LockNotFound\""
+    },
+    {
+      "n": 82,
+      "stage": "S5",
+      "name": "redeem_user H1 again (already redeemed)",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected with \"LockNotPending\""
+    },
+    {
+      "n": 83,
+      "stage": "S5",
+      "name": "U-live [authwit 1000 from user]",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x01de06e7f6f54c631f332f0d370c098fc984577815d5c0f78cdb15b785f05fac",
+      "block": 9917,
+      "proveSubmitMs": 8496,
+      "inclusionMs": 4656,
+      "feeJuice": "1187216481298855656"
+    },
+    {
+      "n": 84,
+      "stage": "S5",
+      "name": "U-live user_lock (hashlock 0x75dbaa3c…)",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x1ef77f4dcd52a2820ff6ab4edd80c8ee41e79f11e701331e3ab27ff2b872b0c0",
+      "block": 9918,
+      "proveSubmitMs": 13556,
+      "inclusionMs": 4689,
+      "feeJuice": "6172775377578944673"
+    },
+    {
+      "n": 85,
+      "stage": "S5",
+      "name": "redeem_user wrong secret",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected with \"HashlockMismatch\""
+    },
+    {
+      "n": 86,
+      "stage": "S5",
+      "name": "refund_user early by non-recipient",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected with \"RefundNotAllowed\""
+    },
+    {
+      "n": 87,
+      "stage": "S5",
+      "name": "U-live cleanup refund by recipient",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x0bec3e01395a778b8a9c27fbbb682daf2dd18d47dc4341d44826a42d75a57a0f",
+      "block": 9919,
+      "proveSubmitMs": 10600,
+      "inclusionMs": 6859,
+      "feeJuice": "2849705123122009867"
+    },
+    {
+      "n": 88,
+      "stage": "S5",
+      "name": "S-live [authwit 1000 from solver]",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x00815db1a254486d523f50772d0c1acd327fadfc7173b94ec23cdc498054acae",
+      "block": 9920,
+      "proveSubmitMs": 11361,
+      "inclusionMs": 4552,
+      "feeJuice": "1187216481298855656"
+    },
+    {
+      "n": 89,
+      "stage": "S5",
+      "name": "S-live solver_lock",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x223df63c51ba7bde8204c72bd7cbd3bbd9d144bb3f68725a17b699cc7601d791",
+      "block": 9921,
+      "proveSubmitMs": 11810,
+      "inclusionMs": 7066,
+      "feeJuice": "4724388600143720398"
+    },
+    {
+      "n": 90,
+      "stage": "S5",
+      "name": "refund_solver early (even by recipient)",
+      "kind": "sim-reject",
+      "status": "OK",
+      "note": "rejected with \"RefundNotAllowed\""
+    },
+    {
+      "n": 91,
+      "stage": "S5",
+      "name": "S-live cleanup redeem",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x2a477e343ac08504e9ab9121dcf633e7ead3bf07843b5aa1f0f361e06b5dfdf9",
+      "block": 9922,
+      "proveSubmitMs": 9204,
+      "inclusionMs": 4761,
+      "feeJuice": "3346586497337801916"
+    },
+    {
+      "n": 92,
+      "stage": "S6",
+      "name": "R1 [authwit 1000 from user]",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x1675035e6111aef4f0ae41f592431ec8d57a3a34fb51be48f33557bc9f00b825",
+      "block": 9924,
+      "proveSubmitMs": 12168,
+      "inclusionMs": 6987,
+      "feeJuice": "1187216481298855656"
+    },
+    {
+      "n": 93,
+      "stage": "S6",
+      "name": "R1 user_lock (hashlock 0xb5ad7ce3…)",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x2ae9ad453cd7bc21ff49447236df97bb12741775e661a979f31db561f8563905",
+      "block": 9925,
+      "proveSubmitMs": 10310,
+      "inclusionMs": 4900,
+      "feeJuice": "6172775377578944673"
+    },
+    {
+      "n": 94,
+      "stage": "S6",
+      "name": "R1 redeem_user (sender: user)",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x25ed8b6bcc1598ad4f9734f80bf406e6a53d40e4bf52b812d723401f18a59393",
+      "block": 9926,
+      "proveSubmitMs": 10261,
+      "inclusionMs": 7473,
+      "feeJuice": "3071533482757362271"
+    },
+    {
+      "n": 95,
+      "stage": "S6",
+      "name": "R1 redeem_user (sender: solver)",
+      "kind": "tx",
+      "status": "REVERTED",
+      "txHash": "0x17b65b08dd8b10e71918ab9f037d78b7301189cba30a95780ba1b2fc2508ead5",
+      "block": 9927,
+      "proveSubmitMs": 18995,
+      "inclusionMs": 4587,
+      "feeJuice": "1655467823051561464",
+      "note": "on-chain revert: reverted"
+    },
+    {
+      "n": 96,
+      "stage": "S6",
+      "name": "R1 exactly one redeem succeeded",
+      "kind": "check",
+      "status": "OK",
+      "note": "outcomes: [OK | REVERTED] — loser REVERTED ON CHAIN"
+    },
+    {
+      "n": 97,
+      "stage": "S6",
+      "name": "R2 [authwit 1000 from solver]",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x1fd6fc913be372717878c46c2002619ca730029741deb2bd4ceef5c654d77186",
+      "block": 9928,
+      "proveSubmitMs": 10982,
+      "inclusionMs": 4619,
+      "feeJuice": "1187216481298855656"
+    },
+    {
+      "n": 98,
+      "stage": "S6",
+      "name": "R2 solver_lock",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x2df6b48317982fa73eccd512b7532c5cce6a2a17bb13503c562e171cdb6ee02b",
+      "block": 9929,
+      "proveSubmitMs": 14173,
+      "inclusionMs": 4590,
+      "feeJuice": "4724388600143720398"
+    },
+    {
+      "n": 99,
+      "stage": "S6",
+      "name": "R2 redeem_solver (user)",
+      "kind": "tx",
+      "status": "OK",
+      "txHash": "0x2b7226398dcc92e497ea207be5fdd8cab742a74527efccd2362cd0c538327008",
+      "block": 9931,
+      "proveSubmitMs": 18425,
+      "inclusionMs": 4437,
+      "feeJuice": "3346586497337801916"
+    },
+    {
+      "n": 100,
+      "stage": "S6",
+      "name": "R2 refund_solver (solver)",
+      "kind": "tx",
+      "status": "REVERTED",
+      "txHash": "0x0bc1fd4f80ada6cd9cabe4ffecef15c1a6c6634aae6e6ffd73963f0e96d730c9",
+      "block": 9932,
+      "proveSubmitMs": 18785,
+      "inclusionMs": 11862,
+      "feeJuice": "1500101700938724070",
+      "note": "on-chain revert: reverted"
+    },
+    {
+      "n": 101,
+      "stage": "S6",
+      "name": "R2 exactly one of redeem/refund succeeded",
+      "kind": "check",
+      "status": "OK",
+      "note": "outcomes: [OK | REVERTED] — loser REVERTED ON CHAIN"
+    }
+  ]
+}
